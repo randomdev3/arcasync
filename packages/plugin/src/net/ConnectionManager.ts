@@ -98,6 +98,9 @@ export class ConnectionManager {
 				this.setState({ status: "error", message: reason });
 			},
 		});
+		// Hocuspocus 4: a provider given an explicit `websocketProvider` does not
+		// attach itself (manageSocket=false), so nothing would ever be sent.
+		provider.attach();
 
 		const handle: OpenDocHandle = {
 			provider,
