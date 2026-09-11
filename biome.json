@@ -1,0 +1,7 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.2.0/schema.json",
+  "files": { "includes": ["**", "!**/dist", "!**/node_modules", "!**/drizzle/**", "!**/vendor/**", "!dev-vault-*"] },
+  "formatter": { "enabled": true, "indentStyle": "tab", "lineWidth": 100 },
+  "linter": { "enabled": true, "rules": { "recommended": true } },
+  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } }
+}

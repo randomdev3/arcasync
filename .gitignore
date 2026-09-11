@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.turbo/
+.data/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+dev-vault-*/
+!dev-vault-*/.obsidian/
+dev-vault-*/.obsidian/*
+!dev-vault-*/.obsidian/app.json
+!dev-vault-*/.obsidian/community-plugins.json
+# AI tooling artifacts are never committed
+.elder-gods/
+.claude/
+.opencode/
+.sisyphus/
