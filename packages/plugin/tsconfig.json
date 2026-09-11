@@ -1,0 +1,14 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["DOM", "DOM.Iterable", "ES2022"],
+		"types": ["svelte", "vitest/globals"],
+		"noEmit": true,
+		"allowJs": true,
+		"baseUrl": ".",
+		"paths": {
+			"@teamsync/shared": ["../shared/src/index.ts"]
+		}
+	},
+	"include": ["src", "vitest.config.ts"]
+}

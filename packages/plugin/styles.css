@@ -1,0 +1,61 @@
+.teamsync-settings {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-4);
+}
+
+.teamsync-settings .teamsync-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-4);
+	padding: var(--size-4-2) 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.teamsync-settings .teamsync-row:first-child {
+	border-top: none;
+}
+
+.teamsync-settings .teamsync-row-info {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-1);
+}
+
+.teamsync-settings .teamsync-row-name {
+	font-weight: var(--font-medium);
+}
+
+.teamsync-settings .teamsync-row-desc {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.teamsync-settings input[type="text"] {
+	min-width: 18em;
+}
+
+.teamsync-status {
+	font-size: var(--font-ui-smaller);
+}
+
+.teamsync-status[data-state="connected"] {
+	color: var(--text-success);
+}
+
+.teamsync-status[data-state="connecting"] {
+	color: var(--text-warning);
+}
+
+.teamsync-status[data-state="error"] {
+	color: var(--text-error);
+}
+
+.teamsync-status[data-state="disconnected"] {
+	color: var(--text-muted);
+}
+
+.status-bar-item.teamsync-status-bar {
+	cursor: default;
+}

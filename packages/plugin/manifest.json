@@ -1,0 +1,9 @@
+{
+	"id": "teamsync",
+	"name": "TeamSync",
+	"version": "0.0.1",
+	"minAppVersion": "1.11.4",
+	"description": "Realtime multiplayer sync for shared Obsidian vaults.",
+	"author": "TeamSync",
+	"isDesktopOnly": false
+}
