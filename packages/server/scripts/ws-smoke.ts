@@ -1,0 +1,99 @@
+/**
+ * End-to-end WebSocket smoke test against a *running* server:
+ *   pnpm --filter @teamsync/server dev        # terminal 1
+ *   pnpm --filter @teamsync/server smoke      # terminal 2
+ *
+ * Logs in, opens the workspace index doc, writes a Y.Map key, disconnects,
+ * reconnects with a fresh Y.Doc and asserts the value came back from the server.
+ */
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { SessionResponse, WS_PATH, WsTokenResponse, docName } from "@teamsync/shared";
+import { WebSocket } from "ws";
+import * as Y from "yjs";
+
+const BASE = process.env.TEAMSYNC_URL ?? "http://localhost:8787";
+const WS_URL = `${BASE.replace(/^http/, "ws")}${WS_PATH}`;
+const DEVICE = { name: "ws-smoke", platform: "macos" as const, vaultId: "ws-smoke" };
+const KEY = "smoke";
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function json<T>(path: string, body: unknown, token?: string): Promise<unknown> {
+	const res = await fetch(`${BASE}${path}`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			...(token ? { Authorization: `Bearer ${token}` } : {}),
+		},
+		body: JSON.stringify(body),
+	});
+	if (!res.ok) throw new Error(`${path} -> ${res.status} ${await res.text()}`);
+	return (await res.json()) as T;
+}
+
+async function connect(name: string, token: string) {
+	const socket = new HocuspocusProviderWebsocket({ url: WS_URL, WebSocketPolyfill: WebSocket });
+	const document = new Y.Doc();
+	const provider = new HocuspocusProvider({ websocketProvider: socket, name, token, document });
+	await new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`timed out syncing ${name}`)), 15_000);
+		provider.on("synced", () => {
+			clearTimeout(timer);
+			resolve();
+		});
+		provider.on("authenticationFailed", (payload: { reason: string }) => {
+			clearTimeout(timer);
+			reject(new Error(`auth failed: ${payload.reason}`));
+		});
+	});
+	return { socket, provider, document };
+}
+
+async function main(): Promise<void> {
+	const session = SessionResponse.parse(
+		await json("/api/auth/dev-login", { name: "smoke", device: DEVICE }),
+	);
+	const workspace = session.workspaces[0];
+	if (!workspace) throw new Error("dev-login returned no workspace");
+	console.log(`logged in as ${session.user.name} in workspace ${workspace.slug}`);
+
+	const mintToken = async () =>
+		WsTokenResponse.parse(
+			await json("/api/auth/ws-token", { workspaceId: workspace.id }, session.sessionToken),
+		).token;
+
+	const name = docName({ workspaceId: workspace.id, kind: "index" });
+	const value = `smoke-${Date.now()}`;
+
+	const first = await connect(name, await mintToken());
+	console.log(`connected to ${name}`);
+	first.document.getMap("debug").set(KEY, value);
+	// Let the update reach the server and the debounced store flush.
+	await sleep(3_000);
+	first.provider.destroy();
+	first.socket.destroy();
+	console.log("disconnected");
+
+	// Wait past the store debounce + unload so the reconnect really reloads from the DB.
+	await sleep(3_000);
+
+	const second = await connect(name, await mintToken());
+	const readBack = second.document.getMap("debug").get(KEY);
+	second.provider.destroy();
+	second.socket.destroy();
+
+	if (readBack !== value) {
+		throw new Error(`expected ${value} after reconnect, got ${String(readBack)}`);
+	}
+	console.log(`reconnected and read back ${KEY}=${String(readBack)}`);
+	console.log("ws-smoke OK");
+}
+
+main()
+	.then(() => process.exit(0))
+	.catch((err) => {
+		console.error("ws-smoke FAILED:", err);
+		process.exit(1);
+	});

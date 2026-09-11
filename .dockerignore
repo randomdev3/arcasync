@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.turbo
+.data
+**/.data
+.git
+.github
+dev-vault-*
+.elder-gods
+.claude
+docs
+deploy
