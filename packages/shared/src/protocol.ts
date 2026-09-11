@@ -37,7 +37,11 @@ export const SessionResponse = z.object({
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
 export const DevLoginRequest = z.object({ name: z.string().min(1).max(60), device: DeviceInfo });
-export const InviteAcceptRequest = z.object({ token: z.string(), device: DeviceInfo, name: z.string().optional() });
+export const InviteAcceptRequest = z.object({
+	token: z.string(),
+	device: DeviceInfo,
+	name: z.string().optional(),
+});
 
 export const MeResponse = z.object({
 	user: User,
@@ -96,7 +100,12 @@ export const ApiError = z.object({
 
 /** Hocuspocus stateless messages (JSON). */
 export const StatelessMessage = z.discriminatedUnion("t", [
-	z.object({ t: z.literal("version.created"), docId: z.string(), versionId: z.string(), trigger: z.string() }),
+	z.object({
+		t: z.literal("version.created"),
+		docId: z.string(),
+		versionId: z.string(),
+		trigger: z.string(),
+	}),
 	z.object({ t: z.literal("membership.changed"), workspaceId: z.string() }),
 	z.object({ t: z.literal("summon"), from: z.string(), file: z.string() }),
 ]);

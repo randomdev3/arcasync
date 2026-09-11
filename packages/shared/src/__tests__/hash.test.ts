@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { isIgnoredPath, kindForPath } from "../fileKinds.js";
 import { chunkFile, sha256Hex } from "../hash.js";
-import { kindForPath, isIgnoredPath } from "../fileKinds.js";
 
 describe("hash", () => {
 	it("sha256 of empty string", async () => {
-		expect(await sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+		expect(await sha256Hex("")).toBe(
+			"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		);
 	});
 	it("chunks by size and handles empty", async () => {
 		const data = new Uint8Array(10);

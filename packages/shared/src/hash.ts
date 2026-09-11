@@ -24,7 +24,11 @@ export interface Chunk {
 
 export async function chunkFile(data: Uint8Array, chunkBytes = CHUNK_BYTES): Promise<Chunk[]> {
 	const chunks: Chunk[] = [];
-	for (let offset = 0; offset < data.byteLength || (offset === 0 && data.byteLength === 0); offset += chunkBytes) {
+	for (
+		let offset = 0;
+		offset < data.byteLength || (offset === 0 && data.byteLength === 0);
+		offset += chunkBytes
+	) {
 		const bytes = data.subarray(offset, Math.min(offset + chunkBytes, data.byteLength));
 		chunks.push({ sha256: await sha256Hex(bytes), offset, size: bytes.byteLength, bytes });
 		if (data.byteLength === 0) break;
