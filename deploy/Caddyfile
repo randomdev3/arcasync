@@ -1,0 +1,14 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	@metrics path /metrics
+	respond @metrics 403
+
+	# WebSocket + REST both go to the single server port.
+	reverse_proxy server:8787
+
+	log {
+		output stdout
+		format json
+	}
+}
