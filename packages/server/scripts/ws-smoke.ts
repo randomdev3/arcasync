@@ -7,7 +7,7 @@
  * reconnects with a fresh Y.Doc and asserts the value came back from the server.
  */
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { SessionResponse, WS_PATH, WsTokenResponse, docName } from "@teamsync/shared";
+import { docName, SessionResponse, WS_PATH, WsTokenResponse } from "@teamsync/shared";
 import { WebSocket } from "ws";
 import * as Y from "yjs";
 
@@ -37,7 +37,7 @@ async function connect(name: string, token: string) {
 	const socket = new HocuspocusProviderWebsocket({ url: WS_URL, WebSocketPolyfill: WebSocket });
 	const document = new Y.Doc();
 	const provider = new HocuspocusProvider({ websocketProvider: socket, name, token, document });
-	await new Promise<void>((resolve, reject) => {
+	const synced = new Promise<void>((resolve, reject) => {
 		const timer = setTimeout(() => reject(new Error(`timed out syncing ${name}`)), 15_000);
 		provider.on("synced", () => {
 			clearTimeout(timer);
@@ -48,6 +48,10 @@ async function connect(name: string, token: string) {
 			reject(new Error(`auth failed: ${payload.reason}`));
 		});
 	});
+	// Hocuspocus 4: a provider given an external `websocketProvider` does NOT attach
+	// itself — nothing is ever sent until `attach()` is called.
+	provider.attach();
+	await synced;
 	return { socket, provider, document };
 }
 

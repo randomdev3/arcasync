@@ -1,11 +1,16 @@
-import type { Extension, onChangePayload, onLoadDocumentPayload, onStoreDocumentPayload } from "@hocuspocus/server";
+import type {
+	Extension,
+	onChangePayload,
+	onLoadDocumentPayload,
+	onStoreDocumentPayload,
+} from "@hocuspocus/server";
 import { docName } from "@teamsync/shared";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { createPersistence, loadDocumentState } from "../collab/persistence.js";
 import type { DbHandle } from "../db/index.js";
-import { docCheckpoints, docClients, docUpdates, docs, users, workspaces } from "../db/schema.js";
+import { docCheckpoints, docClients, docs, docUpdates, users, workspaces } from "../db/schema.js";
 import type { Deps } from "../types.js";
 import { createTestDeps } from "./helpers.js";
 
@@ -61,7 +66,10 @@ afterAll(async () => {
 describe("document persistence", () => {
 	it("replays the update log into a fresh document", async () => {
 		const doc = new Y.Doc();
-		await ext.onLoadDocument?.({ document: doc, documentName: name } as unknown as onLoadDocumentPayload);
+		await ext.onLoadDocument?.({
+			document: doc,
+			documentName: name,
+		} as unknown as onLoadDocumentPayload);
 
 		const updates = recordUpdates(doc);
 		const files = doc.getMap<Record<string, unknown>>("files");
@@ -93,7 +101,10 @@ describe("document persistence", () => {
 
 	it("checkpoints and keeps converging on later updates", async () => {
 		const doc = new Y.Doc();
-		await ext.onLoadDocument?.({ document: doc, documentName: name } as unknown as onLoadDocumentPayload);
+		await ext.onLoadDocument?.({
+			document: doc,
+			documentName: name,
+		} as unknown as onLoadDocumentPayload);
 		expect(doc.getMap("files").toJSON()).toHaveProperty("a.md");
 
 		await ext.onStoreDocument?.({
@@ -116,18 +127,17 @@ describe("document persistence", () => {
 		const reloaded = new Y.Doc();
 		await loadDocumentState(deps.db, name, reloaded);
 		expect(Y.encodeStateVector(reloaded)).toEqual(Y.encodeStateVector(doc));
-		expect(Object.keys(reloaded.getMap("files").toJSON()).sort()).toEqual([
-			"a.md",
-			"b.md",
-			"c.md",
-		]);
+		expect(Object.keys(reloaded.getMap("files").toJSON()).sort()).toEqual(["a.md", "b.md", "c.md"]);
 	});
 
 	it("ignores updates produced while replaying history", async () => {
 		const before = (await deps.db.select().from(docUpdates).where(eq(docUpdates.docId, name)))
 			.length;
 		const doc = new Y.Doc();
-		await ext.onLoadDocument?.({ document: doc, documentName: name } as unknown as onLoadDocumentPayload);
+		await ext.onLoadDocument?.({
+			document: doc,
+			documentName: name,
+		} as unknown as onLoadDocumentPayload);
 		const after = (await deps.db.select().from(docUpdates).where(eq(docUpdates.docId, name)))
 			.length;
 		expect(after).toBe(before);

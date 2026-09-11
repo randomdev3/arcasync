@@ -1,8 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MeResponse, ServerInfo, SessionResponse, WsTokenResponse } from "@teamsync/shared";
+import {
+	docName,
+	MeResponse,
+	ServerInfo,
+	SessionResponse,
+	WsTokenResponse,
+} from "@teamsync/shared";
 import type { Hono } from "hono";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../app.js";
-import { verifyWsToken } from "../auth/tokens.js";
+import { signWsToken, verifyWsToken } from "../auth/tokens.js";
+import { authenticateDoc } from "../collab/auth.js";
 import type { DbHandle } from "../db/index.js";
 import { ensureDevWorkspace } from "../seed.js";
 import type { AppEnv, Deps } from "../types.js";
@@ -134,5 +141,52 @@ describe("dev-login -> me -> ws-token", () => {
 			headers: { Authorization: `Bearer ${session.sessionToken}` },
 		});
 		expect(after.status).toBe(401);
+	});
+});
+
+describe("collab authentication", () => {
+	const workspaceId = "11111111-1111-4111-8111-111111111111";
+	const other = "22222222-2222-4222-8222-222222222222";
+
+	const mint = (role: "owner" | "editor" | "viewer", ws = workspaceId) =>
+		signWsToken({ userId: "u1", workspaceId: ws, role, deviceId: "d1" }, deps.config.secret);
+
+	it("accepts a token minted for the document's workspace", async () => {
+		const { token } = await mint("editor");
+		const result = await authenticateDoc(deps, token, docName({ workspaceId, kind: "index" }));
+		expect(result.context).toMatchObject({ userId: "u1", workspaceId, role: "editor" });
+		expect(result.readOnly).toBe(false);
+	});
+
+	it("marks viewers read-only", async () => {
+		const { token } = await mint("viewer");
+		const result = await authenticateDoc(
+			deps,
+			token,
+			docName({ workspaceId, kind: "md", fileId: "abc" }),
+		);
+		expect(result.readOnly).toBe(true);
+	});
+
+	it("refuses a token minted for another workspace", async () => {
+		const { token } = await mint("owner", other);
+		await expect(
+			authenticateDoc(deps, token, docName({ workspaceId, kind: "index" })),
+		).rejects.toThrow(/not valid for this workspace/);
+	});
+
+	it("refuses an unparseable document name", async () => {
+		const { token } = await mint("owner");
+		await expect(authenticateDoc(deps, token, "garbage")).rejects.toThrow(/Unknown document name/);
+	});
+
+	it("refuses a token signed with a different secret", async () => {
+		const { token } = await signWsToken(
+			{ userId: "u1", workspaceId, role: "owner", deviceId: "d1" },
+			"a-completely-different-secret",
+		);
+		await expect(
+			authenticateDoc(deps, token, docName({ workspaceId, kind: "index" })),
+		).rejects.toThrow(/Invalid or expired token/);
 	});
 });

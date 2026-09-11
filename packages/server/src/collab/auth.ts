@@ -1,6 +1,6 @@
-import { parseDocName } from "@teamsync/shared";
-import type { Role } from "@teamsync/shared";
 import type { onAuthenticatePayload, onTokenSyncPayload } from "@hocuspocus/server";
+import type { Role } from "@teamsync/shared";
+import { parseDocName } from "@teamsync/shared";
 import { verifyWsToken } from "../auth/tokens.js";
 import type { Deps } from "../types.js";
 

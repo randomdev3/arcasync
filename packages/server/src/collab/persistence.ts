@@ -8,7 +8,7 @@ import { parseDocName } from "@teamsync/shared";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import * as Y from "yjs";
 import type { Db } from "../db/index.js";
-import { docCheckpoints, docClients, docUpdates, docs } from "../db/schema.js";
+import { docCheckpoints, docClients, docs, docUpdates } from "../db/schema.js";
 import { docCheckpointsWritten, docUpdatesAppended } from "../metrics.js";
 import type { Deps } from "../types.js";
 import type { CollabContext } from "./auth.js";
@@ -141,7 +141,13 @@ export function createPersistence(deps: Deps): Extension {
 			deps.log.debug({ documentName, upto }, "document loaded");
 		},
 
-		async onChange({ document, documentName, update, context, transactionOrigin }: onChangePayload) {
+		async onChange({
+			document,
+			documentName,
+			update,
+			context,
+			transactionOrigin,
+		}: onChangePayload) {
 			if (transactionOrigin === LOAD_ORIGIN) return;
 			const userId = (context as Partial<CollabContext> | undefined)?.userId ?? null;
 			try {

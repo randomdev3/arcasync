@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { type BlobStore, assertSha256 } from "./BlobStore.js";
+import { assertSha256, type BlobStore } from "./BlobStore.js";
 
 /** Content-addressed chunk store on disk: `<root>/<aa>/<sha256>`. */
 export class FsBlobStore implements BlobStore {

@@ -12,7 +12,7 @@ const TOUCH_INTERVAL_MS = 60_000;
 export function bearerToken(header: string | undefined): string | null {
 	if (!header) return null;
 	const [scheme, value] = header.split(" ");
-	if (!scheme || scheme.toLowerCase() !== "bearer" || !value) return null;
+	if (scheme?.toLowerCase() !== "bearer" || !value) return null;
 	return value.trim() || null;
 }
 

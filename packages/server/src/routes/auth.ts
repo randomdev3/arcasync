@@ -1,20 +1,17 @@
-import { DevLoginRequest, WS_TOKEN_TTL_SECONDS, WsTokenRequest } from "@teamsync/shared";
 import { zValidator } from "@hono/zod-validator";
+import { DevLoginRequest, WS_TOKEN_TTL_SECONDS, WsTokenRequest } from "@teamsync/shared";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { getMembershipRole, requireSession } from "../auth/middleware.js";
 import {
-	getMembershipRole,
-	requireSession,
-} from "../auth/middleware.js";
-import {
-	SESSION_TTL_SECONDS,
 	hashToken,
 	newOpaqueToken,
+	SESSION_TTL_SECONDS,
 	signWsToken,
 	userColor,
 } from "../auth/tokens.js";
-import { devices, memberships, sessions, users } from "../db/schema.js";
 import type { UserRow } from "../db/schema.js";
+import { devices, memberships, sessions, users } from "../db/schema.js";
 import { badRequest, forbidden, notFound } from "../errors.js";
 import { ensureDevWorkspace, ensureMembership } from "../seed.js";
 import type { AppEnv, Deps } from "../types.js";

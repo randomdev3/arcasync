@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
 import type { Role } from "@teamsync/shared";
-import { SignJWT, jwtVerify } from "jose";
+import { WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
+import { jwtVerify, SignJWT } from "jose";
 import { z } from "zod";
 
 export const SESSION_TTL_SECONDS = 90 * 24 * 60 * 60;

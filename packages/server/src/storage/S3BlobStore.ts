@@ -7,7 +7,7 @@ import {
 	S3Client,
 } from "@aws-sdk/client-s3";
 import type { S3Config } from "../config.js";
-import { type BlobStore, assertSha256 } from "./BlobStore.js";
+import { assertSha256, type BlobStore } from "./BlobStore.js";
 
 function isNotFound(err: unknown): boolean {
 	const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };

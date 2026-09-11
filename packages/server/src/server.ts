@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
-import { createAdaptorServer } from "@hono/node-server";
 import type { Hocuspocus, WebSocketLike } from "@hocuspocus/server";
+import { createAdaptorServer } from "@hono/node-server";
 import { WS_PATH } from "@teamsync/shared";
 import { type RawData, WebSocketServer } from "ws";
 import { createApp } from "./app.js";
@@ -58,6 +58,7 @@ export function createHttpServer(deps: Deps, hocuspocus: Hocuspocus) {
 			wsConnections.inc();
 			// With the low-level `Hocuspocus` class we are responsible for forwarding
 			// socket events (the batteries-included `Server` class does this via crossws).
+			deps.log.debug({ url: req.url }, "ws upgrade accepted");
 			ws.on("message", (data: RawData) => clientConnection.handleMessage(toUint8Array(data)));
 			ws.on("close", (code: number, reason: Buffer) => {
 				wsConnections.dec();

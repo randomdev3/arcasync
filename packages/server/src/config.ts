@@ -13,7 +13,11 @@ const envSchema = z.object({
 	TEAMSYNC_SECRET: z.string().default(""),
 	TEAMSYNC_DEV_OPEN_LOGIN: z.string().default(""),
 	TEAMSYNC_ADMIN_BOOTSTRAP_TOKEN: z.string().default(""),
-	TEAMSYNC_MAX_FILE_BYTES: z.coerce.number().int().positive().default(200 * 1024 * 1024),
+	TEAMSYNC_MAX_FILE_BYTES: z.coerce
+		.number()
+		.int()
+		.positive()
+		.default(200 * 1024 * 1024),
 	BLOB_PRESIGN: z.string().default("0"),
 	S3_ENDPOINT: z.string().default(""),
 	S3_BUCKET: z.string().default(""),

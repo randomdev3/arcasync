@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pino } from "pino";
 import { type Config, loadConfig } from "../config.js";
-import { type DbHandle, createDb } from "../db/index.js";
+import { createDb, type DbHandle } from "../db/index.js";
 import { FsBlobStore } from "../storage/FsBlobStore.js";
 import type { Deps } from "../types.js";
 
