@@ -119,6 +119,23 @@ describe("PresenceService", () => {
 		expect(a.getLocalState()?.renewMs).toBe(120_000);
 	});
 
+	it("publishes `following` once per toggle and peers read it", () => {
+		const a = awareness();
+		const b = awareness();
+		wire(a, b);
+		const { s } = service(a);
+		const peer = service(b, bob).s;
+		const local = countLocal(a);
+		s.setFollowing("u-bob");
+		s.setFollowing("u-bob");
+		expect(local.count).toBe(1);
+		expect(peer.users().get("u-alice")?.[0]?.following).toBe("u-bob");
+		s.setFollowing(null);
+		s.setFollowing(null);
+		expect(local.count).toBe(2);
+		expect(peer.users().get("u-alice")?.[0]?.following).toBeNull();
+	});
+
 	it("goes idle after the idle timeout without input, once", () => {
 		const a = awareness();
 		const { s, onIdleChange } = service(a);

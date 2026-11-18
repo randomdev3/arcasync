@@ -36,7 +36,7 @@ export interface PresenceServiceOptions {
  * Workspace presence on the index-doc awareness: publishes this client's `WorkspacePresence`
  * (focused file, idle) and reads everyone's back, validated, grouped by user.
  *
- * Traffic: the local state is published only when `file` or `idle` actually changes. Input only
+ * Traffic: the local state is published only when `file`, `following` or `idle` actually changes. Input only
  * records a timestamp; idle flips are rate limited to one per `idleFlipMinMs` (the first one is
  * immediate), so a flapping window costs at most one update a minute.
  */
@@ -48,6 +48,7 @@ export class PresenceService implements IPresence {
 	private readonly idleFlipMinMs: number;
 	private readonly onIdleChange: () => void;
 	private file: string | null = null;
+	private following: string | null = null;
 	private hidden: boolean;
 	private current: boolean;
 	private lastInput = Date.now();
@@ -82,6 +83,13 @@ export class PresenceService implements IPresence {
 	setFile(file: string | null): void {
 		if (file === this.file) return;
 		this.file = file;
+		this.publish();
+	}
+
+	/** Sets the user this client follows (P1-7), or null; publishes only on a change. */
+	setFollowing(userId: string | null): void {
+		if (userId === this.following) return;
+		this.following = userId;
 		this.publish();
 	}
 
@@ -165,7 +173,7 @@ export class PresenceService implements IPresence {
 			user: this.user,
 			device: this.device,
 			file: this.file,
-			following: null,
+			following: this.following,
 			idle: this.current,
 			ts: Date.now(),
 		};
