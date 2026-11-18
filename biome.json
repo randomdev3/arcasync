@@ -12,6 +12,7 @@
 			"!**/.wrangler",
 			"!.e2e",
 			"!**/.data",
+			"!.claude",
 			"!**/*.svelte"
 		]
 	},
