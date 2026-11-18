@@ -2,6 +2,7 @@ import type { DeviceInfo, ServerInfo } from "@teamsync/shared";
 import { WS_PATH } from "@teamsync/shared";
 import { Notice, Platform, Plugin } from "obsidian";
 import { CounterDebug } from "./debug/CounterDebug";
+import { editorExtensions } from "./editor";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
 import { ConnectionManager, type ConnectionState } from "./net/ConnectionManager";
 import { TokenStore } from "./net/TokenStore";
@@ -15,6 +16,7 @@ import { SecretStore } from "./storage/SecretStore";
 import type { SettingsViewState } from "./ui/components/settingsProps";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
+import { WorkspaceSession } from "./workspace/WorkspaceSession";
 
 /**
  * Every live plugin instance. Obsidian reloads plugins in place; an instance
@@ -47,10 +49,12 @@ export default class TeamSyncPlugin extends Plugin {
 	private connections: ConnectionManager | null = null;
 	private counter: CounterDebug | null = null;
 	private unsubscribeConnection: (() => void) | null = null;
+	/** The connected workspace; null while disconnected. */
+	session: WorkspaceSession | null = null;
 
 	private serverInfo: ServerInfo | null = null;
 	private serverError: string | null = null;
-	private session: MeResult | null = null;
+	private me: MeResult | null = null;
 	private connection: ConnectionState = { status: "disconnected" };
 	private busy = false;
 	private readonly viewListeners = new Set<() => void>();
@@ -78,6 +82,7 @@ export default class TeamSyncPlugin extends Plugin {
 
 		this.statusBar = new StatusBar(this.addStatusBarItem());
 		this.addSettingTab(new TeamSyncSettingsTab(this.app, this));
+		this.registerEditorExtension(editorExtensions(this));
 
 		this.addCommand({
 			id: "connect",
@@ -96,11 +101,7 @@ export default class TeamSyncPlugin extends Plugin {
 			name: "Debug counter +1",
 			callback: () => {
 				const value = this.counter?.increment();
-				new Notice(
-					value === null || value === undefined
-						? "TeamSync: not connected"
-						: `TeamSync counter: ${value}`,
-				);
+				new Notice(value === undefined ? "TeamSync: not connected" : `TeamSync counter: ${value}`);
 			},
 		});
 
@@ -129,6 +130,8 @@ export default class TeamSyncPlugin extends Plugin {
 
 		teardownStep("counter.close", () => this.counter?.close());
 		this.counter = null;
+		teardownStep("session.stop", () => this.session?.stop());
+		this.session = null;
 		teardownStep("connection.unsubscribe", () => this.unsubscribeConnection?.());
 		this.unsubscribeConnection = null;
 		teardownStep("connections.destroy", () => this.connections?.destroy());
@@ -172,7 +175,7 @@ export default class TeamSyncPlugin extends Plugin {
 		this.disconnect();
 		this.serverInfo = null;
 		this.serverError = null;
-		this.session = null;
+		this.me = null;
 		this.tokens.invalidate();
 		await this.updateSettings({ serverUrl, workspaceId: "", workspaces: [] });
 		await this.refreshServerInfo();
@@ -195,7 +198,7 @@ export default class TeamSyncPlugin extends Plugin {
 			serverError: this.serverError,
 			status: this.connection.status,
 			statusMessage: this.connection.message ?? null,
-			signedInAs: this.session?.user.name ?? this.settings.user?.name ?? null,
+			signedInAs: this.me?.user.name ?? this.settings.user?.name ?? null,
 			workspaceName: workspace?.name ?? null,
 			busy: this.busy,
 		};
@@ -241,8 +244,12 @@ export default class TeamSyncPlugin extends Plugin {
 				this.settings.workspaces.find((w) => w.id === this.settings.workspaceId)?.id ??
 				me.workspaces[0]?.id;
 			if (!workspaceId) throw new Error("This account is not a member of any workspace");
-			if (workspaceId !== this.settings.workspaceId) {
+			const folder = this.settings.sharedFolder;
+			if (workspaceId !== this.settings.workspaceId || (folder && !folder.workspaceId)) {
 				this.settings.workspaceId = workspaceId;
+				if (folder && !folder.workspaceId) {
+					this.settings.sharedFolder = { ...folder, workspaceId };
+				}
 				await this.saveSettings();
 			}
 
@@ -263,7 +270,11 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 		const name = this.settings.devLoginName.trim();
 		if (!name) throw new Error("Enter a display name in TeamSync settings first");
-		const session = await this.api.devLogin(name, this.deviceInfo());
+		const session = await this.api.devLogin(
+			name,
+			this.deviceInfo(),
+			this.settings.devLoginRole || undefined,
+		);
 		this.secrets.set(session.sessionToken);
 		this.settings.user = {
 			id: session.user.id,
@@ -277,7 +288,7 @@ export default class TeamSyncPlugin extends Plugin {
 	private async fetchMe(): Promise<MeResult> {
 		try {
 			const me = await this.api.me();
-			this.session = me;
+			this.me = me;
 			this.settings.user = { id: me.user.id, name: me.user.name, color: me.user.color };
 			this.settings.workspaces = me.workspaces;
 			await this.saveSettings();
@@ -286,7 +297,7 @@ export default class TeamSyncPlugin extends Plugin {
 			if (error instanceof ApiRequestError && error.status === 401) {
 				// The stored session is dead; drop it so the next connect re-enrols.
 				this.secrets.clear();
-				this.session = null;
+				this.me = null;
 				throw new Error("Session expired — connect again to sign in");
 			}
 			throw error;
@@ -295,24 +306,39 @@ export default class TeamSyncPlugin extends Plugin {
 
 	private openConnection(workspaceId: string): void {
 		this.disconnect();
+		const user = this.settings.user;
+		if (!user) throw new Error("Not signed in");
 		const connections = new ConnectionManager({
 			// `?ws=` routes the socket to the workspace's relay; the Node server ignores it.
 			url: `${websocketUrl(this.settings.serverUrl, WS_PATH)}?ws=${encodeURIComponent(workspaceId)}`,
 			tokenStore: this.tokens,
 			features: this.serverInfo?.features,
+			isIdle: () => this.session?.presence?.idle ?? false,
 		});
 		this.connections = connections;
 		this.unsubscribeConnection = connections.onStateChange((state) =>
 			this.setConnectionState(state),
 		);
 		connections.connect();
-		this.counter = new CounterDebug(connections);
-		this.counter.open(workspaceId);
+		const folder = this.settings.sharedFolder;
+		const session = new WorkspaceSession({
+			app: this.app,
+			connections,
+			workspaceId,
+			root: folder?.workspaceId === workspaceId ? folder.path : null,
+			user,
+			vaultId: this.secrets.vaultId,
+		});
+		this.session = session;
+		session.start();
+		this.counter = new CounterDebug(session.indexDoc);
 	}
 
 	disconnect(): void {
 		this.counter?.close();
 		this.counter = null;
+		this.session?.stop();
+		this.session = null;
 		this.unsubscribeConnection?.();
 		this.unsubscribeConnection = null;
 		this.connections?.destroy();
@@ -324,7 +350,7 @@ export default class TeamSyncPlugin extends Plugin {
 		this.disconnect();
 		this.secrets.clear();
 		this.tokens.invalidate();
-		this.session = null;
+		this.me = null;
 		await this.updateSettings({ user: null, workspaces: [], workspaceId: "" });
 	}
 
@@ -333,7 +359,7 @@ export default class TeamSyncPlugin extends Plugin {
 		this.statusBar?.update({
 			status: state.status,
 			message: state.message ?? null,
-			userName: this.session?.user.name ?? this.settings.user?.name ?? null,
+			userName: this.me?.user.name ?? this.settings.user?.name ?? null,
 		});
 		this.notifyView();
 	}

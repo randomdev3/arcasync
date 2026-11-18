@@ -1,58 +1,34 @@
-import { docName } from "@teamsync/shared";
 import { Notice } from "obsidian";
-import * as Y from "yjs";
-import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
+import type * as Y from "yjs";
 
 const MAP_NAME = "debug";
 const KEY = "counter";
 
 /**
- * P0 end-to-end proof: two vaults open the same workspace index doc, one runs
- * "Debug counter +1", the other sees a Notice. Nothing else in the plugin
- * depends on this.
+ * P0 end-to-end proof: two vaults share the workspace index doc, one runs "Debug counter +1",
+ * the other sees a Notice. Rides the session's index doc: `ConnectionManager.openDoc` dedupes
+ * by name, so a second Y.Doc for the same name would never sync.
  */
 export class CounterDebug {
-	private ydoc: Y.Doc | null = null;
-	private handle: OpenDocHandle | null = null;
-	private unobserve: (() => void) | null = null;
+	private readonly map: Y.Map<number>;
+	private readonly observer = (_event: Y.YMapEvent<number>, transaction: Y.Transaction) => {
+		if (transaction.local) return;
+		new Notice(`TeamSync counter: ${this.map.get(KEY) ?? 0}`);
+	};
 
-	constructor(private readonly connections: ConnectionManager) {}
-
-	get isOpen(): boolean {
-		return this.ydoc !== null;
+	constructor(indexDoc: Y.Doc) {
+		this.map = indexDoc.getMap<number>(MAP_NAME);
+		this.map.observe(this.observer);
 	}
 
-	open(workspaceId: string): void {
-		if (this.ydoc) this.close();
-		const name = docName({ workspaceId, kind: "index" });
-		const ydoc = new Y.Doc();
-		const map = ydoc.getMap<number>(MAP_NAME);
-		const observer = (_event: Y.YMapEvent<number>, transaction: Y.Transaction) => {
-			if (transaction.local) return;
-			new Notice(`TeamSync counter: ${map.get(KEY) ?? 0}`);
-		};
-		map.observe(observer);
-
-		this.ydoc = ydoc;
-		this.unobserve = () => map.unobserve(observer);
-		this.handle = this.connections.openDoc(name, ydoc);
-	}
-
-	/** Returns the new value, or null when the doc is not open. */
-	increment(): number | null {
-		if (!this.ydoc) return null;
-		const map = this.ydoc.getMap<number>(MAP_NAME);
-		const next = (map.get(KEY) ?? 0) + 1;
-		map.set(KEY, next);
+	/** Returns the new value. */
+	increment(): number {
+		const next = (this.map.get(KEY) ?? 0) + 1;
+		this.map.set(KEY, next);
 		return next;
 	}
 
 	close(): void {
-		this.unobserve?.();
-		this.unobserve = null;
-		this.handle?.close();
-		this.handle = null;
-		this.ydoc?.destroy();
-		this.ydoc = null;
+		this.map.unobserve(this.observer);
 	}
 }

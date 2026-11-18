@@ -35,6 +35,7 @@ export class Plugin extends Component {
 		return command;
 	}
 	addSettingTab(): void {}
+	registerEditorExtension(_extension: unknown): void {}
 	addStatusBarItem(): HTMLElement {
 		throw new Error("addStatusBarItem is not available outside Obsidian");
 	}
@@ -52,6 +53,48 @@ export class PluginSettingTab {
 	) {}
 	display(): void {}
 	hide(): void {}
+}
+
+export class TAbstractFile {
+	vault: unknown = null;
+	path = "";
+	name = "";
+	parent: TFolder | null = null;
+}
+
+export class TFile extends TAbstractFile {
+	basename = "";
+	extension = "";
+	stat = { ctime: 0, mtime: 0, size: 0 };
+}
+
+export class TFolder extends TAbstractFile {
+	children: TAbstractFile[] = [];
+	isRoot(): boolean {
+		return this.path === "/";
+	}
+}
+
+/** Obsidian's vault path normaliser: forward slashes, no duplicate/leading/trailing slashes. */
+export function normalizePath(path: string): string {
+	const p = path
+		.replace(/[\\/]+/g, "/")
+		.replace(/\u00A0|\u202F/g, " ")
+		.replace(/^\/+|\/+$/g, "");
+	return p === "" ? "/" : p.normalize("NFC");
+}
+
+export class MarkdownView {}
+
+export abstract class AbstractInputSuggest<T> {
+	constructor(
+		readonly app: unknown,
+		readonly inputEl: HTMLInputElement,
+	) {}
+	abstract getSuggestions(query: string): T[] | Promise<T[]>;
+	abstract renderSuggestion(value: T, el: HTMLElement): void;
+	selectSuggestion(_value: T, _evt: MouseEvent | KeyboardEvent): void {}
+	close(): void {}
 }
 
 export const Platform = {
