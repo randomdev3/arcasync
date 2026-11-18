@@ -23,4 +23,20 @@ describe("dist bundle", () => {
 		const bundle = readFileSync(bundlePath, "utf8");
 		expect(bundle).toMatch(/require\("obsidian"\)/);
 	});
+
+	/**
+	 * Obsidian mobile has no Node: a `require("fs")`, `electron`, `child_process`, … (esbuild
+	 * leaves Node built-ins external) would throw at load on iOS and Android. Only modules the app
+	 * itself provides may be required.
+	 */
+	it.skipIf(!existsSync(bundlePath))("requires only modules Obsidian provides on mobile", () => {
+		const bundle = readFileSync(bundlePath, "utf8");
+		const required = new Set(
+			[...bundle.matchAll(/\brequire\(\s*["'`]([^"'`]+)["'`]\s*\)/g)].map((m) => m[1] ?? ""),
+		);
+		const allowed = (id: string) => id === "obsidian" || id.startsWith("@codemirror/");
+		expect([...required].filter((id) => !allowed(id))).toEqual([]);
+		// Any other way of loading code at runtime (`require(variable)`, `window.require`).
+		expect(bundle.match(/\brequire\(\s*[^"'`\s]/g) ?? []).toEqual([]);
+	});
 });

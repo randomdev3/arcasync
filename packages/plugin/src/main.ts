@@ -6,6 +6,7 @@ import { editorExtensions } from "./editor";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
 import { ConnectionManager, type ConnectionState } from "./net/ConnectionManager";
 import { TokenStore } from "./net/TokenStore";
+import { limits, type PlatformLimits } from "./platform";
 import {
 	DEFAULT_SETTINGS,
 	normalizeSettings,
@@ -426,6 +427,11 @@ export default class TeamSyncPlugin extends Plugin {
 			workspaceName: this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? null,
 			online: this.session?.online ?? 0,
 		});
+	}
+
+	/** This device's sync limits (smaller on mobile). */
+	limits(): PlatformLimits {
+		return limits();
 	}
 
 	private deviceInfo(): DeviceInfo {
