@@ -1,16 +1,26 @@
 /**
  * G4: measures relay traffic under `wrangler dev` with real providers.
  *
- *   node scripts/measure.ts [idleSeconds=300] > measurements.json
+ *   node scripts/measure.ts [idleSeconds=300] [--profile v1|v2] [--base-port 8801] [--json out.json]
  *
- * Every scenario gets its own relay (own port and state dir); stats are reset once the clients
- * are connected and synced, so the numbers cover only the measured phase. `wakes` includes the
- * final stats read (which wakes a hibernated object itself).
+ * Profiles: `v1` is the spike's client (no batching, no keepalive, y-protocols' 15 s awareness
+ * renewal); `v2` is the plugin's free-tier client (flushDelay, text keepalive, presence policy).
+ * Every scenario gets its own relay (ports `base-port`…`base-port + 4`, own state dir); stats are
+ * reset once the clients are connected and synced, so the numbers cover only the measured phase.
+ * `wakes` includes the final stats read (which wakes a hibernated object itself). Prints the G4
+ * table to stdout.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { docName } from "@teamsync/shared";
+import { parseArgs } from "node:util";
+import {
+	docName,
+	FLUSH_DELAY_MS,
+	KEEPALIVE_INTERVAL_MS,
+	KEEPALIVE_RECONNECT_TIMEOUT_MS,
+	PRESENCE_RENEWAL_MS,
+} from "@teamsync/shared";
 import {
 	type ClientOptions,
 	client,
@@ -21,7 +31,27 @@ import {
 } from "../test/helpers.ts";
 import { startRelayDev } from "./dev-server.mjs";
 
-const IDLE_S = Number(process.argv[2] ?? 300);
+const { values: args, positionals } = parseArgs({
+	allowPositionals: true,
+	options: {
+		profile: { type: "string", default: "v1" },
+		"base-port": { type: "string", default: "8801" },
+		json: { type: "string" },
+	},
+});
+const IDLE_S = Number(positionals[0] ?? 300);
+const BASE_PORT = Number(args["base-port"]);
+const PROFILES: Record<string, ClientOptions> = {
+	v1: {},
+	v2: {
+		flushDelay: FLUSH_DELAY_MS,
+		keepaliveMs: KEEPALIVE_INTERVAL_MS,
+		messageReconnectTimeout: KEEPALIVE_RECONNECT_TIMEOUT_MS,
+		presenceRenewalMs: PRESENCE_RENEWAL_MS,
+	},
+};
+const PROFILE = PROFILES[args.profile ?? ""];
+if (!PROFILE) throw new Error(`unknown --profile ${args.profile} (v1|v2)`);
 
 type Session = Awaited<ReturnType<typeof login>>;
 interface Result {
@@ -55,7 +85,7 @@ async function scenario(
 		const name0 = docName({ workspaceId: ws, kind: "index" });
 		const docs = [];
 		for (const s of sessions) {
-			const c = client(relay.url, ws, options);
+			const c = client(relay.url, ws, { ...PROFILE, ...options });
 			clients.push(c);
 			docs.push(await c.open(name0, s.token));
 		}
@@ -97,28 +127,47 @@ async function typing(
 
 const settled = await Promise.allSettled([
 	// (a1) today's plugin: the counter doc has no awareness, so idle sockets receive nothing.
-	scenario("a1-idle-no-awareness", 8801, {}, async () => {
+	scenario("a1-idle-no-awareness", BASE_PORT, {}, async () => {
 		await sleep(IDLE_S * 1000);
 		return {};
 	}),
 	// (a2) a doc with presence (index presence / open editor): y-protocols renews every 15 s.
-	scenario("a2-idle-awareness", 8802, { awareness: true }, async ({ docs }) => {
+	scenario("a2-idle-awareness", BASE_PORT + 1, { awareness: true }, async ({ docs }) => {
 		for (const d of docs) d.awareness?.setLocalStateField("user", { name: "x" });
 		await sleep(IDLE_S * 1000);
 		return {};
 	}),
 	// (b1) 200 edits, 2 clients alternating, ~10 keystrokes/s, no awareness.
-	scenario("b1-typing-200", 8803, {}, async ({ docs }) => typing(docs, 200, 100, false)),
+	scenario("b1-typing-200", BASE_PORT + 2, {}, async ({ docs }) => typing(docs, 200, 100, false)),
 	// (b2) same with a cursor awareness update per keystroke (what y-codemirror does).
-	scenario("b2-typing-200-cursor", 8804, { awareness: true }, async ({ docs }) =>
+	scenario("b2-typing-200-cursor", BASE_PORT + 3, { awareness: true }, async ({ docs }) =>
 		typing(docs, 200, 100, true),
 	),
 	// (c) compaction cost: 1,200 edits on one doc (default threshold: 500 tail rows).
-	scenario("c-typing-1200-compaction", 8805, {}, async ({ docs }) => typing(docs, 1200, 5, false)),
+	scenario("c-typing-1200-compaction", BASE_PORT + 4, {}, async ({ docs }) =>
+		typing(docs, 1200, 5, false),
+	),
 ]);
 
 const results = settled.map((r) =>
 	r.status === "fulfilled" ? r.value : { error: String(r.reason) },
 );
-console.log(JSON.stringify(results, null, "\t"));
+if (args.json) writeFileSync(args.json, JSON.stringify(results, null, "\t"));
+
+console.log(`profile ${args.profile}, idle ${IDLE_S} s`);
+console.log(
+	"| Scenario | Wall | Reconnects | wakes | msgs_in | msgs_out | upgrades | close events | rows written | awake (est.) |",
+);
+console.log("|---|---|---|---|---|---|---|---|---|---|");
+for (const r of results) {
+	if (!("stats" in r)) {
+		console.log(`| failed: ${r.error} | | | | | | | | | |`);
+		continue;
+	}
+	const s = r.stats;
+	const awakePct = Math.round(s.awake_ms_est / 10 / r.seconds);
+	console.log(
+		`| ${r.scenario} | ${r.seconds.toFixed(1)} s | ${r.reconnects ?? 0} | ${s.wakes} | ${s.msgs_in} | ${s.msgs_out} | ${s.connects} | ${s.closes} | ${s.app_rows_written} | ${Math.round(s.awake_ms_est / 1000)} s (${awakePct}%) |`,
+	);
+}
 process.exit(settled.every((r) => r.status === "fulfilled") ? 0 : 1);

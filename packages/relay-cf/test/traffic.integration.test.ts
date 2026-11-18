@@ -10,7 +10,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import { type ClientOptions, client, login, resetStats, sleep, stats, waitFor } from "./helpers";
 
-const SECRET = "relay-traffic-secret";
+/** ≥ 32 chars, so it also satisfies the R-4 config guard. */
+const SECRET = "relay-traffic-integration-secret-0123456789";
 /** Lane r/plugin-traffic owns 22000–22999. */
 const PORT = 22_000 + Math.floor(Math.random() * 400);
 const IDLE_MS = 40_000;
