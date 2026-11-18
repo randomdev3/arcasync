@@ -17,3 +17,6 @@ dev-vault-*/.obsidian/*
 .claude/
 .opencode/
 .sisyphus/
+
+# e2e harness state (isolated Obsidian profile + throwaway vaults)
+.e2e/

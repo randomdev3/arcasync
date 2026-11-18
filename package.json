@@ -12,7 +12,8 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "turbo run typecheck",
-		"db:generate": "pnpm --filter @teamsync/server db:generate"
+		"db:generate": "pnpm --filter @teamsync/server db:generate",
+		"e2e:p0": "node scripts/e2e/p0-counter.mjs"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.2.0",
