@@ -346,8 +346,11 @@ export class DocManager implements IDocManager {
 		const raw = await this.options.reconcile.writer.read(note.path);
 		if (raw === null) return;
 		const hash = await textHash(diskText(raw));
-		if (!entry.editorHashes.includes(hash)) return;
-		if ((await note.getLastSyncedHash()) !== hash) await note.setLastSyncedHash(hash);
+		if (entry.editorHashes.includes(hash) && (await note.getLastSyncedHash()) !== hash) {
+			await note.setLastSyncedHash(hash);
+		}
+		// Past the grace period every late editor save has landed; a later match is a real edit.
+		if (entry.editors === 0 && !entry.graceTimer) entry.editorHashes.length = 0;
 	}
 
 	private unwarm(fileId: string): void {

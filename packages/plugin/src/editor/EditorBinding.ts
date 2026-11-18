@@ -146,7 +146,7 @@ export class EditorBindings {
 			notes.add(note);
 			if (active && binding.info === active) focused = note;
 		}
-		const user = this.session?.user;
+		const user = this.host.session?.user;
 		for (const note of notes) {
 			const state = note.awareness.getLocalState();
 			if (note === focused && user) {

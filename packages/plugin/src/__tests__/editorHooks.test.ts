@@ -128,6 +128,19 @@ describe("DocManager editor hooks", () => {
 		expect([...d.disk.files.keys()]).toEqual([PATH]);
 	});
 
+	it("after the grace period, a revert to a text the editor once held is a real edit", async () => {
+		const { d, note, remote } = await boundNote("v1\n");
+		await d.docs.editorAttached(note, () => true);
+		note.ytext.insert(3, "typed\n");
+		d.docs.editorDetached(note);
+		await waitUntil(() => d.disk.files.get(PATH) === "v1\ntyped\n");
+		remote((t) => t.insert(t.length, "peer\n"));
+		await waitUntil(() => d.disk.files.get(PATH) === "v1\ntyped\npeer\n");
+		d.disk.files.set(PATH, "v1\ntyped\n");
+		await d.docs.reconcile(note);
+		expect(note.ytext.toString()).toBe("v1\ntyped\n");
+	});
+
 	it("a real offline edit after detach is still merged", async () => {
 		const { d, note } = await boundNote("v1\n");
 		await d.docs.editorAttached(note, () => true);

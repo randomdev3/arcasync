@@ -96,6 +96,44 @@ async function watchErrors(v) {
 	};
 }
 
+/** The awareness of `path`'s attached note doc: own client and state, and peers' user ids. */
+function noteAwareness(v, path) {
+	return v.eval(
+		`const p = app.plugins.plugins.teamsync;
+		const id = p.session.fileIdOf(args.path);
+		const note = id && (await p.session.docs.peek(id));
+		if (!note) return null;
+		const a = note.awareness;
+		return {
+			clientId: a.clientID,
+			local: a.getLocalState(),
+			userId: p.settings.user.id,
+			peers: [...a.getStates()].filter(([c]) => c !== a.clientID).map(([c, st]) => ({ c, id: st.user?.id ?? null })),
+		};`,
+		{ path },
+	);
+}
+
+/** Records updates to `v`'s co.md doc that did not come from the relay (local echoes). */
+function watchLocalUpdates(v) {
+	return v.eval(
+		`const s = app.plugins.plugins.teamsync.session;
+		const note = await s.docs.peek(s.fileIdOf(args.path));
+		window.__tsLocal = [];
+		const fn = (_u, origin) => {
+			if (origin !== note.provider) window.__tsLocal.push(String(origin?.constructor?.name ?? origin));
+		};
+		note.ydoc.on("update", fn);
+		window.__tsLocalOff = () => note.ydoc.off("update", fn);
+		return true;`,
+		{ path: CO },
+	);
+}
+
+function stopLocalUpdates(v) {
+	return v.eval("window.__tsLocalOff(); return window.__tsLocal;");
+}
+
 function closeLeaves(v) {
 	return v.eval(`
 		for (const leaf of app.workspace.getLeavesOfType("markdown")) leaf.detach();
@@ -132,6 +170,18 @@ export default {
 			await sleep(3000);
 			await waitAllEqual([alice, bob], expected, { timeout: 3000, disk: true });
 			step("concurrent typing converges in both editors and on both disks, each word once");
+
+			// The focused note publishes awareness with the session's user id; bob sees alice.
+			const mine = await noteAwareness(alice, CO);
+			assert.equal(mine?.local?.user?.id, mine?.userId, "alice's co.md awareness user is alice");
+			await waitFor(
+				async () =>
+					(await noteAwareness(bob, CO))?.peers.some(
+						(p) => p.c === mine.clientId && p.id === mine.userId,
+					),
+				{ timeout: 5000, label: "bob's co.md awareness has alice" },
+			);
+			step("focused note: alice publishes her user on co.md and bob receives it");
 
 			// 2. Latency of one keystroke.
 			const started = Date.now();
@@ -173,10 +223,19 @@ export default {
 			await openFile(alice, CO, { split: true });
 			await waitLive(alice, CO, 2);
 			await setCursor(bob, { line: 1, ch: 17 });
+			await watchLocalUpdates(alice);
 			await typeKeys(bob, " gamma");
 			expected = "Line one\nLine two beta (b) gamma\n";
 			await waitAllEqual([alice, bob], expected);
 			assert.equal((await leafTexts(alice, CO)).length, 2, "alice shows co.md twice");
+			// Obsidian's cross-pane sync and autosave run while bob types; neither may echo his
+			// edits back into the doc as local changes.
+			await sleep(3000);
+			assert.deepEqual(
+				await stopLocalUpdates(alice),
+				[],
+				"alice's local updates while only bob typed",
+			);
 			// Long enough for Obsidian's autosave and its cross-pane sync to run mid-typing.
 			await setCursor(alice, { line: 0, ch: 8 });
 			await Promise.all([
@@ -199,6 +258,16 @@ export default {
 			await sleep(800);
 			await openFile(alice, OTHER);
 			await sleep(1500);
+			assert.equal(
+				(await noteAwareness(alice, CO))?.local,
+				null,
+				"co.md awareness after leaving it",
+			);
+			assert.notEqual(
+				(await noteAwareness(alice, OTHER))?.local ?? null,
+				null,
+				"other.md awareness",
+			);
 			await openFile(alice, CO);
 			await waitLive(alice);
 			await typing;
