@@ -1,0 +1,11 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ES2023", "DOM"],
+		"types": ["node"],
+		"noEmit": true,
+		"allowJs": true,
+		"checkJs": false
+	},
+	"include": ["test", "scripts", "vitest.config.ts", "vitest.integration.config.ts"]
+}

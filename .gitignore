@@ -20,3 +20,6 @@ dev-vault-*/.obsidian/*
 
 # e2e harness state (isolated Obsidian profile + throwaway vaults)
 .e2e/
+
+# wrangler local state
+.wrangler/

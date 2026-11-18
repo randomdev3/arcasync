@@ -1,0 +1,522 @@
+/**
+ * One hibernating Durable Object per workspace that speaks the Hocuspocus 4.7 protocol to
+ * `HocuspocusProviderWebsocket` clients (one multiplexed socket per client, many documents).
+ *
+ * Nothing needed for correctness lives only in memory: per-socket auth state is the socket
+ * attachment, document state is SQLite (`DocStore`), and peers are found by scanning
+ * `ctx.getWebSockets()`. In-memory maps are caches (awareness, merged doc state) or
+ * short-lived ordering state (the per-socket promise chain, frames that precede their Auth).
+ * No timers or alarms, so the object can hibernate between messages.
+ */
+
+import { DurableObject } from "cloudflare:workers";
+import { parseDocName } from "@teamsync/shared";
+import type { Env } from "./env";
+import { verifyWsToken } from "./jwt";
+import {
+	type AwarenessEntry,
+	awarenessRemoval,
+	decodeAwareness,
+	documentNameOf,
+	encode,
+	encodeAwareness,
+	type Frame,
+	isEmptyUpdate,
+	parseFrame,
+	SyncStep,
+} from "./protocol";
+import { DocStore } from "./store";
+
+interface DocAuth {
+	ro: boolean;
+	/** Awareness client ids this socket introduced on the doc, with their last clock. */
+	aw: Record<string, number>;
+}
+
+/** Serialized onto each socket; must stay well under the 16 KiB attachment limit. */
+interface Attachment {
+	id: string;
+	ws: string;
+	/** Keyed by frame address (the document name unless the provider uses sessionAwareness). */
+	docs: Record<string, DocAuth>;
+}
+
+interface Peer {
+	ws: WebSocket;
+	att: Attachment;
+	address: string;
+	auth: DocAuth;
+}
+
+const RESET = { code: 4205, reason: "Reset Connection" };
+const MAX_QUEUED_FRAMES = 1000;
+const MAX_QUEUED_BYTES = 5 * 1024 * 1024;
+/** Assumed idle time before the platform hibernates the object (for the awake-time estimate). */
+const IDLE_BEFORE_HIBERNATION_MS = 10_000;
+
+interface Counters {
+	msgs_in: number;
+	msgs_out: number;
+	connects: number;
+	closes: number;
+}
+
+/** Dev-only counters for the G4 measurements, kept in one SQLite row (its writes are excluded). */
+class Stats {
+	private pending: Counters = { msgs_in: 0, msgs_out: 0, connects: 0, closes: 0 };
+	private flushedRows = 0;
+	private flushedCompactions = 0;
+
+	constructor(
+		private readonly sql: SqlStorage,
+		private readonly store: DocStore,
+	) {
+		sql.exec(`CREATE TABLE IF NOT EXISTS relay_stats (
+			id INTEGER PRIMARY KEY CHECK (id = 1), wakes INTEGER NOT NULL DEFAULT 0,
+			msgs_in INTEGER NOT NULL DEFAULT 0, msgs_out INTEGER NOT NULL DEFAULT 0,
+			connects INTEGER NOT NULL DEFAULT 0, closes INTEGER NOT NULL DEFAULT 0,
+			app_rows_written INTEGER NOT NULL DEFAULT 0, compactions INTEGER NOT NULL DEFAULT 0,
+			awake_ms_est INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0)`);
+		sql.exec("INSERT INTO relay_stats (id) VALUES (1) ON CONFLICT DO NOTHING");
+		sql.exec("UPDATE relay_stats SET wakes = wakes + 1");
+	}
+
+	count(key: keyof Counters, n = 1): void {
+		this.pending[key] += n;
+	}
+
+	flush(): void {
+		const now = Date.now();
+		const p = this.pending;
+		const rows = this.store.rowsWritten - this.flushedRows;
+		const compactions = this.store.compactions - this.flushedCompactions;
+		this.sql.exec(
+			`UPDATE relay_stats SET msgs_in = msgs_in + ?, msgs_out = msgs_out + ?,
+			 connects = connects + ?, closes = closes + ?, app_rows_written = app_rows_written + ?,
+			 compactions = compactions + ?,
+			 awake_ms_est = awake_ms_est + CASE WHEN last_at = 0 THEN 0 ELSE MIN(? - last_at, ?) END,
+			 last_at = ?`,
+			p.msgs_in,
+			p.msgs_out,
+			p.connects,
+			p.closes,
+			rows,
+			compactions,
+			now,
+			IDLE_BEFORE_HIBERNATION_MS,
+			now,
+		);
+		this.pending = { msgs_in: 0, msgs_out: 0, connects: 0, closes: 0 };
+		this.flushedRows += rows;
+		this.flushedCompactions += compactions;
+	}
+
+	read(): Record<string, unknown> {
+		return this.sql.exec("SELECT * FROM relay_stats WHERE id = 1").one();
+	}
+
+	reset(): void {
+		this.sql.exec(`UPDATE relay_stats SET wakes = 0, msgs_in = 0, msgs_out = 0, connects = 0,
+			closes = 0, app_rows_written = 0, compactions = 0, awake_ms_est = 0, last_at = 0`);
+	}
+}
+
+export class WorkspaceRelay extends DurableObject<Env> {
+	private readonly store: DocStore;
+	private readonly stats: Stats | null;
+	/** Serializes frame handling per socket (Auth verification is async; SyncStep1 follows it). */
+	private readonly chains = new Map<string, Promise<void>>();
+	/** Frames that arrived for a document before its Auth succeeded, per socket and address. */
+	private readonly queued = new Map<string, Map<string, Uint8Array[]>>();
+	/** docName → socket id → awareness entries that socket owns (cache; rebuilt via QueryAwareness). */
+	private readonly awareness = new Map<string, Map<string, Map<number, AwarenessEntry>>>();
+
+	constructor(ctx: DurableObjectState, env: Env) {
+		super(ctx, env);
+		this.store = new DocStore(ctx.storage.sql, (fn) => ctx.storage.transactionSync(fn));
+		this.stats = env.TEAMSYNC_DEBUG_STATS === "1" ? new Stats(ctx.storage.sql, this.store) : null;
+	}
+
+	async fetch(request: Request): Promise<Response> {
+		if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+			return new Response("Expected a WebSocket upgrade", { status: 426 });
+		}
+		const workspaceId = new URL(request.url).searchParams.get("ws");
+		if (!workspaceId) return new Response("Missing ?ws=", { status: 400 });
+		const pair = new WebSocketPair();
+		const [client, server] = [pair[0], pair[1]];
+		this.ctx.acceptWebSocket(server);
+		const att: Attachment = { id: crypto.randomUUID(), ws: workspaceId, docs: {} };
+		server.serializeAttachment(att);
+		this.stats?.count("connects");
+		this.stats?.flush();
+		return new Response(null, { status: 101, webSocket: client });
+	}
+
+	async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+		this.stats?.count("msgs_in");
+		if (typeof message === "string") {
+			this.stats?.flush();
+			return;
+		}
+		const data = new Uint8Array(message);
+		const id = this.attachment(ws)?.id;
+		if (!id) return;
+		const run = (this.chains.get(id) ?? Promise.resolve())
+			.then(() => this.handle(ws, data))
+			.catch((err) => {
+				console.error("relay: frame handling failed", err);
+				this.safeClose(ws, RESET.code, RESET.reason);
+			})
+			.finally(() => this.stats?.flush());
+		this.chains.set(id, run);
+		await run;
+		if (this.chains.get(id) === run) this.chains.delete(id);
+	}
+
+	async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+		this.disconnect(ws);
+		this.safeClose(ws, code === 1005 || code === 1006 ? 1000 : code, reason);
+	}
+
+	async webSocketError(ws: WebSocket): Promise<void> {
+		this.disconnect(ws);
+	}
+
+	private disconnect(ws: WebSocket): void {
+		const att = this.attachment(ws);
+		this.stats?.count("closes");
+		if (att) {
+			for (const address of Object.keys(att.docs)) this.dropDoc(ws, att, address, false);
+			this.chains.delete(att.id);
+			this.queued.delete(att.id);
+		}
+		this.stats?.flush();
+	}
+
+	private attachment(ws: WebSocket): Attachment | null {
+		return (ws.deserializeAttachment() as Attachment | null) ?? null;
+	}
+
+	private save(ws: WebSocket, att: Attachment): void {
+		try {
+			ws.serializeAttachment(att);
+		} catch (err) {
+			console.warn("relay: could not serialize attachment", err);
+		}
+	}
+
+	private send(ws: WebSocket, data: Uint8Array): void {
+		try {
+			ws.send(data);
+			this.stats?.count("msgs_out");
+		} catch {
+			// Socket already closing; its close handler cleans up.
+		}
+	}
+
+	private safeClose(ws: WebSocket, code: number, reason: string): void {
+		try {
+			ws.close(code, reason);
+		} catch {
+			// Already closed.
+		}
+	}
+
+	/** Every other socket that has authenticated `doc`. */
+	private *peers(doc: string, exceptId?: string): Generator<Peer> {
+		for (const ws of this.ctx.getWebSockets()) {
+			const att = this.attachment(ws);
+			if (!att || att.id === exceptId) continue;
+			for (const [address, auth] of Object.entries(att.docs)) {
+				if (documentNameOf(address) === doc) yield { ws, att, address, auth };
+			}
+		}
+	}
+
+	private async handle(ws: WebSocket, data: Uint8Array): Promise<void> {
+		let frame: Frame;
+		try {
+			frame = parseFrame(data);
+		} catch (err) {
+			console.warn("relay: malformed frame", err);
+			this.safeClose(ws, RESET.code, RESET.reason);
+			return;
+		}
+		if (frame.kind === "ping" || frame.kind === "pong") return;
+		if (frame.kind === "auth") {
+			await this.authenticate(ws, frame.address, frame.token);
+			return;
+		}
+		const att = this.attachment(ws);
+		if (!att) return;
+		if (!att.docs[frame.address]) {
+			this.enqueue(ws, att, frame.address, data);
+			return;
+		}
+		this.dispatch(ws, att, frame);
+	}
+
+	/** Holds frames that precede their document's Auth, bounded like Hocuspocus does. */
+	private enqueue(ws: WebSocket, att: Attachment, address: string, data: Uint8Array): void {
+		let perSocket = this.queued.get(att.id);
+		if (!perSocket) {
+			perSocket = new Map();
+			this.queued.set(att.id, perSocket);
+		}
+		let frames = 0;
+		let bytes = 0;
+		for (const list of perSocket.values()) {
+			frames += list.length;
+			for (const f of list) bytes += f.length;
+		}
+		if (frames + 1 > MAX_QUEUED_FRAMES || bytes + data.length > MAX_QUEUED_BYTES) {
+			this.safeClose(ws, RESET.code, RESET.reason);
+			return;
+		}
+		const list = perSocket.get(address) ?? [];
+		list.push(data);
+		perSocket.set(address, list);
+	}
+
+	private takeQueued(att: Attachment, address: string): Uint8Array[] {
+		const perSocket = this.queued.get(att.id);
+		const list = perSocket?.get(address) ?? [];
+		perSocket?.delete(address);
+		return list;
+	}
+
+	private async authenticate(ws: WebSocket, address: string, token: string): Promise<void> {
+		const doc = documentNameOf(address);
+		const ref = parseDocName(doc);
+		let readOnly: boolean | null = null;
+		try {
+			const claims = await verifyWsToken(token, this.env.TEAMSYNC_SECRET);
+			const att = this.attachment(ws);
+			if (ref && att && claims.ws === ref.workspaceId && claims.ws === att.ws) {
+				readOnly = claims.role === "viewer";
+			}
+		} catch {
+			readOnly = null;
+		}
+
+		// Re-read after the await: the attachment is the source of truth.
+		const att = this.attachment(ws);
+		if (!att) return;
+		if (readOnly === null) {
+			this.send(ws, encode.permissionDenied(address, "permission-denied"));
+			if (att.docs[address]) this.dropDoc(ws, att, address, true);
+			this.takeQueued(att, address);
+			return;
+		}
+		att.docs[address] = { ro: readOnly, aw: att.docs[address]?.aw ?? {} };
+		this.save(ws, att);
+		this.send(ws, encode.authenticated(address, readOnly));
+		this.sendPresence(ws, att, address);
+		for (const data of this.takeQueued(att, address)) {
+			const queuedFrame = parseFrame(data);
+			if (
+				queuedFrame.kind !== "auth" &&
+				queuedFrame.kind !== "ping" &&
+				queuedFrame.kind !== "pong"
+			) {
+				this.dispatch(ws, att, queuedFrame);
+			}
+		}
+	}
+
+	private dispatch(
+		ws: WebSocket,
+		att: Attachment,
+		frame: Exclude<Frame, { kind: "auth" | "ping" | "pong" }>,
+	) {
+		const { address } = frame;
+		const auth = att.docs[address];
+		if (!auth) return;
+		const doc = documentNameOf(address);
+		switch (frame.kind) {
+			case "sync":
+				this.handleSync(ws, att, address, auth, frame.step, frame.payload);
+				return;
+			case "awareness":
+				this.handleAwareness(ws, att, address, auth, frame.update);
+				return;
+			case "queryAwareness":
+				this.sendPresence(ws, att, address, true);
+				return;
+			case "stateless":
+				for (const peer of this.peers(doc, att.id)) {
+					this.send(peer.ws, encode.stateless(peer.address, frame.payload));
+				}
+				return;
+			case "close":
+				this.dropDoc(ws, att, address, true);
+				return;
+			default:
+				return;
+		}
+	}
+
+	private handleSync(
+		ws: WebSocket,
+		att: Attachment,
+		address: string,
+		auth: DocAuth,
+		step: SyncStep,
+		payload: Uint8Array,
+	): void {
+		const doc = documentNameOf(address);
+		if (step === SyncStep.Step1) {
+			// Same order as Hocuspocus' Connection path: our SyncStep1 (so the client sends what we
+			// lack, e.g. offline edits), then the SyncStep2 diff. Both as Sync(0), never SyncReply(4).
+			const { stateVector, diff } = this.store.syncReply(doc, payload);
+			this.send(ws, encode.syncStep1(address, stateVector));
+			this.send(ws, encode.syncStep2(address, diff));
+			return;
+		}
+		const empty = isEmptyUpdate(payload);
+		if (auth.ro) {
+			// Viewers: nothing is stored or relayed; only a no-op SyncStep2 counts as "saved".
+			this.send(ws, encode.syncStatus(address, step === SyncStep.Step2 && empty));
+			return;
+		}
+		if (!empty) {
+			try {
+				this.store.append(doc, payload);
+			} catch (err) {
+				console.warn("relay: rejected undecodable update", err);
+				this.send(ws, encode.syncStatus(address, false));
+				return;
+			}
+			for (const peer of this.peers(doc, att.id)) {
+				this.send(peer.ws, encode.update(peer.address, payload));
+			}
+		}
+		// The SQL write above is durable before this ack leaves (DO output gate).
+		this.send(ws, encode.syncStatus(address, true));
+	}
+
+	private handleAwareness(
+		ws: WebSocket,
+		att: Attachment,
+		address: string,
+		auth: DocAuth,
+		update: Uint8Array,
+	): void {
+		const doc = documentNameOf(address);
+		let entries: AwarenessEntry[];
+		try {
+			entries = decodeAwareness(update);
+		} catch {
+			return;
+		}
+		// A provider's own renewals carry exactly its own client; replies to QueryAwareness carry
+		// everyone it knows. So a single non-null entry claims ownership.
+		const only = entries.length === 1 ? entries[0] : undefined;
+		if (only && only.state !== "null" && !(String(only.clientId) in auth.aw)) {
+			auth.aw[String(only.clientId)] = only.clock;
+		}
+		const cache = this.awarenessCache(doc, att.id);
+		for (const entry of entries) {
+			const key = String(entry.clientId);
+			if (!(key in auth.aw)) continue;
+			if (entry.state === "null") {
+				delete auth.aw[key];
+				cache.delete(entry.clientId);
+			} else {
+				auth.aw[key] = entry.clock;
+				cache.set(entry.clientId, entry);
+			}
+		}
+		this.save(ws, att);
+		// Hocuspocus echoes awareness to every connection, the sender included; that echo is
+		// what keeps a lone client's socket from hitting its 30 s receive timeout.
+		this.send(ws, encode.awareness(address, update));
+		for (const peer of this.peers(doc, att.id)) {
+			this.send(peer.ws, encode.awareness(peer.address, update));
+		}
+	}
+
+	private awarenessCache(doc: string, socketId: string): Map<number, AwarenessEntry> {
+		let perDoc = this.awareness.get(doc);
+		if (!perDoc) {
+			perDoc = new Map();
+			this.awareness.set(doc, perDoc);
+		}
+		let cache = perDoc.get(socketId);
+		if (!cache) {
+			cache = new Map();
+			perDoc.set(socketId, cache);
+		}
+		return cache;
+	}
+
+	/**
+	 * Gives a (re)joining socket the presence of everyone else on the doc: cached entries are sent
+	 * directly; peers that own clients but have no cached entry (e.g. after hibernation) get a
+	 * QueryAwareness, and their reply is relayed like any awareness update.
+	 */
+	private sendPresence(ws: WebSocket, att: Attachment, address: string, includeSelf = false): void {
+		const doc = documentNameOf(address);
+		const entries: AwarenessEntry[] = [];
+		const perDoc = this.awareness.get(doc);
+		if (includeSelf) entries.push(...(perDoc?.get(att.id)?.values() ?? []));
+		for (const peer of this.peers(doc, att.id)) {
+			const cached = perDoc?.get(peer.att.id);
+			if (cached && cached.size > 0) entries.push(...cached.values());
+			else if (Object.keys(peer.auth.aw).length > 0) {
+				this.send(peer.ws, encode.queryAwareness(peer.address));
+			}
+		}
+		if (entries.length > 0) this.send(ws, encode.awareness(address, encodeAwareness(entries)));
+	}
+
+	/** Detaches one doc from a socket and tells the remaining peers its clients left. */
+	private dropDoc(ws: WebSocket, att: Attachment, address: string, persist: boolean): void {
+		const auth = att.docs[address];
+		if (!auth) return;
+		delete att.docs[address];
+		if (persist) this.save(ws, att);
+		const doc = documentNameOf(address);
+		this.awareness.get(doc)?.delete(att.id);
+		if (Object.keys(auth.aw).length === 0) return;
+		const removal = awarenessRemoval(auth.aw);
+		for (const peer of this.peers(doc, att.id)) {
+			this.send(peer.ws, encode.awareness(peer.address, removal));
+		}
+	}
+
+	// --- dev-only instrumentation (worker gates these on TEAMSYNC_DEBUG_STATS) ---
+
+	async debugStats(): Promise<Record<string, unknown>> {
+		const docs = this.ctx.storage.sql
+			.exec<{ doc: string; rows: number }>(
+				"SELECT doc, COUNT(*) AS rows FROM doc_updates GROUP BY doc",
+			)
+			.toArray();
+		const parts = this.ctx.storage.sql
+			.exec<{ doc: string; parts: number; bytes: number }>(
+				"SELECT doc, COUNT(*) AS parts, SUM(LENGTH(data)) AS bytes FROM doc_state GROUP BY doc",
+			)
+			.toArray();
+		return {
+			...(this.stats?.read() ?? {}),
+			sockets: this.ctx.getWebSockets().length,
+			tailRows: docs,
+			stateParts: parts,
+			databaseSize: this.ctx.storage.sql.databaseSize,
+		};
+	}
+
+	/** Drops every in-memory cache, as a hibernation wake would. */
+	async debugForget(): Promise<{ ok: true }> {
+		this.store.forget();
+		this.awareness.clear();
+		return { ok: true };
+	}
+
+	async debugReset(): Promise<{ ok: true }> {
+		this.stats?.reset();
+		return { ok: true };
+	}
+}

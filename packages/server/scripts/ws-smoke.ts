@@ -12,7 +12,9 @@ import { WebSocket } from "ws";
 import * as Y from "yjs";
 
 const BASE = process.env.TEAMSYNC_URL ?? "http://localhost:8787";
-const WS_URL = `${BASE.replace(/^http/, "ws")}${WS_PATH}`;
+// `?ws=` routes the socket to the workspace's relay object; the Node server ignores it.
+const wsUrl = (workspaceId: string) =>
+	`${BASE.replace(/^http/, "ws")}${WS_PATH}?ws=${encodeURIComponent(workspaceId)}`;
 const DEVICE = { name: "ws-smoke", platform: "macos" as const, vaultId: "ws-smoke" };
 const KEY = "smoke";
 
@@ -33,8 +35,8 @@ async function json<T>(path: string, body: unknown, token?: string): Promise<unk
 	return (await res.json()) as T;
 }
 
-async function connect(name: string, token: string) {
-	const socket = new HocuspocusProviderWebsocket({ url: WS_URL, WebSocketPolyfill: WebSocket });
+async function connect(url: string, name: string, token: string) {
+	const socket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: WebSocket });
 	const document = new Y.Doc();
 	const provider = new HocuspocusProvider({ websocketProvider: socket, name, token, document });
 	const synced = new Promise<void>((resolve, reject) => {
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
 	const name = docName({ workspaceId: workspace.id, kind: "index" });
 	const value = `smoke-${Date.now()}`;
 
-	const first = await connect(name, await mintToken());
+	const first = await connect(wsUrl(workspace.id), name, await mintToken());
 	console.log(`connected to ${name}`);
 	first.document.getMap("debug").set(KEY, value);
 	// Let the update reach the server and the debounced store flush.
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
 	// Wait past the store debounce + unload so the reconnect really reloads from the DB.
 	await sleep(3_000);
 
-	const second = await connect(name, await mintToken());
+	const second = await connect(wsUrl(workspace.id), name, await mintToken());
 	const readBack = second.document.getMap("debug").get(KEY);
 	second.provider.destroy();
 	second.socket.destroy();

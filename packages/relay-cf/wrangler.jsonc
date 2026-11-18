@@ -1,0 +1,22 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "teamsync-relay",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-11-01",
+	"durable_objects": {
+		"bindings": [
+			{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
+			{ "name": "RELAY", "class_name": "WorkspaceRelay" }
+		]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountsDO", "WorkspaceRelay"] }],
+	// Local-dev defaults only. A real deployment sets TEAMSYNC_SECRET with `wrangler secret put`
+	// and turns dev login and the debug stats endpoint off.
+	"vars": {
+		"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
+		"TEAMSYNC_DEV_OPEN_LOGIN": "1",
+		"TEAMSYNC_DEBUG_STATS": "1",
+		"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+	},
+	"observability": { "enabled": false }
+}
