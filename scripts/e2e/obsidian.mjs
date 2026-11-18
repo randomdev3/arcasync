@@ -321,11 +321,13 @@ export async function waitConnected(vault, { timeout = 20000 } = {}) {
 /**
  * Installs the plugin, turns off restricted mode, loads the plugin, points it at `serverUrl`, logs in as `name`,
  * connects, and turns on `autoConnect` so a relaunch reconnects with the stored session.
- * `role` and `sharedFolder` are written to `devLoginRole`/`sharedFolder` as given (plugin
- * settings added in P1-0; older plugin builds ignore them).
+ * `role` is written to `devLoginRole`. `sharedFolder` is a vault folder path (e.g. "Shared"),
+ * written as `{path, workspaceId: ""}` so the plugin binds it to the workspace it connects to;
+ * `null` unmaps. Leave either undefined to keep the vault's current setting.
  */
 export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
 	installPlugin(vault.path);
+	if (typeof sharedFolder === "string") sharedFolder = { path: sharedFolder, workspaceId: "" };
 	return vault.eval(
 		`
 		await app.plugins.loadManifests();

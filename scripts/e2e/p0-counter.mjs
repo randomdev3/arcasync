@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { connectPlugin, launchObsidian, prepareVaults, waitFor } from "./obsidian.mjs";
 import { restartServer, SkipError, startServer } from "./server.mjs";
 
-const COUNTER = `return app.plugins.plugins.teamsync?.counter?.ydoc?.getMap("debug").get("counter") ?? 0;`;
+const COUNTER = `return app.plugins.plugins.teamsync?.session?.indexDoc.getMap("debug").get("counter") ?? 0;`;
 const BUMP = `app.commands.executeCommandById("teamsync:debug-counter-increment"); return true;`;
 const NOTICES = `return [...document.querySelectorAll(".notice")].map((n) => n.textContent);`;
 

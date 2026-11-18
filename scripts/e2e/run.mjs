@@ -25,6 +25,8 @@ const { values: opts } = parseArgs({
 
 const VAULTS = ["alice", "bob", "carol"];
 const ROLES = { carol: "viewer" };
+/** Every vault maps this folder; each scenario works in `Shared/<name>/`. */
+const SHARED_FOLDER = "Shared";
 const CDP_PORT_BASE = Number(process.env.E2E_CDP_PORT ?? 9333);
 
 const dir = join(ROOT, "scripts", "e2e", opts.suite);
@@ -82,7 +84,12 @@ async function ensure(names) {
 			if (relaunched) await waitConnected(v);
 			continue;
 		}
-		const r = await connectPlugin(v, { serverUrl: server.url, name, role: ROLES[name] });
+		const r = await connectPlugin(v, {
+			serverUrl: server.url,
+			name,
+			role: ROLES[name],
+			sharedFolder: SHARED_FOLDER,
+		});
 		if (r.status !== "connected") throw new Error(`${name} did not connect: ${JSON.stringify(r)}`);
 		connected.add(name);
 	}
