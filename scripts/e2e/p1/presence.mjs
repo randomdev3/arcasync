@@ -25,6 +25,34 @@ const STATUS = `return document.querySelector(".teamsync-status-bar")?.textConte
 const USER_ID = "return app.plugins.plugins.teamsync.settings.user.id;";
 const HAS_FILE = "return !!app.vault.getAbstractFileByPath(args.path);";
 
+const IDLE = "return app.plugins.plugins.teamsync.session?.presence?.idle ?? null;";
+/** Counts this client's own index-awareness changes (renewals do not change the state). */
+const COUNT_OWN = `
+	const a = app.plugins.plugins.teamsync.session.awareness;
+	globalThis.__teamsyncOwnChanges?.off();
+	const c = { n: 0 };
+	const on = ({ added, updated, removed }) => {
+		if ([...added, ...updated, ...removed].includes(a.clientID)) c.n++;
+	};
+	a.on("change", on);
+	c.off = () => a.off("change", on);
+	globalThis.__teamsyncOwnChanges = c;
+	return true;
+`;
+const FOCUS_EXPLORER = `
+	const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
+	if (!leaf) throw new Error("no file explorer");
+	app.workspace.setActiveLeaf(leaf, { focus: true });
+	return app.workspace.activeLeaf === leaf;
+`;
+
+/** Real mouse moves through CDP (the page sees mousemove events). */
+async function nudge(v, count = 1) {
+	for (let i = 0; i < count; i++) {
+		await v.cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300 + i, y: 300 });
+	}
+}
+
 async function avatar(v, path, userId) {
 	return v.eval(AVATAR, { path, userId });
 }
@@ -67,6 +95,19 @@ export default {
 			});
 		}
 
+		// Harness windows get no input between scenarios; an idle vault would need up to a minute
+		// (the idle flip rate limit) to become active again.
+		for (const v of [alice, bob]) {
+			const t = Date.now();
+			await nudge(v);
+			await waitFor(async () => (await v.eval(IDLE)) === false, {
+				timeout: 65000,
+				interval: 500,
+				label: `${v.name} presence active`,
+			});
+			ctx.step(`${v.name} presence active (waited ${Date.now() - t} ms)`);
+		}
+
 		// 1. Both on x.md → each sees the other `here`.
 		await openFile(alice, X);
 		await openFile(bob, X);
@@ -89,6 +130,20 @@ export default {
 		);
 		const rect = await alice.eval(HEADER_RECT, { path: X });
 		const shotHere = await screenshot(alice, join(ctx.artifacts, "header-here.png"), rect);
+
+		// Traffic: input and focusing a non-note leaf publish nothing; a note switch publishes once.
+		await bob.eval(COUNT_OWN);
+		await nudge(bob, 50);
+		await bob.eval(FOCUS_EXPLORER);
+		await openFile(bob, X);
+		const quiet = await bob.eval("return globalThis.__teamsyncOwnChanges.n;");
+		assert.equal(quiet, 0, "own presence changes after input and sidebar focus");
+		await openFile(bob, Y);
+		await openFile(bob, X);
+		const switched = await bob.eval("return globalThis.__teamsyncOwnChanges.n;");
+		assert.equal(switched, 2, "own presence changes after two note switches");
+		await bob.eval("globalThis.__teamsyncOwnChanges.off(); return true;");
+		ctx.step("bob: 50 mouse moves + sidebar focus → 0 own presence changes; 2 note switches → 2");
 
 		// 5. Status bar counts users.
 		const status = await waitStatus(alice, /\b2 online\b/, "alice status bar 2 online");
@@ -126,15 +181,25 @@ export default {
 		});
 		ctx.step("bob reconnected: here again");
 
-		// Obsidian persists its own state (the vault's plugin trust) lazily; a SIGKILL soon after the
-		// plugin was first enabled loses it. A graceful restart first makes the crash below test
-		// only TeamSync.
-		await bob.relaunch();
+		// Quit → the clean close removes bob as well. It runs before the SIGKILL on purpose: Obsidian
+		// persists its own state (the vault's plugin trust) lazily, and a SIGKILL soon after the plugin
+		// was first enabled loses it, so the crash below then tests only TeamSync.
+		const tq = Date.now();
+		const quitGone = waitFor(async () => (await avatar(alice, X, bobId)) === null, {
+			timeout: 15000,
+			interval: 100,
+			label: "bob's avatar gone after quit",
+		}).then(() => Date.now() - tq);
+		await bob.quit();
+		const quitMs = await quitGone;
+		assert.ok(quitMs <= 10000, `avatar removed ${quitMs} ms after quit (bound 10000)`);
+		ctx.step(`bob quit: avatar gone after ${quitMs} ms`);
+		await bob.launch();
 		await waitConnected(bob);
 		await openFile(bob, X);
 		await waitAvatar(alice, X, bobId, (a) => a?.state === "here", {
 			timeout: 10000,
-			label: "bob here after a graceful restart",
+			label: "bob here after relaunch from quit",
 		});
 
 		// 4. SIGKILL → the relay's close-driven removal clears bob within 10 s.
