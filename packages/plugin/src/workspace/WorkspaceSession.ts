@@ -3,6 +3,7 @@ import { docName } from "@teamsync/shared";
 import type { App } from "obsidian";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
+import { startNoteDocs } from "../doc";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
 import { SelfWriteRegistry } from "./SelfWriteRegistry";
 import type { IDocManager, INavigator, IPresence } from "./types";
@@ -49,6 +50,7 @@ export class WorkspaceSession {
 	private doc: Y.Doc | null = null;
 	private docAwareness: Awareness | null = null;
 	private handle: OpenDocHandle | null = null;
+	private stopNoteDocs: (() => void) | null = null;
 
 	constructor(options: WorkspaceSessionOptions) {
 		this.app = options.app;
@@ -86,9 +88,12 @@ export class WorkspaceSession {
 		this.doc = doc;
 		this.docAwareness = awareness;
 		this.handle = this.connections.openDoc(this.indexName, doc, awareness);
+		this.stopNoteDocs = startNoteDocs(this);
 	}
 
 	stop(): void {
+		this.stopNoteDocs?.();
+		this.stopNoteDocs = null;
 		this.selfWrites.clear();
 		this.handle?.close();
 		this.handle = null;

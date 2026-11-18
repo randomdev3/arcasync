@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
 import { WorkspaceSession } from "../workspace/WorkspaceSession";
 
+// The note-doc layer needs a real vault and providers; it has its own tests.
+vi.mock("../doc", () => ({ startNoteDocs: () => () => {} }));
+
 function session() {
 	const close = vi.fn();
 	const openDoc = vi.fn(
