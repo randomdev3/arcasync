@@ -20,6 +20,8 @@ export interface DocManagerOptions {
 	warmDocs: number;
 	/** Debounce between a doc change and its write to disk while no editor is bound. */
 	flushDelayMs?: number;
+	/** How long a closed editor still owns the disk (its last save may be in flight). */
+	editorGraceMs?: number;
 	/** Opens a note doc; tests inject a fake. */
 	openNote?: (fileId: string, path: string, deps: NoteDocDeps) => Promise<NoteDoc>;
 }
@@ -36,9 +38,18 @@ interface Entry {
 	wake: (() => void) | null;
 	/** The note once opened, so closing need not wait a microtask. */
 	resolved: NoteDoc | null;
+	/** Editors bound to the note (split panes share one doc). */
+	editors: number;
+	/** Hashes of texts a bound editor held and may still be writing to disk; newest last. */
+	editorHashes: string[];
+	/** Runs out the editor's ownership of the disk after the last editor let go. */
+	graceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const RECONCILE_ATTEMPTS = 3;
+const EDITOR_HASHES = 8;
+/** Obsidian finishes the save it started for a closing editor well within this. */
+const EDITOR_GRACE_MS = 2000;
 
 /**
  * Refcounted, lazily attached note docs. `acquire` opens the doc (IndexedDB, then provider) and
@@ -102,14 +113,19 @@ export class DocManager implements IDocManager {
 		return this.entries.get(fileId)?.note ?? null;
 	}
 
-	/** Reconciles a note's disk file and doc; serialised per note. */
-	reconcile(note: NoteDoc): Promise<ReconcileResult> {
+	/**
+	 * Reconciles a note's disk file and doc; serialised per note. With `unlessBound` it defers
+	 * when an editor has bound the note by the time it runs (a flush queued just before the bind).
+	 */
+	reconcile(note: NoteDoc, { unlessBound = false } = {}): Promise<ReconcileResult> {
 		const entry = this.entries.get(note.fileId);
 		const run = async (): Promise<ReconcileResult> => {
+			if (unlessBound && note.editorBound) return { action: "defer" };
 			let result: ReconcileResult = { action: "missing" };
 			for (let i = 0; i < RECONCILE_ATTEMPTS && note.state !== "closed"; i++) {
 				const path = this.options.pathOf(note.fileId) ?? note.path;
 				note.path = path;
+				if (entry) await this.adoptEditorSave(note, entry);
 				result = await reconcileNote(note, path, this.options.reconcile);
 				if (!result.retry) break;
 			}
@@ -121,13 +137,61 @@ export class DocManager implements IDocManager {
 		return result;
 	}
 
-	/** An open editor saved its buffer; if the disk now equals the doc, remember that. */
+	/**
+	 * An editor shows the note and owns its buffer and disk saves from now on (P1-4). `attach`
+	 * runs once no reconcile of the note is running (none can start while it runs) and returns
+	 * false when the editor gave up meanwhile; only then is the editor counted as bound.
+	 */
+	editorAttached(handle: NoteDocHandle, attach: () => boolean): Promise<boolean> {
+		const entry = this.entries.get(handle.fileId);
+		const note = entry?.resolved;
+		if (!entry || !note || note !== handle) return Promise.resolve(false);
+		const run = () => {
+			if (note.state === "closed" || !attach()) return false;
+			entry.editors++;
+			note.editorBound = true;
+			if (entry.flushTimer) clearTimeout(entry.flushTimer);
+			entry.flushTimer = null;
+			if (entry.graceTimer) clearTimeout(entry.graceTimer);
+			entry.graceTimer = null;
+			return true;
+		};
+		const result = entry.lock.then(run, run);
+		entry.lock = result.catch(() => undefined);
+		return result;
+	}
+
+	/**
+	 * An editor bound by `editorAttached` let go of the note. Its buffer mirrored the doc, so the
+	 * text it may still save is remembered as synced, and the editor keeps owning the disk for a
+	 * short grace period: a save Obsidian started before the switch lands as an editor save, not
+	 * as an offline edit. After that, doc changes reach the disk again.
+	 */
+	editorDetached(handle: NoteDocHandle): void {
+		const entry = this.entries.get(handle.fileId);
+		const note = entry?.resolved;
+		if (!entry || !note || note !== handle || entry.editors === 0) return;
+		this.rememberEditorText(entry, note.ytext.toString());
+		entry.editors--;
+		if (entry.editors > 0) return;
+		if (entry.graceTimer) clearTimeout(entry.graceTimer);
+		entry.graceTimer = setTimeout(() => {
+			entry.graceTimer = null;
+			if (entry.editors > 0 || note.state === "closed") return;
+			note.editorBound = false;
+			this.scheduleFlush(entry, note);
+		}, this.options.editorGraceMs ?? EDITOR_GRACE_MS);
+	}
+
+	/** An open editor saved its buffer, a mirror of the doc: remember it as synced text. */
 	noteEditorSave(note: NoteDoc): Promise<void> {
 		const run = async () => {
 			const raw = await this.options.reconcile.writer.read(note.path);
 			if (raw === null) return;
 			const text = diskText(raw);
-			if (text === note.ytext.toString()) await note.setLastSyncedHash(await textHash(text));
+			const hash = await textHash(text);
+			if (entry) remember(entry, hash);
+			if (text === note.ytext.toString()) await note.setLastSyncedHash(hash);
 		};
 		const entry = this.entries.get(note.fileId);
 		if (!entry) return run();
@@ -155,6 +219,9 @@ export class DocManager implements IDocManager {
 			evicting: false,
 			wake: null,
 			resolved: null,
+			editors: 0,
+			editorHashes: [],
+			graceTimer: null,
 		};
 		entry.note = openNote(fileId, path, this.options.note).then((note) => {
 			entry.resolved = note;
@@ -187,7 +254,8 @@ export class DocManager implements IDocManager {
 		entry.flushTimer = setTimeout(() => {
 			entry.flushTimer = null;
 			if (note.state !== "ready" || note.editorBound) return;
-			this.reconcile(note).catch((error) =>
+			// An editor may bind while this waits for the note's lock; it owns the disk then.
+			this.reconcile(note, { unlessBound: true }).catch((error) =>
 				console.error(`[TeamSync] writing ${note.path} failed`, error),
 			);
 		}, this.options.flushDelayMs ?? 1000);
@@ -254,6 +322,8 @@ export class DocManager implements IDocManager {
 	private closeEntry(fileId: string, entry: Entry): void {
 		if (entry.flushTimer) clearTimeout(entry.flushTimer);
 		entry.flushTimer = null;
+		if (entry.graceTimer) clearTimeout(entry.graceTimer);
+		entry.graceTimer = null;
 		this.unwarm(fileId);
 		const close = (note: NoteDoc) => {
 			for (const fn of entry.dispose) fn();
@@ -265,8 +335,38 @@ export class DocManager implements IDocManager {
 		else entry.note.then(close, () => undefined);
 	}
 
+	/** Hashed on the entry's lock, so a reconcile queued after this call sees it. */
+	private rememberEditorText(entry: Entry, text: string): void {
+		const run = async () => remember(entry, await textHash(text));
+		entry.lock = entry.lock.then(run, run).catch(() => undefined);
+	}
+
+	/**
+	 * A disk text a bound editor wrote is a snapshot of the doc, so the doc's later changes win
+	 * over it: record it as synced before reconciling, or a save that lands after the editor
+	 * let go would look like an offline edit (a local copy, or a revert of newer remote text).
+	 */
+	private async adoptEditorSave(note: NoteDoc, entry: Entry): Promise<void> {
+		if (entry.editorHashes.length === 0) return;
+		const raw = await this.options.reconcile.writer.read(note.path);
+		if (raw === null) return;
+		const hash = await textHash(diskText(raw));
+		if (entry.editorHashes.includes(hash) && (await note.getLastSyncedHash()) !== hash) {
+			await note.setLastSyncedHash(hash);
+		}
+		// Past the grace period every late editor save has landed; a later match is a real edit.
+		if (entry.editors === 0 && !entry.graceTimer) entry.editorHashes.length = 0;
+	}
+
 	private unwarm(fileId: string): void {
 		const i = this.warm.indexOf(fileId);
 		if (i >= 0) this.warm.splice(i, 1);
 	}
+}
+
+function remember(entry: Entry, hash: string): void {
+	const i = entry.editorHashes.indexOf(hash);
+	if (i >= 0) entry.editorHashes.splice(i, 1);
+	entry.editorHashes.push(hash);
+	if (entry.editorHashes.length > EDITOR_HASHES) entry.editorHashes.shift();
 }

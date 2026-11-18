@@ -5,6 +5,7 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { startNoteDocs } from "../doc";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
+import { startPresence } from "../presence";
 import { DiskWatcher } from "./DiskWatcher";
 import { type IndexListener, IndexStore } from "./IndexStore";
 import { LocalStorageKnown, ObsidianLocalFiles } from "./LocalFiles";
@@ -132,9 +133,9 @@ export class WorkspaceSession {
 		return this.reconciler?.idle() ?? Promise.resolve();
 	}
 
-	/** Clients present on the index doc (this one included); 0 while stopped. */
+	/** Users present on the index doc (this one included); 0 while stopped. */
 	get online(): number {
-		return this.docAwareness?.getStates().size ?? 0;
+		return this.presence?.users().size ?? this.docAwareness?.getStates().size ?? 0;
 	}
 
 	/** Fires when `online` may have changed; survives stop/start. Returns unsubscribe. */
@@ -163,6 +164,8 @@ export class WorkspaceSession {
 		);
 		if (this.root !== null) this.syncFolder(this.root, store, this.handle.provider);
 		this.teardown.push(startNoteDocs(this));
+		this.teardown.push(startPresence(this));
+		this.emitOnline();
 	}
 
 	private syncFolder(root: string, index: IndexStore, provider: HocuspocusProvider): void {

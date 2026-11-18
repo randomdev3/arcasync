@@ -20,8 +20,12 @@ export interface NoteDocHandle {
 	 */
 	readonly awareness: Awareness;
 	readonly state: NoteDocState;
+	/** The relay granted this user read-only access (a viewer). */
+	readonly readonly: boolean;
 	/** Local persistence loaded AND (provider synced OR offline with local data). */
 	whenReady(): Promise<void>;
+	/** Runs once when the note is closed; returns unsubscribe. */
+	onClose(listener: () => void): () => void;
 }
 
 /** Refcounted, lazily attached note docs (P1-3). */
@@ -30,6 +34,13 @@ export interface IDocManager {
 	release(handle: NoteDocHandle): void;
 	/** Docs whose provider is currently attached (in use plus warm LRU). */
 	attachedCount(): number;
+	/**
+	 * An acquired note gets an editor (P1-4): `attach` runs with no reconcile in flight and
+	 * returns whether the editor still wants it. Resolves true when the editor counts as bound.
+	 */
+	editorAttached(handle: NoteDocHandle, attach: () => boolean): Promise<boolean>;
+	/** The editor bound by `editorAttached` let go (its buffer mirrored the doc until now). */
+	editorDetached(handle: NoteDocHandle): void;
 }
 
 /** Workspace presence read from the index-doc awareness (P1-5). */
