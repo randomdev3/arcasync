@@ -4,6 +4,11 @@ import type { App } from "obsidian";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
+import { DiskWatcher } from "./DiskWatcher";
+import { type IndexListener, IndexStore } from "./IndexStore";
+import { LocalStorageKnown, ObsidianLocalFiles } from "./LocalFiles";
+import { toVault, toWs } from "./paths";
+import { Reconciler } from "./Reconciler";
 import { SelfWriteRegistry } from "./SelfWriteRegistry";
 import type { IDocManager, INavigator, IPresence } from "./types";
 
@@ -30,7 +35,11 @@ export interface WorkspaceSessionOptions {
  *
  * Lifetime: `start()` creates a fresh index Y.Doc and Awareness and attaches them; `stop()`
  * detaches and destroys both (the provider destroys the awareness). Anything holding
- * `indexDoc` or `awareness` must drop it on `stop()` and re-read it after `start()`.
+ * `indexDoc`, `awareness` or `index` must drop it on `stop()` and re-read it after `start()`;
+ * the `on*` subscriptions survive a restart.
+ *
+ * With a mapped `root`, `start()` also keeps the folder's notes and the index `files` map in
+ * step (DiskWatcher → Reconciler → IndexStore, and back on remote changes).
  */
 export class WorkspaceSession {
 	readonly app: App;
@@ -49,6 +58,15 @@ export class WorkspaceSession {
 	private doc: Y.Doc | null = null;
 	private docAwareness: Awareness | null = null;
 	private handle: OpenDocHandle | null = null;
+	private store: IndexStore | null = null;
+	private reconciler: Reconciler | null = null;
+	private teardown: (() => void)[] = [];
+	private readonly indexListeners = new Set<IndexListener>();
+	private readonly modifyListeners = new Set<(vaultPath: string) => void>();
+	private readonly onlineListeners = new Set<() => void>();
+	private readonly emitOnline = () => {
+		for (const listener of this.onlineListeners) listener();
+	};
 
 	constructor(options: WorkspaceSessionOptions) {
 		this.app = options.app;
@@ -79,6 +97,51 @@ export class WorkspaceSession {
 		return this.handle.provider;
 	}
 
+	/** The index `files` map; null while stopped. */
+	get index(): IndexStore | null {
+		return this.store;
+	}
+
+	/** File id of a synced note at `vaultPath`, or null. */
+	fileIdOf(vaultPath: string): string | null {
+		const ws = this.root === null ? null : toWs(this.root, vaultPath);
+		return (ws && this.store?.get(ws)?.id) ?? null;
+	}
+
+	/** Vault path of the note with `fileId`, or null when it is not indexed. */
+	vaultPathOf(fileId: string): string | null {
+		const ws = this.store?.pathsOf(fileId)[0];
+		return ws && this.root !== null ? toVault(this.root, ws) : null;
+	}
+
+	/** Index `files` deltas, local and remote; survives stop/start. Returns unsubscribe. */
+	onIndexChange(listener: IndexListener): () => void {
+		this.indexListeners.add(listener);
+		return () => this.indexListeners.delete(listener);
+	}
+
+	/** User edits (not TeamSync's own writes) to synced notes, by vault path. */
+	onDiskModify(listener: (vaultPath: string) => void): () => void {
+		this.modifyListeners.add(listener);
+		return () => this.modifyListeners.delete(listener);
+	}
+
+	/** Resolves once queued index ↔ disk work has finished (tests, shutdown). */
+	settled(): Promise<void> {
+		return this.reconciler?.idle() ?? Promise.resolve();
+	}
+
+	/** Clients present on the index doc (this one included); 0 while stopped. */
+	get online(): number {
+		return this.docAwareness?.getStates().size ?? 0;
+	}
+
+	/** Fires when `online` may have changed; survives stop/start. Returns unsubscribe. */
+	onOnlineChange(listener: () => void): () => void {
+		this.onlineListeners.add(listener);
+		return () => this.onlineListeners.delete(listener);
+	}
+
 	start(): void {
 		if (this.handle) return;
 		const doc = new Y.Doc();
@@ -86,15 +149,67 @@ export class WorkspaceSession {
 		this.doc = doc;
 		this.docAwareness = awareness;
 		this.handle = this.connections.openDoc(this.indexName, doc, awareness);
+		awareness.on("change", this.emitOnline);
+		this.emitOnline();
+
+		const store = new IndexStore(doc);
+		this.store = store;
+		this.teardown.push(
+			store.observe((delta, local) => {
+				for (const listener of this.indexListeners) listener(delta, local);
+				if (!local) void this.reconciler?.applyRemote(delta);
+			}),
+		);
+		if (this.root !== null) this.syncFolder(this.root, store, this.handle.provider);
+	}
+
+	private syncFolder(root: string, index: IndexStore, provider: HocuspocusProvider): void {
+		const reconciler = new Reconciler({
+			index,
+			files: new ObsidianLocalFiles(this.app, root, this.selfWrites),
+			known: new LocalStorageKnown(`teamsync:${this.vaultId}:${this.workspaceId}:known`, root),
+			userId: this.user.id,
+			isSynced: () => provider.synced,
+			isAcked: () => !provider.hasUnsyncedChanges,
+		});
+		this.reconciler = reconciler;
+		const watcher = new DiskWatcher(this.app.vault, root, this.selfWrites, {
+			create: (path) => void reconciler.localCreate(path),
+			delete: (path) => void reconciler.localDelete(path),
+			rename: (from, to) => void reconciler.localRename(from, to),
+			modify: (path) => {
+				const vaultPath = toVault(root, path);
+				if (vaultPath) for (const listener of this.modifyListeners) listener(vaultPath);
+			},
+		});
+		watcher.start();
+		const onSynced = () => void reconciler.run();
+		const onUnsynced = ({ number }: { number: number }) => {
+			if (number === 0) void reconciler.checkpoint();
+		};
+		provider.on("synced", onSynced);
+		provider.on("unsyncedChanges", onUnsynced);
+		this.teardown.push(() => {
+			provider.off("synced", onSynced);
+			provider.off("unsyncedChanges", onUnsynced);
+			watcher.stop();
+			reconciler.dispose();
+		});
+		if (provider.synced) onSynced();
 	}
 
 	stop(): void {
+		for (const fn of this.teardown.splice(0)) fn();
+		this.reconciler = null;
+		this.store = null;
 		this.selfWrites.clear();
+		this.docAwareness?.off("change", this.emitOnline);
 		this.handle?.close();
 		this.handle = null;
 		this.docAwareness?.destroy();
 		this.docAwareness = null;
 		this.doc?.destroy();
 		this.doc = null;
+		this.emitOnline();
 	}
 }

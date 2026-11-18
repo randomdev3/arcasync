@@ -1,6 +1,6 @@
 import type { DeviceInfo, ServerInfo } from "@teamsync/shared";
 import { WS_PATH } from "@teamsync/shared";
-import { Notice, Platform, Plugin } from "obsidian";
+import { Notice, normalizePath, Platform, Plugin } from "obsidian";
 import { CounterDebug } from "./debug/CounterDebug";
 import { editorExtensions } from "./editor";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
@@ -14,6 +14,7 @@ import {
 } from "./settings";
 import { SecretStore } from "./storage/SecretStore";
 import type { SettingsViewState } from "./ui/components/settingsProps";
+import { FolderSuggest } from "./ui/FolderSuggest";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { WorkspaceSession } from "./workspace/WorkspaceSession";
@@ -49,6 +50,7 @@ export default class TeamSyncPlugin extends Plugin {
 	private connections: ConnectionManager | null = null;
 	private counter: CounterDebug | null = null;
 	private unsubscribeConnection: (() => void) | null = null;
+	private unsubscribeOnline: (() => void) | null = null;
 	/** The connected workspace; null while disconnected. */
 	session: WorkspaceSession | null = null;
 
@@ -130,6 +132,8 @@ export default class TeamSyncPlugin extends Plugin {
 
 		teardownStep("counter.close", () => this.counter?.close());
 		this.counter = null;
+		teardownStep("online.unsubscribe", () => this.unsubscribeOnline?.());
+		this.unsubscribeOnline = null;
 		teardownStep("session.stop", () => this.session?.stop());
 		this.session = null;
 		teardownStep("connection.unsubscribe", () => this.unsubscribeConnection?.());
@@ -169,6 +173,53 @@ export default class TeamSyncPlugin extends Plugin {
 		this.notifyView();
 	}
 
+	/** Maps (or with `""` unmaps) the shared folder; a live connection restarts on it. */
+	async setSharedFolder(value: string): Promise<void> {
+		const trimmed = value.trim();
+		const path = trimmed ? normalizePath(trimmed) : "";
+		const current = this.settings.sharedFolder;
+		if ((current?.path ?? "") === path) return;
+		const sharedFolder =
+			path && path !== "/" ? { path, workspaceId: this.settings.workspaceId } : null;
+		await this.updateSettings({ sharedFolder });
+		await this.reconnectIfConnected();
+	}
+
+	/** Selects the workspace the shared folder syncs with; a live connection restarts on it. */
+	async setWorkspace(workspaceId: string): Promise<void> {
+		if (workspaceId === this.settings.workspaceId) return;
+		const folder = this.settings.sharedFolder;
+		await this.updateSettings({
+			workspaceId,
+			sharedFolder: folder ? { ...folder, workspaceId } : null,
+		});
+		await this.reconnectIfConnected();
+	}
+
+	/** Re-reads `GET /api/workspaces` for the workspace select; silent when signed out. */
+	async refreshWorkspaces(): Promise<void> {
+		if (!this.secrets.get()) return;
+		try {
+			const workspaces = await this.api.workspaces();
+			await this.updateSettings({ workspaces });
+		} catch (error) {
+			console.warn("[TeamSync] could not list workspaces", error);
+		}
+	}
+
+	attachFolderSuggest(input: HTMLInputElement): () => void {
+		const suggest = new FolderSuggest(this.app, input, (path) => {
+			void this.setSharedFolder(path);
+		});
+		return () => suggest.close();
+	}
+
+	private async reconnectIfConnected(): Promise<void> {
+		if (!this.connections) return;
+		this.disconnect();
+		await this.connect();
+	}
+
 	async setServerUrl(value: string): Promise<void> {
 		const serverUrl = value.trim().replace(/\/+$/, "");
 		if (serverUrl === this.settings.serverUrl) return;
@@ -200,6 +251,9 @@ export default class TeamSyncPlugin extends Plugin {
 			statusMessage: this.connection.message ?? null,
 			signedInAs: this.me?.user.name ?? this.settings.user?.name ?? null,
 			workspaceName: workspace?.name ?? null,
+			workspaces: this.settings.workspaces.map((w) => ({ id: w.id, name: w.name })),
+			workspaceId: this.settings.workspaceId,
+			sharedFolderPath: this.settings.sharedFolder?.path ?? "",
 			busy: this.busy,
 		};
 	}
@@ -330,6 +384,7 @@ export default class TeamSyncPlugin extends Plugin {
 			vaultId: this.secrets.vaultId,
 		});
 		this.session = session;
+		this.unsubscribeOnline = session.onOnlineChange(() => this.renderStatusBar());
 		session.start();
 		this.counter = new CounterDebug(session.indexDoc);
 	}
@@ -337,6 +392,8 @@ export default class TeamSyncPlugin extends Plugin {
 	disconnect(): void {
 		this.counter?.close();
 		this.counter = null;
+		this.unsubscribeOnline?.();
+		this.unsubscribeOnline = null;
 		this.session?.stop();
 		this.session = null;
 		this.unsubscribeConnection?.();
@@ -356,12 +413,19 @@ export default class TeamSyncPlugin extends Plugin {
 
 	private setConnectionState(state: ConnectionState): void {
 		this.connection = state;
-		this.statusBar?.update({
-			status: state.status,
-			message: state.message ?? null,
-			userName: this.me?.user.name ?? this.settings.user?.name ?? null,
-		});
+		this.renderStatusBar();
 		this.notifyView();
+	}
+
+	private renderStatusBar(): void {
+		const workspaceId = this.session?.workspaceId ?? this.settings.workspaceId;
+		this.statusBar?.update({
+			status: this.connection.status,
+			message: this.connection.message ?? null,
+			userName: this.me?.user.name ?? this.settings.user?.name ?? null,
+			workspaceName: this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? null,
+			online: this.session?.online ?? 0,
+		});
 	}
 
 	private deviceInfo(): DeviceInfo {

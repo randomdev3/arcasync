@@ -25,6 +25,7 @@ export class TeamSyncSettingsTab extends PluginSettingTab {
 		this.unsubscribe = this.plugin.onViewChange(() => this.mounted?.set(this.props()));
 		// The server's feature flags decide whether the dev-login field renders.
 		void this.plugin.refreshServerInfo();
+		void this.plugin.refreshWorkspaces();
 	}
 
 	hide(): void {
@@ -49,6 +50,13 @@ export class TeamSyncSettingsTab extends PluginSettingTab {
 			onDevLoginNameChange: (value) => {
 				void this.plugin.updateSettings({ devLoginName: value });
 			},
+			onSharedFolderChange: (path) => {
+				void this.plugin.setSharedFolder(path);
+			},
+			onWorkspaceChange: (workspaceId) => {
+				void this.plugin.setWorkspace(workspaceId);
+			},
+			onFolderInputMount: (input) => this.plugin.attachFolderSuggest(input),
 			onConnect: () => {
 				void this.plugin.connect();
 			},
