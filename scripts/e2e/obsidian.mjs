@@ -297,14 +297,25 @@ export async function launchObsidian(vaultDirs, { port = CDP_PORT_BASE } = {}) {
 }
 
 /** Waits until the plugin reports `connected`, e.g. after a relaunch with `autoConnect`. */
-export function waitConnected(vault, { timeout = 20000 } = {}) {
-	return waitFor(
-		() =>
-			vault.eval(
-				`return app.plugins.plugins.teamsync?.connection?.status === "connected" ? true : null;`,
-			),
-		{ timeout, label: `${vault.name} connected` },
-	);
+export async function waitConnected(vault, { timeout = 20000 } = {}) {
+	let last = null;
+	try {
+		return await waitFor(
+			async () => {
+				last = await vault.eval(
+					`const p = app.plugins.plugins.teamsync;
+					return p ? { status: p.connection?.status ?? null, message: p.connection?.message ?? null,
+						autoConnect: p.settings?.autoConnect, hasSession: !!p.secrets?.get?.() } : { plugin: "not loaded" };`,
+				);
+				return last?.status === "connected";
+			},
+			{ timeout, label: `${vault.name} connected` },
+		);
+	} catch {
+		throw new Error(
+			`timed out waiting for ${vault.name} connected (last state: ${JSON.stringify(last)})`,
+		);
+	}
 }
 
 /**
