@@ -1,5 +1,12 @@
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { SessionResponse, WS_PATH, WsTokenResponse } from "@teamsync/shared";
+import {
+	createKeepaliveWebSocket,
+	installPresencePolicy,
+	SessionResponse,
+	type WebSocketClass,
+	WS_PATH,
+	WsTokenResponse,
+} from "@teamsync/shared";
 import { WebSocket } from "ws";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
@@ -56,14 +63,45 @@ export interface ClientOptions {
 	renewAwareness?: boolean;
 	/** Provider receive timeout before it force-reconnects (Hocuspocus default 30 s). */
 	messageReconnectTimeout?: number;
+	/** Provider batch window (the plugin uses `FLUSH_DELAY_MS`). */
+	flushDelay?: number;
+	/** Wrap the socket with the shared text keepalive, pinging this often. */
+	keepaliveMs?: number;
+	/** Install the shared presence policy on awareness docs with this renewal interval. */
+	presenceRenewalMs?: number;
+	/** Presence policy tick, for time-scaled measurements (default from the policy). */
+	presenceCheckMs?: number;
+}
+
+export interface DocOptions {
+	/** Overrides `ClientOptions.awareness` for this doc. */
+	awareness?: boolean;
 }
 
 /** One multiplexed socket, like the plugin's ConnectionManager, carrying any number of docs. */
 export function client(base: string, workspaceId: string, options: ClientOptions = {}) {
 	let opens = 0;
+	let textFramesSent = 0;
+	const rawSockets: WebSocket[] = [];
+	/** The `ws` sockets underneath (for `terminate()`), counting text frames (keepalive pings). */
+	class RawWebSocket extends WebSocket {
+		constructor(address: string | URL, protocols?: string | string[]) {
+			super(address, protocols);
+			rawSockets.push(this);
+		}
+
+		override send(data: unknown, ...rest: unknown[]): void {
+			if (typeof data === "string") textFramesSent += 1;
+			(super.send as (...args: unknown[]) => void)(data, ...rest);
+		}
+	}
 	const socket = new HocuspocusProviderWebsocket({
 		url: `${base.replace(/^http/, "ws")}${WS_PATH}?ws=${workspaceId}`,
-		WebSocketPolyfill: WebSocket,
+		WebSocketPolyfill: options.keepaliveMs
+			? createKeepaliveWebSocket(RawWebSocket as unknown as WebSocketClass, {
+					intervalMs: options.keepaliveMs,
+				})
+			: RawWebSocket,
 		messageReconnectTimeout: options.messageReconnectTimeout ?? 30_000,
 		onOpen: () => {
 			opens += 1;
@@ -71,17 +109,12 @@ export function client(base: string, workspaceId: string, options: ClientOptions
 	});
 	const providers: HocuspocusProvider[] = [];
 
-	const open = async (name: string, token: () => Promise<string>) => {
+	const open = async (name: string, token: () => Promise<string>, doc: DocOptions = {}) => {
 		const document = new Y.Doc();
 		let awareness: Awareness | null = null;
-		if (options.awareness) {
+		if (doc.awareness ?? options.awareness) {
 			awareness = new Awareness(document);
-			if (options.renewAwareness === false) {
-				clearInterval(
-					(awareness as unknown as { _checkInterval: ReturnType<typeof setInterval> })
-						._checkInterval,
-				);
-			}
+			if (options.renewAwareness === false) clearInterval(awareness._checkInterval);
 		}
 		const provider = new HocuspocusProvider({
 			websocketProvider: socket,
@@ -89,6 +122,7 @@ export function client(base: string, workspaceId: string, options: ClientOptions
 			document,
 			awareness,
 			token,
+			flushDelay: options.flushDelay ?? false,
 		});
 		const synced = new Promise<void>((resolve, reject) => {
 			provider.on("synced", () => resolve());
@@ -98,6 +132,14 @@ export function client(base: string, workspaceId: string, options: ClientOptions
 		});
 		provider.attach();
 		providers.push(provider);
+		if (awareness && options.presenceRenewalMs) {
+			installPresencePolicy(awareness, {
+				activeRenewMs: options.presenceRenewalMs,
+				idleRenewMs: options.presenceRenewalMs,
+				isIdle: () => false,
+				checkIntervalMs: options.presenceCheckMs,
+			});
+		}
 		await synced;
 		return { provider, document, awareness };
 	};
@@ -108,6 +150,11 @@ export function client(base: string, workspaceId: string, options: ClientOptions
 		get opens() {
 			return opens;
 		},
+		/** Text frames sent on the raw sockets: keepalive pings. */
+		get pings() {
+			return textFramesSent;
+		},
+		rawSockets,
 		destroy() {
 			for (const p of providers) p.destroy();
 			socket.destroy();
@@ -126,6 +173,11 @@ export interface RelayStats {
 	awake_ms_est: number;
 	sockets: number;
 	databaseSize: number;
+}
+
+export async function resetStats(base: string, workspaceId: string): Promise<void> {
+	const res = await fetch(`${base}/api/debug/reset?ws=${workspaceId}`, { method: "POST" });
+	if (!res.ok) throw new Error(`debug reset -> ${res.status}`);
 }
 
 export async function stats(base: string, workspaceId: string): Promise<RelayStats> {

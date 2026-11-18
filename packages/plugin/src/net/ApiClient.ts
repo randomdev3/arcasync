@@ -5,11 +5,12 @@ import {
 	MeResponse,
 	ServerInfo,
 	SessionResponse,
-	WorkspaceSummary,
+	type WorkspaceSummary,
+	WorkspacesResponse,
 	WsTokenResponse,
 } from "@teamsync/shared";
 import { type RequestUrlResponse, requestUrl } from "obsidian";
-import { z } from "zod";
+import type { z } from "zod";
 
 /** The server answered, but with an error status. */
 export class ApiRequestError extends Error {
@@ -81,8 +82,9 @@ export class ApiClient {
 		});
 	}
 
-	workspaces(): Promise<WorkspaceSummary[]> {
-		return this.request("/workspaces", { schema: z.array(WorkspaceSummary) });
+	async workspaces(): Promise<WorkspaceSummary[]> {
+		const response = await this.request("/workspaces", { schema: WorkspacesResponse });
+		return response.workspaces;
 	}
 
 	private async request<T>(pathname: string, options: RequestOptions<T>): Promise<T> {
