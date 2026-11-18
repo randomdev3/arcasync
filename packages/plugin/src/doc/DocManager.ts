@@ -1,4 +1,5 @@
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
+import { diskText, textHash } from "./diskText";
 import {
 	DISK_ORIGIN,
 	ENROLL_ORIGIN,
@@ -33,6 +34,8 @@ interface Entry {
 	evicting: boolean;
 	/** Re-checks a waiting eviction (it stops once the doc is acquired again). */
 	wake: (() => void) | null;
+	/** The note once opened, so closing need not wait a microtask. */
+	resolved: NoteDoc | null;
 }
 
 const RECONCILE_ATTEMPTS = 3;
@@ -118,6 +121,21 @@ export class DocManager implements IDocManager {
 		return result;
 	}
 
+	/** An open editor saved its buffer; if the disk now equals the doc, remember that. */
+	noteEditorSave(note: NoteDoc): Promise<void> {
+		const run = async () => {
+			const raw = await this.options.reconcile.writer.read(note.path);
+			if (raw === null) return;
+			const text = diskText(raw);
+			if (text === note.ytext.toString()) await note.setLastSyncedHash(await textHash(text));
+		};
+		const entry = this.entries.get(note.fileId);
+		if (!entry) return run();
+		const result = entry.lock.then(run, run);
+		entry.lock = result.catch(() => undefined);
+		return result;
+	}
+
 	/** Detaches everything now. Unacked changes stay in IndexedDB and sync on the next attach. */
 	destroy(): void {
 		this.destroyed = true;
@@ -136,8 +154,10 @@ export class DocManager implements IDocManager {
 			dispose: [],
 			evicting: false,
 			wake: null,
+			resolved: null,
 		};
 		entry.note = openNote(fileId, path, this.options.note).then((note) => {
+			entry.resolved = note;
 			if (this.entries.get(fileId) !== entry) {
 				note.close();
 				throw new Error(`note ${fileId} was closed while opening`);
@@ -191,6 +211,13 @@ export class DocManager implements IDocManager {
 		await entry.lock;
 		await this.untilAcked(note, entry);
 		if (!entry.evicting || entry.refs > 0 || this.entries.get(fileId) !== entry) return;
+		if (entry.flushTimer) {
+			// A remote change arrived while waiting: write it before detaching.
+			clearTimeout(entry.flushTimer);
+			entry.flushTimer = null;
+			await this.reconcile(note).catch(() => undefined);
+			if (!entry.evicting || entry.refs > 0 || this.entries.get(fileId) !== entry) return;
+		}
 		this.entries.delete(fileId);
 		this.closeEntry(fileId, entry);
 	}
@@ -228,14 +255,14 @@ export class DocManager implements IDocManager {
 		if (entry.flushTimer) clearTimeout(entry.flushTimer);
 		entry.flushTimer = null;
 		this.unwarm(fileId);
-		entry.note.then(
-			(note) => {
-				for (const fn of entry.dispose) fn();
-				entry.dispose.length = 0;
-				note.close();
-			},
-			() => undefined,
-		);
+		const close = (note: NoteDoc) => {
+			for (const fn of entry.dispose) fn();
+			entry.dispose.length = 0;
+			note.close();
+		};
+		// Synchronously when possible: the session stops its notes before the socket goes away.
+		if (entry.resolved) close(entry.resolved);
+		else entry.note.then(close, () => undefined);
 	}
 
 	private unwarm(fileId: string): void {

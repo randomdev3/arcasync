@@ -71,7 +71,12 @@ export class BackgroundSync {
 	async onDiskModify(fileId: string): Promise<void> {
 		const { docs, index } = this.options;
 		const attached = await docs.peek(fileId)?.catch(() => null);
-		if (attached?.editorBound) return;
+		if (attached?.editorBound) {
+			// The editor saved its buffer: record that disk and doc agree, so a later reconcile
+			// does not mistake the save for an offline edit.
+			await docs.noteEditorSave(attached);
+			return;
+		}
 		const path = index.pathOf(fileId);
 		if (!path) return;
 		const note = await docs.acquire(fileId, path);
@@ -124,6 +129,10 @@ export class BackgroundSync {
 			const note = await docs.acquire(fileId, path);
 			try {
 				await note.whenReady();
+				// A warm note's first-open readiness says nothing about now: after a reconnect it may
+				// not have the server state yet, and marking the rev synced would skip it for good.
+				await note.whenSynced();
+				if (!note.synced) return;
 				if (!note.editorBound) {
 					const result = await docs.reconcile(note);
 					if (result.action === "defer" || result.action === "missing" || result.retry) return;
