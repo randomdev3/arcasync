@@ -16,8 +16,9 @@ done
 cat <<TXT
 
 Next:
-  1. pnpm dev   (server on http://localhost:8787, plugin watch -> packages/plugin/dist)
+  1. pnpm dev   (Cloudflare relay on http://localhost:8789, plugin watch -> packages/plugin/dist;
+                `pnpm dev:node` runs the Node server on http://localhost:8787 instead)
   2. In Obsidian: "Open folder as vault" -> dev-vault-a, then again for dev-vault-b (second window)
   3. Settings -> Community plugins -> enable "TeamSync" (trust the plugin)
-  4. Settings -> TeamSync -> server URL http://localhost:8787 -> Dev login as "alice" / "bob"
+  4. Settings -> TeamSync -> server URL http://localhost:8789 -> Dev login as "alice" / "bob"
 TXT
