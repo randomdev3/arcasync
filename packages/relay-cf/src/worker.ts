@@ -113,13 +113,12 @@ api.get("/workspaces", async (c) =>
 );
 
 /** Dev-only relay instrumentation (G4). Each call is itself one DO request. */
-api.on(["GET", "POST"], "/debug/:op{stats|forget|reset}", async (c) => {
+api.on(["GET", "POST"], "/debug/:op{stats|reset}", async (c) => {
 	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
 	const relay = c.env.RELAY.getByName(ws);
 	const op = c.req.param("op");
-	if (op === "forget") return c.json(await relay.debugForget());
 	if (op === "reset") return c.json(await relay.debugReset());
 	return c.json(await relay.debugStats());
 });

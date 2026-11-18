@@ -171,9 +171,4 @@ export class DocStore {
 			diff: Y.diffUpdate(state, clientStateVector),
 		};
 	}
-
-	/** Drops every in-memory cache, as if the object had just been woken. */
-	forget(): void {
-		this.docs.clear();
-	}
 }

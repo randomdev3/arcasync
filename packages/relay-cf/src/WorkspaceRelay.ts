@@ -508,13 +508,6 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		};
 	}
 
-	/** Drops every in-memory cache, as a hibernation wake would. */
-	async debugForget(): Promise<{ ok: true }> {
-		this.store.forget();
-		this.awareness.clear();
-		return { ok: true };
-	}
-
 	async debugReset(): Promise<{ ok: true }> {
 		this.stats?.reset();
 		return { ok: true };
