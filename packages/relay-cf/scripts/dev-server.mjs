@@ -15,15 +15,20 @@ const WRANGLER = join(
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * @param {{ port: number, persistTo: string, vars?: Record<string, string>, log?: boolean }} options
+ * @param {{ port: number, persistTo: string, env?: string, vars?: Record<string, string>, log?: boolean }} options
  * @returns {Promise<{ url: string, pid: number, stop: () => Promise<void> }>}
  */
-export async function startRelayDev({ port, persistTo, vars = {}, log = false }) {
+export async function startRelayDev({ port, persistTo, env = "dev", vars = {}, log = false }) {
 	const args = [
 		WRANGLER,
 		"dev",
+		"--env",
+		env,
 		"--port",
 		String(port),
+		// Distinct per relay so parallel lanes do not collide on wrangler's default 9229.
+		"--inspector-port",
+		String(port + 10_000),
 		"--ip",
 		"localhost",
 		"--persist-to",

@@ -20,5 +20,23 @@
 	},
 	// The Node server defaults to 8787; keep `pnpm dev` (turbo runs both) collision-free.
 	"dev": { "port": 8789 },
+	// `wrangler dev --env dev` (scripts/dev-server.mjs). vars and durable_objects are not inherited
+	// by environments, so they are repeated here.
+	"env": {
+		"dev": {
+			"durable_objects": {
+				"bindings": [
+					{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
+					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
+				]
+			},
+			"vars": {
+				"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
+				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
+				"TEAMSYNC_DEBUG_STATS": "1",
+				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+			}
+		}
+	},
 	"observability": { "enabled": false }
 }
