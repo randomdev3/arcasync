@@ -1,7 +1,7 @@
 import type { WorkspaceSummary } from "@teamsync/shared";
 
 export interface TeamSyncSettings {
-	/** Base URL of the TeamSync server, e.g. `http://localhost:8787`. */
+	/** Base URL of the TeamSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
 	serverUrl: string;
 	/** Name used for `POST /api/auth/dev-login` while the server allows open login. */
 	devLoginName: string;
@@ -16,7 +16,7 @@ export interface TeamSyncSettings {
 }
 
 export const DEFAULT_SETTINGS: TeamSyncSettings = {
-	serverUrl: "http://localhost:8787",
+	serverUrl: "http://localhost:8789",
 	devLoginName: "",
 	workspaceId: "",
 	user: null,

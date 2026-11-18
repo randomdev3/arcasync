@@ -1,20 +1,28 @@
 // Starts a throwaway sync backend for e2e tests (fresh data dir, its own port).
 // This is the only e2e file that knows which backend implementation exists:
-// E2E_BACKEND=node (default) runs packages/server, E2E_BACKEND=cf runs packages/relay-cf
-// under `wrangler dev` with its local state persisted inside the data dir.
+// - E2E_BACKEND=cf (default) runs packages/relay-cf under `wrangler dev --env dev`, with its local
+//   state persisted inside the data dir.
+// - E2E_BACKEND=node runs packages/server (the conformance oracle).
+// - E2E_BACKEND=remote uses an already-running backend at E2E_REMOTE_URL; it cannot be stopped or
+//   restarted, so restart legs are skipped.
+// The port comes from E2E_PORT (default 8788).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startRelayDev } from "../../packages/relay-cf/scripts/dev-server.mjs";
-import { ROOT, waitFor } from "./obsidian.mjs";
+import { ROOT, sleep, waitFor } from "./obsidian.mjs";
 
-const BACKEND = process.env.E2E_BACKEND ?? "node";
+export const BACKEND = process.env.E2E_BACKEND ?? "cf";
 
-export async function startServer({ port = 8788, dataDir } = {}) {
+/** Thrown by steps that cannot run against the current backend; runners print SKIP. */
+export class SkipError extends Error {}
+
+export async function startServer({ port = Number(process.env.E2E_PORT ?? 8788), dataDir } = {}) {
+	if (BACKEND === "remote") return remoteServer();
 	const dir = dataDir ?? mkdtempSync(join(tmpdir(), "teamsync-e2e-"));
 	if (BACKEND === "cf") return startCfRelay({ port, dir });
-	if (BACKEND !== "node") throw new Error(`unknown E2E_BACKEND=${BACKEND} (node|cf)`);
+	if (BACKEND !== "node") throw new Error(`unknown E2E_BACKEND=${BACKEND} (cf|node|remote)`);
 	const child = spawn("pnpm", ["--filter", "@teamsync/server", "exec", "tsx", "src/index.ts"], {
 		cwd: ROOT,
 		env: {
@@ -40,11 +48,13 @@ export async function startServer({ port = 8788, dataDir } = {}) {
 		{ timeout: 30000, label: "server health" },
 	);
 	const stop = async ({ keepData = false } = {}) => {
-		child.kill("SIGTERM");
-		await new Promise((r) => child.once("exit", r));
+		if (child.exitCode === null && child.signalCode === null) {
+			child.kill("SIGTERM");
+			await new Promise((r) => child.once("exit", r));
+		}
 		if (!keepData) rmSync(dir, { recursive: true, force: true });
 	};
-	return { url, dataDir: dir, stop };
+	return { backend: BACKEND, url, port, dataDir: dir, stop };
 }
 
 async function startCfRelay({ port, dir }) {
@@ -57,5 +67,22 @@ async function startCfRelay({ port, dir }) {
 		await relay.stop();
 		if (!keepData) rmSync(dir, { recursive: true, force: true });
 	};
-	return { url: relay.url, dataDir: dir, stop };
+	return { backend: BACKEND, url: relay.url, port, dataDir: dir, stop };
+}
+
+function remoteServer() {
+	const url = process.env.E2E_REMOTE_URL?.replace(/\/+$/, "");
+	if (!url) throw new Error("E2E_BACKEND=remote needs E2E_REMOTE_URL");
+	return { backend: BACKEND, url, port: null, dataDir: null, stop: async () => {} };
+}
+
+/**
+ * Stops the backend (keeping its data), waits `pauseMs`, and starts it again on the same port and
+ * data dir. Returns the new server. Throws SkipError for a remote backend.
+ */
+export async function restartServer(server, { pauseMs = 0 } = {}) {
+	if (server.backend === "remote") throw new SkipError("server restart needs a local backend");
+	await server.stop({ keepData: true });
+	await sleep(pauseMs);
+	return startServer({ port: server.port, dataDir: server.dataDir });
 }
