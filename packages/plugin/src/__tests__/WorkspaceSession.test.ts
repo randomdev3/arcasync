@@ -2,20 +2,51 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
 import { WorkspaceSession } from "../workspace/WorkspaceSession";
 
-function session() {
+/** Counts live listeners on the fake vault and provider, to prove stop() removes them all. */
+function fakes() {
+	const listeners = { vault: 0, provider: 0 };
+	const vault = {
+		on: () => {
+			listeners.vault++;
+			return {};
+		},
+		offref: () => {
+			listeners.vault--;
+		},
+		getMarkdownFiles: () => [],
+	};
+	const provider = {
+		synced: false,
+		hasUnsyncedChanges: false,
+		on: () => {
+			listeners.provider++;
+		},
+		off: () => {
+			listeners.provider--;
+		},
+	};
+	return { listeners, vault, provider };
+}
+
+function session(root: string | null = "Shared") {
+	const { listeners, vault, provider } = fakes();
 	const close = vi.fn();
 	const openDoc = vi.fn(
-		(): OpenDocHandle => ({ provider: {} as OpenDocHandle["provider"], presence: null, close }),
+		(): OpenDocHandle => ({
+			provider: provider as unknown as OpenDocHandle["provider"],
+			presence: null,
+			close,
+		}),
 	);
 	const s = new WorkspaceSession({
-		app: {} as WorkspaceSession["app"],
+		app: { vault } as unknown as WorkspaceSession["app"],
 		connections: { openDoc } as unknown as ConnectionManager,
 		workspaceId: "ws1",
-		root: "Shared",
+		root,
 		user: { id: "u1", name: "alice", color: "#fff" },
 		vaultId: "vault1",
 	});
-	return { s, openDoc, close };
+	return { s, openDoc, close, listeners };
 }
 
 describe("WorkspaceSession", () => {
@@ -43,5 +74,26 @@ describe("WorkspaceSession", () => {
 		s.start();
 		expect(openDoc).toHaveBeenCalledTimes(2);
 		expect(s.indexDoc).not.toBe(first);
+	});
+
+	it("watches the mapped folder only while started", () => {
+		const { s, listeners } = session();
+		s.start();
+		expect(listeners).toEqual({ vault: 4, provider: 2 });
+		expect(s.index).not.toBeNull();
+		s.stop();
+		expect(listeners).toEqual({ vault: 0, provider: 0 });
+		expect(s.index).toBeNull();
+		s.start();
+		expect(listeners).toEqual({ vault: 4, provider: 2 });
+	});
+
+	it("keeps the index store but syncs no folder when none is mapped", () => {
+		const { s, listeners } = session(null);
+		s.start();
+		expect(listeners).toEqual({ vault: 0, provider: 0 });
+		s.indexDoc.getMap("files").set("a.md", { id: "A", kind: "md", updatedBy: "u", updatedAt: 1 });
+		expect(s.index?.get("a.md")?.id).toBe("A");
+		expect(s.fileIdOf("Shared/a.md")).toBeNull();
 	});
 });
