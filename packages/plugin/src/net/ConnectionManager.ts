@@ -3,7 +3,17 @@ import {
 	HocuspocusProviderWebsocket,
 	WebSocketStatus,
 } from "@hocuspocus/provider";
-import { parseDocName } from "@teamsync/shared";
+import {
+	createKeepaliveWebSocket,
+	FLUSH_DELAY_MS,
+	installPresencePolicy,
+	KEEPALIVE_INTERVAL_MS,
+	KEEPALIVE_RECONNECT_TIMEOUT_MS,
+	PRESENCE_IDLE_RENEWAL_MS,
+	type PresencePolicy,
+	parseDocName,
+	type ServerInfo,
+} from "@teamsync/shared";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import type { TokenStore } from "./TokenStore";
@@ -18,6 +28,8 @@ export interface ConnectionState {
 
 export interface OpenDocHandle {
 	readonly provider: HocuspocusProvider;
+	/** Set when the doc has awareness and the server advertises `presenceRenewalMs`. */
+	readonly presence: PresencePolicy | null;
 	/** Detach this document without touching the shared socket. */
 	close(): void;
 }
@@ -26,6 +38,10 @@ export interface ConnectionManagerOptions {
 	/** Full websocket URL, e.g. `ws://localhost:8787/ws`. */
 	url: string;
 	tokenStore: TokenStore;
+	/** `server-info.features`; relay-only traffic savings are gated on these flags. */
+	features?: ServerInfo["features"];
+	/** Drives the idle presence renewal interval; call `refreshPresence()` when it flips. */
+	isIdle?: () => boolean;
 }
 
 const STATUS_BY_SOCKET: Record<WebSocketStatus, ConnectionStatus> = {
@@ -61,8 +77,19 @@ export class ConnectionManager {
 	connect(): void {
 		if (this.socket) return;
 		this.setState({ status: "connecting" });
+		// Without traffic the provider force-reconnects every ~30 s. The relay answers a text
+		// ping without waking its Durable Object, which is far cheaper than reconnect churn.
+		const keepalive = this.options.features?.textKeepalive
+			? {
+					WebSocketPolyfill: createKeepaliveWebSocket(WebSocket, {
+						intervalMs: KEEPALIVE_INTERVAL_MS,
+					}),
+					messageReconnectTimeout: KEEPALIVE_RECONNECT_TIMEOUT_MS,
+				}
+			: {};
 		this.socket = new HocuspocusProviderWebsocket({
 			url: this.options.url,
+			...keepalive,
 			onStatus: ({ status }) => this.setState({ status: STATUS_BY_SOCKET[status] }),
 			onClose: ({ event }) => {
 				if (event.code >= 4000) {
@@ -92,6 +119,8 @@ export class ConnectionManager {
 			name,
 			document: ydoc,
 			awareness: awareness ?? null,
+			// Batch keystrokes and awareness into one message (and one relay row) per window.
+			flushDelay: FLUSH_DELAY_MS,
 			token: () => this.options.tokenStore.get(ref.workspaceId),
 			onAuthenticationFailed: ({ reason }) => {
 				this.options.tokenStore.invalidate(ref.workspaceId);
@@ -102,15 +131,32 @@ export class ConnectionManager {
 		// attach itself (manageSocket=false), so nothing would ever be sent.
 		provider.attach();
 
+		const renewalMs = this.options.features?.presenceRenewalMs;
+		const presence =
+			awareness && renewalMs
+				? installPresencePolicy(awareness, {
+						activeRenewMs: renewalMs,
+						idleRenewMs: PRESENCE_IDLE_RENEWAL_MS,
+						isIdle: this.options.isIdle ?? (() => false),
+					})
+				: null;
+
 		const handle: OpenDocHandle = {
 			provider,
+			presence,
 			close: () => {
 				this.docs.delete(name);
+				presence?.dispose();
 				provider.destroy();
 			},
 		};
 		this.docs.set(name, handle);
 		return handle;
+	}
+
+	/** Re-evaluate `isIdle` for every open doc's presence policy. */
+	refreshPresence(): void {
+		for (const handle of this.docs.values()) handle.presence?.refresh();
 	}
 
 	/** Tear down every provider and the socket, but keep the manager reusable. */

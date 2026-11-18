@@ -299,6 +299,7 @@ export default class TeamSyncPlugin extends Plugin {
 			// `?ws=` routes the socket to the workspace's relay; the Node server ignores it.
 			url: `${websocketUrl(this.settings.serverUrl, WS_PATH)}?ws=${encodeURIComponent(workspaceId)}`,
 			tokenStore: this.tokens,
+			features: this.serverInfo?.features,
 		});
 		this.connections = connections;
 		this.unsubscribeConnection = connections.onStateChange((state) =>
