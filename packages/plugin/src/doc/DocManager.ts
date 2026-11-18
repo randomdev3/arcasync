@@ -1,5 +1,5 @@
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
-import { diskText, textHash } from "./diskText";
+import { diskText, textHash, utf8Bytes } from "./diskText";
 import {
 	DISK_ORIGIN,
 	ENROLL_ORIGIN,
@@ -18,6 +18,13 @@ export interface DocManagerOptions {
 	pathOf(fileId: string): string | null;
 	/** Released docs kept attached (`limits().warmDocs`). */
 	warmDocs: number;
+	/**
+	 * Notes larger than this, on disk or in the doc, are not synced on this device
+	 * (`limits().maxMdBytes`; unlimited by default).
+	 */
+	maxBytes?: number;
+	/** Size in bytes of the vault file at `path` (its stat; no read), or null when there is none. */
+	sizeOf?(path: string): number | null;
 	/** Debounce between a doc change and its write to disk while no editor is bound. */
 	flushDelayMs?: number;
 	/** How long a closed editor still owns the disk (its last save may be in flight). */
@@ -64,6 +71,8 @@ export class DocManager implements IDocManager {
 	private readonly entries = new Map<string, Entry>();
 	/** Released file ids, least recently used first. */
 	private readonly warm: string[] = [];
+	/** Notes already reported as over `maxBytes`. */
+	private readonly warned = new Set<string>();
 	private destroyed = false;
 
 	constructor(private readonly options: DocManagerOptions) {}
@@ -108,6 +117,15 @@ export class DocManager implements IDocManager {
 		return this.entries.size;
 	}
 
+	exceedsLimit(fileId: string, path: string): boolean {
+		const max = this.options.maxBytes ?? Number.POSITIVE_INFINITY;
+		if (!Number.isFinite(max)) return false;
+		const size = this.options.sizeOf?.(path) ?? null;
+		if (size === null || size <= max) return false;
+		this.warnTooLarge(fileId, path, max);
+		return true;
+	}
+
 	/** An attached note, if any (no refcount taken). */
 	peek(fileId: string): Promise<NoteDoc> | null {
 		return this.entries.get(fileId)?.note ?? null;
@@ -125,6 +143,9 @@ export class DocManager implements IDocManager {
 			for (let i = 0; i < RECONCILE_ATTEMPTS && note.state !== "closed"; i++) {
 				const path = this.options.pathOf(note.fileId) ?? note.path;
 				note.path = path;
+				// Neither side is touched: no enroll of a large file, no write of a large doc.
+				note.tooLarge = this.overLimit(note, path);
+				if (note.tooLarge) return { action: "too-large" };
 				if (entry) await this.adoptEditorSave(note, entry);
 				result = await reconcileNote(note, path, this.options.reconcile);
 				if (!result.retry) break;
@@ -333,6 +354,27 @@ export class DocManager implements IDocManager {
 		// Synchronously when possible: the session stops its notes before the socket goes away.
 		if (entry.resolved) close(entry.resolved);
 		else entry.note.then(close, () => undefined);
+	}
+
+	/** The note's file or doc is over `maxBytes`; a UTF-8 count only when the length allows it. */
+	private overLimit(note: NoteDoc, path: string): boolean {
+		const max = this.options.maxBytes ?? Number.POSITIVE_INFINITY;
+		if (!Number.isFinite(max)) return false;
+		if (this.exceedsLimit(note.fileId, path)) return true;
+		// A UTF-16 code unit is at most 3 UTF-8 bytes.
+		if (note.ytext.length * 3 <= max || utf8Bytes(note.ytext.toString()) <= max) return false;
+		this.warnTooLarge(note.fileId, path, max);
+		return true;
+	}
+
+	private warnTooLarge(fileId: string, path: string, max: number): void {
+		if (this.warned.has(fileId)) return;
+		this.warned.add(fileId);
+		const limit = `${Math.round((max / 1048576) * 10) / 10} MiB`;
+		console.warn(`[TeamSync] ${path} is over ${limit}; it is not synced on this device`);
+		this.options.reconcile.notify?.(
+			`TeamSync: ${path} is larger than ${limit} and is not synced on this device.`,
+		);
 	}
 
 	/** Hashed on the entry's lock, so a reconcile queued after this call sees it. */

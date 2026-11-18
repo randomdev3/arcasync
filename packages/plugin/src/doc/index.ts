@@ -32,7 +32,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		storage: window.localStorage,
 		keyPrefix: `teamsync:${session.vaultId}:${session.workspaceId}`,
 	});
-	const { warmDocs, bgConcurrency } = limits();
+	const { warmDocs, bgConcurrency, maxMdBytes } = limits();
 	const docs = new DocManager({
 		note: {
 			vaultId: session.vaultId,
@@ -49,6 +49,8 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		track: (note) => revTracker.track(note),
 		pathOf: (fileId) => index.pathOf(fileId),
 		warmDocs,
+		maxBytes: maxMdBytes,
+		sizeOf: (path) => app.vault.getFileByPath(path)?.stat.size ?? null,
 	});
 	const background = new BackgroundSync({
 		docs,

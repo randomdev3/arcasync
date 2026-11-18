@@ -70,8 +70,11 @@ export interface ReconcileInput {
  *   goes into the doc (a three-way merge whose base is the doc itself).
  * - `conflict`: both moved since they last agreed. The doc wins on disk and the disk text is
  *   kept in a local copy. Nothing is dropped.
+ * - `too-large`: the file or the doc is over this device's `maxMdBytes`; neither is touched
+ *   (decided by `DocManager` before `reconcileNote` runs, never by `decide`).
  */
 export type ReconcileAction =
+	| "too-large"
 	| "missing"
 	| "defer"
 	| "enroll"
@@ -152,6 +155,7 @@ export async function reconcileNote(
 	});
 
 	switch (action) {
+		case "too-large":
 		case "missing":
 		case "defer":
 			return { action };

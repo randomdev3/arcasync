@@ -22,6 +22,8 @@ export interface NoteDocHandle {
 	readonly state: NoteDocState;
 	/** The relay granted this user read-only access (a viewer). */
 	readonly readonly: boolean;
+	/** The last reconcile found the file or the doc over this device's `maxMdBytes`. */
+	readonly tooLarge: boolean;
 	/** Local persistence loaded AND (provider synced OR offline with local data). */
 	whenReady(): Promise<void>;
 	/** Runs once when the note is closed; returns unsubscribe. */
@@ -34,6 +36,11 @@ export interface IDocManager {
 	release(handle: NoteDocHandle): void;
 	/** Docs whose provider is currently attached (in use plus warm LRU). */
 	attachedCount(): number;
+	/**
+	 * True when the file at `path` is over this device's `maxMdBytes` (mobile): the note is not
+	 * synced here. Warns once per note. Checked before attaching, so it costs no traffic.
+	 */
+	exceedsLimit(fileId: string, path: string): boolean;
 	/**
 	 * An acquired note gets an editor (P1-4): `attach` runs with no reconcile in flight and
 	 * returns whether the editor still wants it. Resolves true when the editor counts as bound.
