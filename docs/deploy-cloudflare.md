@@ -69,6 +69,10 @@ as rows written). It runs only on the `probe` environment, and the worker is del
    - **Workers & Pages → teamsync-relay-probe → Metrics**: Worker requests.
    - **Workers & Pages → teamsync-relay-probe → Durable Objects** (or **Storage & Databases →
      Durable Objects**), per namespace: requests, rows written, rows read, duration.
+   - The probe has no GraphQL Analytics mode: the Durable Objects datasets
+     (`durableObjectsInvocationsAdaptiveGroups`, `durableObjectsPeriodicGroups`,
+     `durableObjectsStorageGroups`) are documented, but their WebSocket-message and SQL-row field
+     names are not, so read them from the dashboard (or discover them with GraphQL introspection).
    - Compare each window with the probe's expected numbers: the `pings` window shows whether
      auto-responses bill, `frames` gives the inbound message ratio, `rows` the rows written per
      update, and `connects` whether close events count as requests.
