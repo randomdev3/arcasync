@@ -13,9 +13,9 @@ import {
 	RECENT_LABEL_MS,
 	stampCarets,
 } from "../editor/caretLabels";
-import { docUser } from "../editor/docUser";
+import { presenceUser } from "../presence/PresenceService";
 
-const BOB = docUser({ id: "user-bob", name: "bob" });
+const BOB = presenceUser({ id: "user-bob", name: "bob" });
 
 /** Alice's note doc plus bob's, with bob's awareness and doc updates forwarded to alice. */
 function pair() {
@@ -50,7 +50,7 @@ describe("caretIdentity", () => {
 	});
 });
 
-describe("docUser", () => {
+describe("presenceUser", () => {
 	it("derives the colour from the user id", () => {
 		expect(BOB).toEqual({ id: "user-bob", name: "bob", ...userColor("user-bob") });
 	});
@@ -113,7 +113,7 @@ describe("CaretRecency", () => {
 		const { alice, bob } = pair();
 		const recency = new CaretRecency(alice, () => undefined);
 		bob.setLocalState({ user: BOB, cursor: null });
-		alice.setLocalState({ user: docUser({ id: "user-alice", name: "alice" }), cursor: {} });
+		alice.setLocalState({ user: presenceUser({ id: "user-alice", name: "alice" }), cursor: {} });
 		expect(recency.recent()).toEqual([]);
 		recency.destroy();
 	});

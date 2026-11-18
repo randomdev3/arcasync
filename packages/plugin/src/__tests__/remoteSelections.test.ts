@@ -7,10 +7,10 @@ import { describe, expect, it } from "vitest";
 import { YSyncConfig, yRemoteSelections, ySyncFacet } from "y-codemirror.next";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { docUser } from "../editor/docUser";
+import { presenceUser } from "../presence/PresenceService";
 
-const ALICE = docUser({ id: "user-alice", name: "alice" });
-const BOB = docUser({ id: "user-bob", name: "bob" });
+const ALICE = presenceUser({ id: "user-alice", name: "alice" });
+const BOB = presenceUser({ id: "user-bob", name: "bob" });
 const TEXT = "Line one\nLine two\n";
 
 interface PluginValue {

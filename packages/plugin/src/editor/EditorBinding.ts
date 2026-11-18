@@ -19,6 +19,7 @@ import * as Y from "yjs";
 import { presenceUser } from "../presence/PresenceService";
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
 import type { WorkspaceSession } from "../workspace/WorkspaceSession";
+import { caretLabels } from "./caretLabels";
 
 /** Marks an editor whose buffer is bound to its note's CRDT. */
 export const LIVE_CLASS = "teamsync-live";
@@ -181,6 +182,8 @@ function fileOf(state: EditorState): TFile | null {
 function collabExtension(note: NoteDocHandle, undoManager: Y.UndoManager): Extension {
 	return [
 		yCollab(note.ytext, note.awareness, { undoManager }),
+		// Name labels for 2 s after a remote caret moves; remote carets hidden until the note is ready.
+		caretLabels({ awareness: note.awareness, ready: note.whenReady() }),
 		// CodeMirror owns the editor element's class list; a facet survives its rewrites.
 		EditorView.editorAttributes.of({ class: LIVE_CLASS }),
 		// Obsidian's own Mod-z runs CodeMirror's history, which would also undo remote edits.
