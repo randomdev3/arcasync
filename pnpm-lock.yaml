@@ -14,6 +14,12 @@ importers:
       '@biomejs/biome':
         specifier: ^2.2.0
         version: 2.5.13
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       turbo:
         specifier: ^2.5.0
         version: 2.10.12
@@ -47,6 +53,9 @@ importers:
       y-codemirror.next:
         specifier: 0.3.6
         version: 0.3.6(@codemirror/state@6.5.0)(@codemirror/view@6.38.6)(yjs@13.6.32)
+      y-indexeddb:
+        specifier: 9.0.12
+        version: 9.0.12(yjs@13.6.32)
       y-protocols:
         specifier: ^1.0.6
         version: 1.0.7(yjs@13.6.32)
@@ -209,6 +218,12 @@ importers:
 
   packages/shared:
     dependencies:
+      lib0:
+        specifier: ^0.2.117
+        version: 0.2.117
+      y-protocols:
+        specifier: ^1.0.7
+        version: 1.0.7(yjs@13.6.32)
       zod:
         specifier: ^4.1.0
         version: 4.6.1
@@ -219,6 +234,9 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@22.20.2)(tsx@4.23.13)
+      yjs:
+        specifier: 13.6.32
+        version: 13.6.32
 
 packages:
 
@@ -1334,6 +1352,9 @@ packages:
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
+  '@types/pngjs@6.0.5':
+    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
+
   '@types/tern@0.23.9':
     resolution: {integrity: sha512-ypzHFE/wBzh+BlH6rrBgS5I/Z7RD21pGhZ2rltb/+ZrVM1awdZwjx7hE5XfuYgHWk9uvV5HLZN3SloevCAp3Bw==}
 
@@ -1785,6 +1806,10 @@ packages:
     resolution: {integrity: sha512-8OEwKp5juEvb/MjpIc4hjqfgCNysrS94RIOMXYvpYCdm/jglrKEiAYmiumbmGhCvs+IcInsphYDFwqrjr7398w==}
     hasBin: true
 
+  pngjs@7.0.0:
+    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
+    engines: {node: '>=14.19.0'}
+
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -2121,6 +2146,12 @@ packages:
     peerDependencies:
       '@codemirror/state': ^6.0.0
       '@codemirror/view': ^6.0.0
+      yjs: 13.6.32
+
+  y-indexeddb@9.0.12:
+    resolution: {integrity: sha512-9oCFRSPPzBK7/w5vOkJBaVCQZKHXB/v6SIT+WYhnJxlEC61juqG0hBrAf+y3gmSMLFLwICNH9nQ53uscuse6Hg==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
       yjs: 13.6.32
 
   y-protocols@1.0.7:
@@ -2973,6 +3004,10 @@ snapshots:
       pg-protocol: 1.16.0
       pg-types: 2.2.0
 
+  '@types/pngjs@6.0.5':
+    dependencies:
+      '@types/node': 22.20.2
+
   '@types/tern@0.23.9':
     dependencies:
       '@types/estree': 1.0.9
@@ -3373,6 +3408,8 @@ snapshots:
       sonic-boom: 4.2.1
       thread-stream: 3.2.0
 
+  pngjs@7.0.0: {}
+
   postcss@8.5.28:
     dependencies:
       nanoid: 3.3.18
@@ -3708,6 +3745,11 @@ snapshots:
     dependencies:
       '@codemirror/state': 6.5.0
       '@codemirror/view': 6.38.6
+      lib0: 0.2.117
+      yjs: 13.6.32
+
+  y-indexeddb@9.0.12(yjs@13.6.32):
+    dependencies:
       lib0: 0.2.117
       yjs: 13.6.32
 

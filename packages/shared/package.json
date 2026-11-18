@@ -17,10 +17,13 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"lib0": "^0.2.117",
+		"y-protocols": "^1.0.7",
 		"zod": "^4.1.0"
 	},
 	"devDependencies": {
 		"typescript": "^5.9.0",
-		"vitest": "^3.2.0"
+		"vitest": "^3.2.0",
+		"yjs": "13.6.32"
 	}
 }
