@@ -264,10 +264,12 @@ describe("DocStore", () => {
 		b.doc.getText("t").insert(0, "z");
 		woken.append(DOC, b.updates[0] as Uint8Array, BOB);
 		expect(woken.rowsWritten).toBe(3);
-		expect(woken.debug(DOC).clients).toEqual([
-			{ clientId: a.doc.clientID, userId: ALICE },
-			{ clientId: b.doc.clientID, userId: BOB },
-		]);
+		expect(new Map(woken.debug(DOC).clients.map((c) => [c.clientId, c.userId]))).toEqual(
+			new Map([
+				[a.doc.clientID, ALICE],
+				[b.doc.clientID, BOB],
+			]),
+		);
 	});
 
 	it("records the author and time of every log row", () => {

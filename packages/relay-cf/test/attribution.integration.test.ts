@@ -135,6 +135,11 @@ describe("attribution", () => {
 			{ label: "alice sees bob" },
 		);
 
+		// Every state alice ever holds for bob's client, so a relayed forgery cannot hide.
+		const seen: unknown[] = [];
+		aDoc.awareness?.on("change", () => {
+			seen.push(aDoc.awareness?.getStates().get(bDoc.document.clientID)?.user);
+		});
 		const raw = b.rawSockets[b.rawSockets.length - 1];
 		if (!raw) throw new Error("no raw socket");
 		const closed = new Promise<{ code: number; reason: string }>((resolve) =>
@@ -150,9 +155,37 @@ describe("attribution", () => {
 			label: "bob's presence removed",
 		});
 		await sleep(300);
-		const names = [...(aDoc.awareness?.getStates().values() ?? [])].map((s) => s.user?.name);
-		expect(names).not.toContain("not alice");
+		expect(seen.length).toBeGreaterThan(0);
+		expect(seen).not.toContainEqual({ id: aliceId, name: "not alice" });
+		for (const user of seen) {
+			if (user !== undefined) expect(user).toEqual({ id: bob.session.user.id, name: "bob" });
+		}
 		a.destroy();
+	});
+
+	it("binds a socket to its first user: another user's token is denied on it", async () => {
+		const alice = await login(relay.url, "alice");
+		const bob = await login(relay.url, "bob");
+		const ws = alice.workspaceId;
+		const mine = docName({ workspaceId: ws, kind: "md", fileId: "bound1" });
+		const theirs = docName({ workspaceId: ws, kind: "md", fileId: "bound2" });
+		const a = client(relay.url, ws);
+		const peer = client(relay.url, ws);
+		cleanup.push(a.destroy, peer.destroy);
+		const aDoc = await a.open(mine, alice.token);
+		await expect(a.open(theirs, bob.token)).rejects.toThrow(/auth failed: permission-denied/);
+
+		// The socket's own doc keeps syncing.
+		const pDoc = await peer.open(mine, bob.token);
+		aDoc.document.getText("body").insert(0, "still alice");
+		await waitFor(() => pDoc.document.getText("body").toString() === "still alice", {
+			label: "alice's doc still syncs",
+		});
+		await waitFor(() => !aDoc.provider.hasUnsyncedChanges, { label: "alice acked" });
+		const debug = await debugDoc(ws, mine);
+		expect(debug.rowsByUser).toEqual({ [alice.session.user.id]: 1 });
+		a.destroy();
+		peer.destroy();
 	});
 
 	it("relays a viewer's awareness and stores none of the viewer's updates", async () => {

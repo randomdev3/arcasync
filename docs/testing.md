@@ -1,7 +1,8 @@
 # Testing
 
 Every command runs from the repository root. There are four layers. The first three run on any
-OS with Node 22.13 or newer; the last needs Obsidian on macOS.
+OS with a Node version that runs `.ts` files natively (22.18 or newer; the relay's scripts, such as
+the budget gate, are run as `node scripts/<name>.ts`); the last needs Obsidian on macOS.
 
 ## Unit tests, lint, types, build
 

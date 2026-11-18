@@ -47,6 +47,8 @@ describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
 	it("hides the debug endpoints", async () => {
 		expect((await fetch(`${relay.url}/api/debug/stats?ws=x`)).status).toBe(404);
 		expect((await fetch(`${relay.url}/api/debug/reset?ws=x`, { method: "POST" })).status).toBe(404);
+		const doc = encodeURIComponent("ws:x:index");
+		expect((await fetch(`${relay.url}/api/debug/doc?ws=x&doc=${doc}`)).status).toBe(404);
 	});
 
 	it("gives a new member the requested role and keeps existing roles", async () => {
