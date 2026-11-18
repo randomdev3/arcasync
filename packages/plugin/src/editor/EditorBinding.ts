@@ -16,8 +16,9 @@ import {
 import { editorInfoField, MarkdownView, type TFile } from "obsidian";
 import { yCollab, ySyncAnnotation, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
+import { presenceUser } from "../presence/PresenceService";
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
-import type { SessionUser, WorkspaceSession } from "../workspace/WorkspaceSession";
+import type { WorkspaceSession } from "../workspace/WorkspaceSession";
 
 /** Marks an editor whose buffer is bound to its note's CRDT. */
 export const LIVE_CLASS = "teamsync-live";
@@ -151,7 +152,7 @@ export class EditorBindings {
 			const state = note.awareness.getLocalState();
 			if (note === focused && user) {
 				if (state === null) {
-					note.awareness.setLocalState({ user: docUser(user) });
+					note.awareness.setLocalState({ user: presenceUser(user) });
 				}
 			} else if (state !== null) {
 				note.awareness.setLocalState(null);
@@ -170,11 +171,6 @@ export class EditorBindings {
 		this.offIndex = null;
 		this.session = null;
 	}
-}
-
-/** The `user` field of a note's awareness state; its `id` must be the JWT `sub` (relay 4403). */
-function docUser(user: SessionUser): { id: string; name: string; color: string } {
-	return { id: user.id, name: user.name, color: user.color };
 }
 
 function fileOf(state: EditorState): TFile | null {

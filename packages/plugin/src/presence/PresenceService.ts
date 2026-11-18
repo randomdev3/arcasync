@@ -10,7 +10,11 @@ import type { IPresence } from "../workspace/types";
 /** Minimum time between two published idle flips (the budget's "presence changes" row). */
 export const IDLE_FLIP_MIN_MS = 60_000;
 
-/** The awareness `user` of this client: the shared colour palette keeps avatars and carets alike. */
+/**
+ * The one `user` shape this client publishes, on the index awareness and on the focused note's
+ * awareness alike. `id` must be the JWT `sub` (the relay closes the socket with 4403 otherwise);
+ * colours come from the shared palette so avatars and carets match.
+ */
 export function presenceUser(user: { id: string; name: string }): PresenceUser {
 	return { id: user.id, name: user.name, ...userColor(user.id) };
 }
