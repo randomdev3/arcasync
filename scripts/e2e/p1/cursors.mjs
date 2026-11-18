@@ -1,7 +1,6 @@
 // P1-6: bob's caret and selection show in alice's editor in bob's colour with his name, in Live
 // Preview and in source mode; alice never sees her own caret.
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { userColor } from "../../../packages/shared/dist/index.js";
 import {
@@ -15,14 +14,12 @@ import {
 	setCursor,
 	waitEditorText,
 } from "../editor.mjs";
-import { ROOT, waitFor } from "../obsidian.mjs";
-import { SkipError } from "../server.mjs";
+import { waitFor } from "../obsidian.mjs";
 
 const NAME = "cursors";
 const NOTE = `Shared/${NAME}/cur.md`;
+const OTHER = `Shared/${NAME}/other.md`;
 const TEXT = "Line one\nLine two\nLine three\n";
-/** Carets are drawn by the editor binding (P1-4); this lane merges after it. */
-const BINDING = join(ROOT, "packages", "plugin", "src", "editor", "EditorBinding.ts");
 
 const USER_ID = "return app.plugins.plugins.teamsync.settings.user?.id ?? null;";
 
@@ -48,10 +45,18 @@ function livePreview(v) {
 		return el ? el.classList.contains("is-live-preview") : null;`);
 }
 
-/** Switches the editing mode and reopens the note so its editor is rebuilt in that mode. */
+/**
+ * Switches the active leaf between Live Preview and source mode through its view state (`source`);
+ * the `livePreview` vault config only sets the default for newly opened notes.
+ */
 async function setLivePreview(v, on) {
-	await v.eval('app.vault.setConfig("livePreview", args.on); return true;', { on });
-	await openFile(v, NOTE);
+	await v.eval(
+		`const leaf = app.workspace.activeLeaf;
+		const vs = leaf.getViewState();
+		await leaf.setViewState({ ...vs, state: { ...vs.state, mode: "source", source: !args.on } });
+		return true;`,
+		{ on },
+	);
 	await waitFor(async () => (await livePreview(v)) === on, {
 		timeout: 5000,
 		label: `${v.name} live preview ${on}`,
@@ -77,9 +82,8 @@ async function bobCaretAt(alice, bob, pos) {
 export default {
 	name: NAME,
 	needs: ["alice", "bob"],
-	seed: { alice: { [NOTE]: TEXT } },
+	seed: { alice: { [NOTE]: TEXT, [OTHER]: "Other\n" } },
 	async run({ vaults, step, artifacts }) {
-		if (!existsSync(BINDING)) throw new SkipError("editor binding (P1-4) not in this build");
 		const { alice, bob } = vaults;
 		const bobId = await bob.eval(USER_ID);
 		assert.ok(bobId, "bob has a user id");
@@ -119,10 +123,30 @@ export default {
 			assert.ok(hits >= 1, `no pixel near ${bobUser.color} in ${file}`);
 			step(`pixel check: ${hits} pixel(s) near ${bobUser.color} in the caret clip`);
 
-			const pendingGate = await alice.eval(
-				'return !!document.querySelector(".cm-editor.teamsync-carets-pending");',
-			);
-			assert.equal(pendingGate, false, "alice's editor left the not-ready caret gate");
+			// Hidden until ready: the gate class hides carets, and a rebind applies it then lifts it.
+			const gateHides = await alice.eval(`const ed = document.querySelector(".cm-editor");
+				ed.classList.add("teamsync-carets-pending");
+				const caret = ed.querySelector(".cm-ySelectionCaret");
+				const display = caret ? getComputedStyle(caret).display : null;
+				ed.classList.remove("teamsync-carets-pending");
+				return display;`);
+			assert.equal(gateHides, "none", "the not-ready gate hides remote carets");
+			await alice.eval(`window.__tsGate = [];
+				window.__tsGateObserver = new MutationObserver((records) => {
+					for (const r of records) if (r.target.classList?.contains("cm-editor"))
+						window.__tsGate.push((r.oldValue ?? "").includes("teamsync-carets-pending"));
+				});
+				window.__tsGateObserver.observe(document.body,
+					{ subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+				return true;`);
+			await openFile(alice, OTHER);
+			await openFile(alice, NOTE);
+			await bobCaretAt(alice, bobUser, pos);
+			const gate = await alice.eval(`window.__tsGateObserver.disconnect();
+				return { sawPending: window.__tsGate.includes(true),
+					pendingNow: !!document.querySelector(".cm-editor.teamsync-carets-pending") };`);
+			assert.deepEqual(gate, { sawPending: true, pendingNow: false }, "gate on rebind");
+			step("rebind: carets gated until the note is ready, then bob's caret is back");
 			// The label shows for 2 s after a move (`.is-recent`), then only on hover.
 			const LABEL = `const el = document.querySelector(".cm-ySelectionCaret");
 				const info = el?.querySelector(".cm-ySelectionInfo");
