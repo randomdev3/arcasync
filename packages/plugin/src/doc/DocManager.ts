@@ -31,6 +31,8 @@ interface Entry {
 	flushTimer: ReturnType<typeof setTimeout> | null;
 	dispose: Array<() => void>;
 	evicting: boolean;
+	/** Re-checks a waiting eviction (it stops once the doc is acquired again). */
+	wake: (() => void) | null;
 }
 
 const RECONCILE_ATTEMPTS = 3;
@@ -61,6 +63,7 @@ export class DocManager implements IDocManager {
 		}
 		entry.refs++;
 		entry.evicting = false;
+		entry.wake?.();
 		this.unwarm(fileId);
 		const current = entry;
 		return current.note.then(
@@ -132,6 +135,7 @@ export class DocManager implements IDocManager {
 			flushTimer: null,
 			dispose: [],
 			evicting: false,
+			wake: null,
 		};
 		entry.note = openNote(fileId, path, this.options.note).then((note) => {
 			if (this.entries.get(fileId) !== entry) {
@@ -194,10 +198,11 @@ export class DocManager implements IDocManager {
 	/** Resolves when the relay has acked the note's changes, the socket is down, or eviction is off. */
 	private untilAcked(note: NoteDoc, entry: Entry): Promise<void> {
 		return new Promise((resolve) => {
-			const offConnection = this.options.note.onConnectionChange(() => check());
-			const onUnsynced = () => check();
+			let settled = false;
+			let offConnection: (() => void) | null = null;
 			const check = () => {
-				const settled =
+				if (settled) return;
+				settled =
 					!note.provider.hasUnsyncedChanges ||
 					note.readonly ||
 					this.options.note.isOffline() ||
@@ -205,11 +210,16 @@ export class DocManager implements IDocManager {
 					!entry.evicting ||
 					entry.refs > 0;
 				if (!settled) return;
-				offConnection();
-				note.provider.off("unsyncedChanges", onUnsynced);
+				offConnection?.();
+				note.provider.off("unsyncedChanges", check);
+				entry.wake = null;
 				resolve();
 			};
-			note.provider.on("unsyncedChanges", onUnsynced);
+			note.provider.on("unsyncedChanges", check);
+			entry.wake = check;
+			// `onStateChange` calls the listener right away, possibly settling before it returns.
+			offConnection = this.options.note.onConnectionChange(check);
+			if (settled) offConnection();
 			check();
 		});
 	}

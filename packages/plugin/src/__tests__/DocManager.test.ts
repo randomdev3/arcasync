@@ -125,6 +125,21 @@ describe("DocManager", () => {
 		expect(note.path).toBe("Shared/new.md");
 	});
 
+	it("leaves no connection listeners behind after ready and eviction", async () => {
+		const relay = new FakeRelay();
+		const d = device({ relay, warmDocs: 0 });
+		for (let i = 0; i < 3; i++) {
+			const id = newId();
+			d.paths[id] = `Shared/${id}.md`;
+			d.disk.files.set(`Shared/${id}.md`, "text\n");
+			const note = await d.docs.acquire(id, `Shared/${id}.md`);
+			await note.whenReady();
+			d.docs.release(note);
+			await waitUntil(() => note.state === "closed");
+		}
+		expect(relay.statusListenerCount).toBe(0);
+	});
+
 	it("destroy() detaches everything at once", async () => {
 		const relay = new FakeRelay();
 		const d = device({ relay, disk: new FakeDisk({ "Shared/a.md": "" }) });

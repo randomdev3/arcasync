@@ -114,10 +114,16 @@ export class FakeRelay {
 
 	isOffline = (): boolean => !this.online;
 
+	/** Like `ConnectionManager.onStateChange`: the listener also runs right away. */
 	onConnectionChange = (listener: () => void): (() => void) => {
 		this.statusListeners.add(listener);
+		listener();
 		return () => this.statusListeners.delete(listener);
 	};
+
+	get statusListenerCount(): number {
+		return this.statusListeners.size;
+	}
 
 	setOnline(online: boolean): void {
 		this.online = online;

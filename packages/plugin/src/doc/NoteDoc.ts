@@ -91,22 +91,28 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 	/** Server state loaded, or the socket is down and IndexedDB had this note. */
 	whenSynced(): Promise<void> {
 		return new Promise((resolve, reject) => {
+			let settled = false;
 			const cleanup: Array<() => void> = [];
 			const done = (error?: Error) => {
-				for (const fn of cleanup) fn();
+				settled = true;
+				for (const fn of cleanup.splice(0)) fn();
 				if (error) reject(error);
 				else resolve();
 			};
 			const check = () => {
+				if (settled) return;
 				if (this.state === "closed") done(new Error(`note ${this.fileId} closed`));
 				else if (this.provider.synced) done();
 				else if (this.deps.isOffline() && this.hasLocalData()) done();
 			};
 			this.provider.on("synced", check);
 			cleanup.push(() => this.provider.off("synced", check));
-			cleanup.push(this.deps.onConnectionChange(check));
 			this.closeListeners.add(check);
 			cleanup.push(() => this.closeListeners.delete(check));
+			// `onStateChange` calls the listener right away, possibly settling before it returns.
+			const offConnection = this.deps.onConnectionChange(check);
+			if (settled) offConnection();
+			else cleanup.push(offConnection);
 			check();
 		});
 	}
