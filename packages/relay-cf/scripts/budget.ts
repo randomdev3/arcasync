@@ -294,7 +294,8 @@ async function live(units: Units, minutes: number, users: number): Promise<void>
 		msgs_in:
 			keys * (units.updateMsgsPerKey + units.awarenessMsgsPerKey) +
 			users * hours * 2 * units.renewalsPerHourActive,
-		app_rows_written: keys * units.rowsPerKey * (1 + units.compactionRowsPerLogRow),
+		// Log rows only: a short run stays below the 500-row compaction threshold per doc.
+		app_rows_written: keys * units.rowsPerKey,
 		connects: 0,
 	};
 	console.log(`\n### Live: ${users} clients × ${minutes} min, ${keysPerBurst} keys/min each\n`);
