@@ -7,6 +7,7 @@ import {
 	CHUNK_BYTES,
 	DevLoginRequest,
 	PRESENCE_RENEWAL_MS,
+	parseDocName,
 	type ServerInfo,
 	WS_PATH,
 	WsTokenRequest,
@@ -144,6 +145,18 @@ api.on(["GET", "POST"], "/debug/:op{stats|reset}", async (c) => {
 	const op = c.req.param("op");
 	if (op === "reset") return c.json(await relay.debugReset());
 	return c.json(await relay.debugStats());
+});
+
+/** Dev-only attribution readout of one doc (P1-8): rows per user, client ids, tail, state size. */
+api.get("/debug/doc", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const ws = c.req.query("ws") ?? "";
+	const doc = c.req.query("doc") ?? "";
+	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
+	if (parseDocName(doc)?.workspaceId !== ws) {
+		return c.json(errorBody("bad_request", "?doc= must be a doc of ?ws="), 400);
+	}
+	return c.json(await c.env.RELAY.getByName(ws).debugDoc(doc));
 });
 
 app.route(API_PREFIX, api);
