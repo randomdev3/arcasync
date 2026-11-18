@@ -96,6 +96,10 @@ export const FileMeta = z.object({
 });
 export type FileMeta = z.infer<typeof FileMeta>;
 
+/** Value stored under each fileId key in the index doc's `docRevs` Y.Map. */
+export const DocRev = z.object({ at: z.number(), by: z.string() });
+export type DocRev = z.infer<typeof DocRev>;
+
 export const Version = z.object({
 	id: z.string(),
 	name: z.string().nullable(),

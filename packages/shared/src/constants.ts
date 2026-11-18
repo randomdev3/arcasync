@@ -14,3 +14,7 @@ export const PRESENCE_IDLE_AFTER_MS = 300_000;
 export const PRESENCE_TIMEOUT_FACTOR = 2.75;
 export const PRESENCE_DEFAULT_TIMEOUT_MS = 30_000;
 export const CODEC_YJS_V1 = 1;
+/** Index-doc Y.Map of path → `FileMeta`. */
+export const INDEX_FILES = "files";
+/** Index-doc Y.Map of fileId → `DocRev`, bumped after the relay acks a note's local changes. */
+export const INDEX_REVS = "docRevs";
