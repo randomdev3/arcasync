@@ -54,7 +54,28 @@ const CLICK_AVATAR = `
 	else el.click();
 	return true;
 `;
+const LIVE =
+	'return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live");';
 const FOCUS_EDITOR = "app.workspace.activeEditor.editor.cm.focus(); return true;";
+
+/** Waits until the active editor is bound to its note (y-codemirror publishes carets from then). */
+function waitLive(v) {
+	return waitFor(() => v.eval(LIVE), {
+		timeout: 5000,
+		interval: 50,
+		label: `${v.name} editor bound`,
+	});
+}
+
+/**
+ * Puts `v`'s caret on `line` of its bound editor and waits out the provider's awareness batch
+ * (FLUSH_DELAY_MS = 1 s), so peers have the caret before the step goes on.
+ */
+async function placeCaret(v, line) {
+	await waitLive(v);
+	await setCursor(v, { line, ch: 0 });
+	await sleep(1500);
+}
 
 async function waitActive(v, path, { timeout = 3000 } = {}) {
 	const t0 = Date.now();
@@ -120,17 +141,16 @@ export default {
 		// 1. API jump: bob's caret on line 180 of far.md → alice shows far.md with line 180 centred.
 		await openFile(alice, HOME);
 		await openFile(bob, FAR);
-		await setCursor(bob, { line: 180, ch: 0 });
+		await placeCaret(bob, 180);
 		await waitPeerOn(alice, bobId, FAR);
 		const t1 = Date.now();
 		await alice.eval(
 			"await app.plugins.plugins.teamsync.session.navigator.jumpTo(args.bobId); return true;",
-			{
-				bobId,
-			},
+			{ bobId },
 		);
-		await waitActive(alice, FAR);
-		await waitLine(alice, 180);
+		assert.ok(Date.now() - t1 <= 3000, `jumpTo resolved in ${Date.now() - t1} ms`);
+		await waitActive(alice, FAR, { timeout: 200 });
+		await waitLine(alice, 180, { timeout: 500 });
 		const fraction = await alice.eval(LINE_FRACTION, { line: 180 });
 		assert.ok(
 			fraction > 0.3 && fraction < 0.7,
@@ -146,9 +166,7 @@ export default {
 		await screenshot(alice, join(ctx.artifacts, "jump.png"));
 
 		// 2. Avatar click jumps too: bob's caret on line 60, alice back on home.md.
-		await setCursor(bob, { line: 60, ch: 0 });
-		// The provider batches awareness for FLUSH_DELAY_MS (1 s); let bob's caret move go out.
-		await sleep(1500);
+		await placeCaret(bob, 60);
 		await openFile(alice, HOME);
 		await waitFor(() => alice.eval(CLICK_AVATAR, { userId: bobId, shift: false }), {
 			timeout: 3000,
@@ -178,6 +196,7 @@ export default {
 			await sleep(Math.max(0, 2000 - (Date.now() - t)));
 		}
 		await openFile(bob, FAR);
+		await waitLive(bob);
 		await setCursor(bob, { line: 10, ch: 0 });
 		await waitActive(alice, FAR);
 		await waitLine(alice, 10);

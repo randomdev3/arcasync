@@ -1,4 +1,5 @@
 import { EditorView } from "@codemirror/view";
+import { FLUSH_DELAY_MS } from "@teamsync/shared";
 import { type App, MarkdownView, Notice, type TFile } from "obsidian";
 import * as Y from "yjs";
 import { LIVE_CLASS } from "../editor/EditorBinding";
@@ -9,6 +10,11 @@ import type { NavigatorPort } from "./Navigator";
 /** How long `reveal` waits for the editor to bind and for the target's awareness to arrive. */
 const REVEAL_TIMEOUT_MS = 3000;
 const POLL_MS = 50;
+/**
+ * A peer's state may arrive before its caret: focusing a note publishes `{user}` at once and the
+ * caret follows in a later batch (the provider flushes awareness every FLUSH_DELAY_MS).
+ */
+const CARET_GRACE_MS = FLUSH_DELAY_MS + 500;
 /** Caret moves of a followed user scroll at most this often. */
 const TRACK_THROTTLE_MS = 100;
 const RETURN_NOTICE_MS = 10_000;
@@ -79,10 +85,13 @@ export class ObsidianNavigatorPort implements NavigatorPort {
 		try {
 			await note.whenReady();
 			const deadline = Date.now() + REVEAL_TIMEOUT_MS;
+			let caretDeadline = deadline;
 			for (;;) {
 				const cm = this.boundEditor(path, note);
 				const caret = caretOf(note, userId);
-				if (cm && (caret.index !== null || caret.present || Date.now() >= deadline)) {
+				const now = Date.now();
+				if (caret.present) caretDeadline = Math.min(caretDeadline, now + CARET_GRACE_MS);
+				if (cm && (caret.index !== null || now >= caretDeadline)) {
 					const at = caret.index ?? 0;
 					cm.dispatch({
 						effects: EditorView.scrollIntoView(at, {
@@ -91,7 +100,7 @@ export class ObsidianNavigatorPort implements NavigatorPort {
 					});
 					return caret.index !== null;
 				}
-				if (Date.now() >= deadline || note.state === "closed") return false;
+				if (now >= deadline || note.state === "closed") return false;
 				await sleep(POLL_MS);
 			}
 		} catch {
