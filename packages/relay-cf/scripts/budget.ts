@@ -190,7 +190,8 @@ async function renewals(renewMs: number, clients: number, seconds: number, pinge
 		await sleep(seconds * 1000);
 		pings = (p?.pings ?? 0) - start;
 	});
-	const perHour = (n: number) => (n / (seconds * SCALE)) * 3600;
+	// The counters also run through the settle window before they are read.
+	const perHour = (n: number) => (n / ((seconds + SETTLE_MS / 1000) * SCALE)) * 3600;
 	return { renewalsPerHour: perHour(s.msgs_in / clients), pingsPerHour: perHour(pings) };
 }
 
