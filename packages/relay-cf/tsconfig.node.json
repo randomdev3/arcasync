@@ -5,6 +5,7 @@
 		"types": ["node"],
 		"noEmit": true,
 		"allowJs": true,
+		"allowImportingTsExtensions": true,
 		"checkJs": false
 	},
 	"include": ["test", "scripts", "vitest.config.ts", "vitest.integration.config.ts"]
