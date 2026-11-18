@@ -34,6 +34,8 @@ function onkeydown(event: KeyboardEvent) {
 	onclick={(event) => onselect(event.shiftKey)}
 	oncontextmenu={(event) => {
 		event.preventDefault();
+		// The view header has a context menu of its own.
+		event.stopPropagation();
 		onmenu(event);
 	}}
 	{onkeydown}

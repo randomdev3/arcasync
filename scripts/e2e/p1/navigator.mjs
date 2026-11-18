@@ -56,6 +56,49 @@ const CLICK_AVATAR = `
 `;
 const LIVE =
 	'return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live");';
+/** Counts alice's own awareness changes on the index doc and on every attached note. */
+const COUNT_OWN = `
+	const s = app.plugins.plugins.teamsync.session;
+	globalThis.__teamsyncOwn?.off();
+	const c = { n: 0, offs: [] };
+	const watch = (a) => {
+		const on = ({ added, updated, removed }) => {
+			if ([...added, ...updated, ...removed].includes(a.clientID)) c.n++;
+		};
+		a.on("change", on);
+		c.offs.push(() => a.off("change", on));
+	};
+	watch(s.awareness);
+	for (const h of app.plugins.plugins.teamsync.connections.docs.values()) if (h.provider.awareness) watch(h.provider.awareness);
+	c.off = () => c.offs.forEach((f) => f());
+	globalThis.__teamsyncOwn = c;
+	return true;
+`;
+const OWN_COUNT = "const c = globalThis.__teamsyncOwn; c.off(); return c.n;";
+/** Right-clicks `userId`'s avatar in the active view's header (dispatched on the element itself:
+ * the notices in the top right may cover it). */
+const AVATAR_MENU = `
+	const view = app.workspace.activeLeaf?.view;
+	const sel = '.view-header .teamsync-facepile .teamsync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
+	const el = view?.containerEl.querySelector(sel);
+	if (!el) return false;
+	const r = el.getBoundingClientRect();
+	const init = { bubbles: true, cancelable: true, button: 2, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+	el.dispatchEvent(new MouseEvent("contextmenu", init));
+	return true;
+`;
+const MENU_CLICK = `
+	const item = [...document.querySelectorAll(".menu .menu-item")].find((i) => i.textContent.trim() === args.title);
+	if (!item) return false;
+	item.click();
+	return true;
+`;
+const BADGE_STOP = `
+	const b = document.querySelector(".teamsync-follow-badge .teamsync-follow-stop");
+	if (!b) return false;
+	b.click();
+	return true;
+`;
 const FOCUS_EDITOR = "app.workspace.activeEditor.editor.cm.focus(); return true;";
 
 /** Waits until the active editor is bound to its note (y-codemirror publishes carets from then). */
@@ -201,9 +244,15 @@ export default {
 		await waitActive(alice, FAR);
 		await waitLine(alice, 10);
 		assert.equal(await isLineVisible(alice, 150), false, "line 150 starts out of view");
+		await alice.eval(COUNT_OWN);
 		await setCursor(bob, { line: 150, ch: 0 });
 		const caretMs = await waitLine(alice, 150, { timeout: 2000 });
-		ctx.step(`bob's caret 10 → 150 in far.md: alice shows line 150 in ${caretMs} ms`);
+		await sleep(1500);
+		const own = await alice.eval(OWN_COUNT);
+		assert.equal(own, 0, "alice publishes nothing while following a caret move");
+		ctx.step(
+			`bob's caret 10 → 150 in far.md: alice shows line 150 in ${caretMs} ms, publishing ${own} awareness changes`,
+		);
 		assert.equal(await alice.eval(FOLLOWING), bobId, "still following after the hops");
 		await screenshot(alice, join(ctx.artifacts, "following.png"));
 
@@ -224,6 +273,26 @@ export default {
 			label: "bob sees alice no longer following",
 		});
 		ctx.step("alice typed: follow stopped, notice shown, badge gone, presence cleared");
+
+		// 4b. The avatar menu follows; the badge's Stop button ends it without a notice.
+		// Native (OS) menus are not in the DOM; use Obsidian's own menus for this step.
+		const nativeMenus = await alice.eval('return app.vault.getConfig("nativeMenus") ?? null;');
+		await alice.eval('app.vault.setConfig("nativeMenus", false); return true;');
+		assert.ok(await alice.eval(AVATAR_MENU, { userId: bobId }), "bob's avatar");
+		await waitFor(() => alice.eval(MENU_CLICK, { title: "Follow bob" }), {
+			timeout: 2000,
+			label: "menu item 'Follow bob'",
+		});
+		await waitFollowing(alice, bobId, { label: "menu follows bob" });
+		await alice.eval('app.vault.setConfig("nativeMenus", args.v); return true;', {
+			v: nativeMenus,
+		});
+		const before = (await notices(alice)).length;
+		assert.ok(await alice.eval(BADGE_STOP), "badge Stop button");
+		await waitFollowing(alice, null, { label: "badge Stop ends the follow" });
+		assert.equal(await alice.eval(BADGE), null, "badge gone after Stop");
+		assert.ok((await notices(alice)).length <= before, "Stop shows no notice");
+		ctx.step("avatar menu → Follow bob; badge Stop → unfollowed");
 
 		// 5. The "Follow user…" command (typing in its modal does not cancel), then bob disconnects.
 		await alice.eval('app.commands.executeCommandById("teamsync:follow-user"); return true;');
