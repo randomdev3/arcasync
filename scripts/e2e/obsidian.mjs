@@ -7,7 +7,16 @@
 // `app` available.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,12 +74,32 @@ export function prepareVaults(names, { seed = {}, keep = false } = {}) {
 	});
 }
 
-/** Symlinks the built plugin (`packages/plugin/dist`) into the vault. */
+const PLUGIN_FILES = ["main.js", "manifest.json", "styles.css"];
+
+/**
+ * Symlinks the built plugin files (`packages/plugin/dist/*`) into a real per-vault plugin folder.
+ * Linking the whole `dist` folder would make every vault share one `data.json` (settings).
+ */
 function installPlugin(vaultPath) {
-	const link = join(vaultPath, ".obsidian", "plugins", "teamsync");
-	if (existsSync(link)) return;
-	mkdirSync(dirname(link), { recursive: true });
-	symlinkSync(join(ROOT, "packages", "plugin", "dist"), link);
+	const dir = join(vaultPath, ".obsidian", "plugins", "teamsync");
+	if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) unlinkSync(dir);
+	mkdirSync(dir, { recursive: true });
+	for (const file of PLUGIN_FILES) {
+		const link = join(dir, file);
+		if (!existsSync(link)) symlinkSync(join(ROOT, "packages", "plugin", "dist", file), link);
+	}
+}
+
+/** True once Obsidian has flushed the vault's enabled-plugin list with `teamsync` in it. */
+function pluginEnabledOnDisk(vaultPath) {
+	try {
+		const ids = JSON.parse(
+			readFileSync(join(vaultPath, ".obsidian", "community-plugins.json"), "utf8"),
+		);
+		return Array.isArray(ids) && ids.includes("teamsync");
+	} catch {
+		return false;
+	}
 }
 
 async function cdpAnswers(port) {
@@ -328,7 +357,7 @@ export async function waitConnected(vault, { timeout = 20000 } = {}) {
 export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
 	installPlugin(vault.path);
 	if (typeof sharedFolder === "string") sharedFolder = { path: sharedFolder, workspaceId: "" };
-	return vault.eval(
+	const result = await vault.eval(
 		`
 		await app.plugins.loadManifests();
 		if (!app.plugins.isEnabled()) await app.plugins.setEnable(true);
@@ -347,4 +376,11 @@ export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder
 	`,
 		{ serverUrl, name, role, sharedFolder },
 	);
+	// Obsidian writes `community-plugins.json` a few seconds after `enablePluginAndSave`. A quit
+	// inside that window loses it, and the relaunched vault never loads the plugin.
+	await waitFor(() => pluginEnabledOnDisk(vault.path), {
+		timeout: 15000,
+		label: `${vault.name} community-plugins.json lists teamsync`,
+	});
+	return result;
 }
