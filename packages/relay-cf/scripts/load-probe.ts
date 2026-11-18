@@ -9,7 +9,8 @@
  * inbound frame is known. Every phase opens its own socket(s); its Auth frame counts:
  * - pings:    N text "ping" frames, answered by the relay's auto-response (never reach the DO code).
  * - frames:   N awareness frames (no rows written).
- * - rows:     N one-character updates, 1 row each (N < 500, on a fresh doc, so no compaction).
+ * - rows:     N one-character updates, 1 row each, plus 1 `doc_clients` row for the probe's single
+ *             Yjs client on first sight (N < 500, on a fresh doc, so no compaction).
  * - connects: N connect + Auth + close cycles.
  * Phases are separated by `--pause-ms` (default 2 min) so their analytics windows do not overlap.
  * The relay env must allow dev login (`dev` locally, `probe` on Cloudflare).
@@ -353,7 +354,8 @@ export async function runProbe(options: ProbeOptions): Promise<ProbeResult> {
 		return { upgrades: 1, binaryFrames: s.binaryFrames, pings: 0, closes: 1 };
 	});
 
-	await run("rows", counts.rows, counts.rows, async () => {
+	// One log row per update, plus the doc_clients row for the one Yjs client (P1-8).
+	await run("rows", counts.rows, counts.rows + 1, async () => {
 		const token = await wsToken();
 		const s = await ProbeSocket.open(socketUrl);
 		await s.authenticate(doc, token);
