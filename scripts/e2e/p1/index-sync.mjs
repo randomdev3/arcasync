@@ -15,7 +15,9 @@ function create(v, name) {
 
 function rename(v, from, to) {
 	return v.eval(
-		`const f = app.vault.getFileByPath(args.from);
+		// The file can reach disk a moment before Obsidian's vault cache registers it.
+		`let f = null;
+		for (let i = 0; i < 50 && !(f = app.vault.getFileByPath(args.from)); i++) await new Promise((r) => setTimeout(r, 100));
 		if (!f) throw new Error("no such file: " + args.from);
 		await app.fileManager.renameFile(f, args.to); return true;`,
 		{ from: `${FOLDER}/${from}`, to: `${FOLDER}/${to}` },
@@ -24,7 +26,8 @@ function rename(v, from, to) {
 
 function trash(v, name) {
 	return v.eval(
-		`const f = app.vault.getFileByPath(args.path);
+		`let f = null;
+		for (let i = 0; i < 50 && !(f = app.vault.getFileByPath(args.path)); i++) await new Promise((r) => setTimeout(r, 100));
 		if (!f) throw new Error("no such file: " + args.path);
 		await app.fileManager.trashFile(f); return true;`,
 		{ path: `${FOLDER}/${name}` },
