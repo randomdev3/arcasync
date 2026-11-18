@@ -1,0 +1,40 @@
+import { isIgnoredPath, kindForPath } from "@teamsync/shared";
+
+/**
+ * Two path spaces meet here. Vault paths are what Obsidian uses (`Shared/notes/a.md`). Workspace
+ * paths are the index-doc keys, relative to the mapped folder (`notes/a.md`), so two vaults may map
+ * the workspace under different folder names. `root` is a vault folder path without leading or
+ * trailing slashes.
+ */
+
+/** A relative path that stays inside its base: no empty, `.` or `..` segments, nothing hidden. */
+function isSafeRelative(path: string): boolean {
+	if (path === "" || path.startsWith("/") || path.endsWith("/")) return false;
+	const segs = path.split("/");
+	if (segs.some((s) => s === "" || s === "." || s === "..")) return false;
+	if (segs.some((s) => s === ".obsidian" || s === ".trash")) return false;
+	return !isIgnoredPath(path);
+}
+
+/** True when `vaultPath` lies strictly inside the folder `root`. */
+export function isUnder(root: string, vaultPath: string): boolean {
+	return root !== "" && vaultPath.startsWith(`${root}/`) && vaultPath.length > root.length + 1;
+}
+
+/** Workspace path for a vault path under `root`; null when outside it or not syncable. */
+export function toWs(root: string, vaultPath: string): string | null {
+	if (!isUnder(root, vaultPath)) return null;
+	const rel = vaultPath.slice(root.length + 1);
+	return isSafeRelative(rel) ? rel : null;
+}
+
+/** Vault path for a workspace path; null when the workspace path could escape `root`. */
+export function toVault(root: string, wsPath: string): string | null {
+	if (root === "" || !isSafeRelative(wsPath)) return null;
+	return `${root}/${wsPath}`;
+}
+
+/** Workspace paths synced in P1: markdown notes only (`.excalidraw.md` is its own kind). */
+export function isSyncedNote(wsPath: string): boolean {
+	return kindForPath(wsPath) === "md";
+}

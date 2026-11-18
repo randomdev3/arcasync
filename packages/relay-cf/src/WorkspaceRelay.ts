@@ -25,7 +25,7 @@ import {
 	parseFrame,
 	SyncStep,
 } from "./protocol";
-import { DocStore } from "./store";
+import { type DocDebug, DocStore } from "./store";
 
 interface DocAuth {
 	ro: boolean;
@@ -37,6 +37,8 @@ interface DocAuth {
 interface Attachment {
 	id: string;
 	ws: string;
+	/** The user (JWT `sub`) of the first successful Auth; every later Auth must match it. */
+	uid: string | null;
 	/** Keyed by frame address (the document name unless the provider uses sessionAwareness). */
 	docs: Record<string, DocAuth>;
 }
@@ -49,6 +51,8 @@ interface Peer {
 }
 
 const RESET = { code: 4205, reason: "Reset Connection" };
+/** A socket published awareness claiming another user's identity. */
+const AWARENESS_IDENTITY = { code: 4403, reason: "awareness-identity" };
 const MAX_QUEUED_FRAMES = 1000;
 const MAX_QUEUED_BYTES = 5 * 1024 * 1024;
 /** Assumed idle time before the platform hibernates the object (for the awake-time estimate). */
@@ -147,7 +151,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		const pair = new WebSocketPair();
 		const [client, server] = [pair[0], pair[1]];
 		this.ctx.acceptWebSocket(server);
-		const att: Attachment = { id: crypto.randomUUID(), ws: workspaceId, docs: {} };
+		const att: Attachment = { id: crypto.randomUUID(), ws: workspaceId, uid: null, docs: {} };
 		server.serializeAttachment(att);
 		this.stats?.count("connects");
 		this.stats?.flush();
@@ -291,11 +295,13 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		const doc = documentNameOf(address);
 		const ref = parseDocName(doc);
 		let readOnly: boolean | null = null;
+		let uid: string | null = null;
 		try {
 			const claims = await verifyWsToken(token, this.env.TEAMSYNC_SECRET);
 			const att = this.attachment(ws);
 			if (ref && att && claims.ws === ref.workspaceId && claims.ws === att.ws) {
 				readOnly = claims.role === "viewer";
+				uid = claims.sub;
 			}
 		} catch {
 			readOnly = null;
@@ -304,12 +310,15 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		// Re-read after the await: the attachment is the source of truth.
 		const att = this.attachment(ws);
 		if (!att) return;
-		if (readOnly === null) {
+		// One socket is one user: a token for someone else is refused for that doc.
+		if (att.uid !== null && att.uid !== uid) readOnly = null;
+		if (readOnly === null || uid === null) {
 			this.send(ws, encode.permissionDenied(address, "permission-denied"));
 			if (att.docs[address]) this.dropDoc(ws, att, address, true);
 			this.takeQueued(att, address);
 			return;
 		}
+		att.uid = uid;
 		att.docs[address] = { ro: readOnly, aw: att.docs[address]?.aw ?? {} };
 		this.save(ws, att);
 		this.send(ws, encode.authenticated(address, readOnly));
@@ -382,8 +391,9 @@ export class WorkspaceRelay extends DurableObject<Env> {
 			return;
 		}
 		if (!empty) {
+			if (att.uid === null) return;
 			try {
-				this.store.append(doc, payload);
+				this.store.append(doc, payload, att.uid);
 			} catch (err) {
 				console.warn("relay: rejected undecodable update", err);
 				this.send(ws, encode.syncStatus(address, false));
@@ -414,9 +424,15 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		// A provider's own renewals carry exactly its own client; replies to QueryAwareness carry
 		// everyone it knows. So a single non-null entry claims ownership.
 		const only = entries.length === 1 ? entries[0] : undefined;
-		if (only && only.state !== "null" && !(String(only.clientId) in auth.aw)) {
-			auth.aw[String(only.clientId)] = only.clock;
+		const claimed =
+			only && only.state !== "null" && !(String(only.clientId) in auth.aw) ? only : undefined;
+		const owned = entries.filter((e) => e === claimed || String(e.clientId) in auth.aw);
+		if (owned.some((e) => this.impersonates(att, e))) {
+			for (const other of Object.keys(att.docs)) this.dropDoc(ws, att, other, true);
+			this.safeClose(ws, AWARENESS_IDENTITY.code, AWARENESS_IDENTITY.reason);
+			return;
 		}
+		if (claimed) auth.aw[String(claimed.clientId)] = claimed.clock;
 		const cache = this.awarenessCache(doc, att.id);
 		for (const entry of entries) {
 			const key = String(entry.clientId);
@@ -436,6 +452,19 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		for (const peer of this.peers(doc, att.id)) {
 			this.send(peer.ws, encode.awareness(peer.address, update));
 		}
+	}
+
+	/** True when an owned awareness state names a `user.id` other than the socket's user. */
+	private impersonates(att: Attachment, entry: AwarenessEntry): boolean {
+		if (entry.state === "null") return false;
+		let state: unknown;
+		try {
+			state = JSON.parse(entry.state);
+		} catch {
+			return false;
+		}
+		const user = (state as { user?: { id?: unknown } } | null)?.user;
+		return user?.id !== undefined && user.id !== att.uid;
 	}
 
 	private awarenessCache(doc: string, socketId: string): Map<number, AwarenessEntry> {
@@ -507,6 +536,10 @@ export class WorkspaceRelay extends DurableObject<Env> {
 			stateParts: parts,
 			databaseSize: this.ctx.storage.sql.databaseSize,
 		};
+	}
+
+	async debugDoc(doc: string): Promise<DocDebug> {
+		return this.store.debug(doc);
 	}
 
 	async debugReset(): Promise<{ ok: true }> {

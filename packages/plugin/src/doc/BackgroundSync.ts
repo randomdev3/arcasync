@@ -14,6 +14,11 @@ export interface BackgroundSyncOptions {
 	concurrency: number;
 	/** Socket connected and the index synced; rev catch-up only runs then. */
 	isOnline(): boolean;
+	/**
+	 * Resolves once index sync has applied queued index ↔ disk work (`session.settled()`), so a
+	 * job never looks for a remotely created file before it exists.
+	 */
+	settled?: () => Promise<void>;
 }
 
 /**
@@ -46,7 +51,18 @@ export class BackgroundSync {
 		};
 		revs.observe(onRevs);
 		this.cleanup.push(() => revs.unobserve(onRevs));
-		this.cleanup.push(index.observe((notes) => void this.queueEnrollments(notes)));
+		// A note entering the index (local add, remote add, move): catch up if its rev is ahead
+		// (the bump may have arrived before the entry), else enroll it if its file has text.
+		this.cleanup.push(
+			index.observe((notes) => {
+				const enroll = notes.filter(({ fileId }) => {
+					if (!this.options.revTracker.isChanged(fileId)) return true;
+					this.enqueue(fileId);
+					return false;
+				});
+				void this.queueEnrollments(enroll);
+			}),
+		);
 	}
 
 	/** Queues everything that may be behind; call when the index has (re)synced. */
@@ -122,6 +138,7 @@ export class BackgroundSync {
 
 	private async run(fileId: string): Promise<void> {
 		const { docs, revTracker, index } = this.options;
+		await this.options.settled?.();
 		const rev = revTracker.rev(fileId);
 		const path = index.pathOf(fileId);
 		if (!path) return;

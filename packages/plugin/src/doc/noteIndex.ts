@@ -1,5 +1,6 @@
-import { FileMeta } from "@teamsync/shared";
-import type * as Y from "yjs";
+import type { IndexDelta } from "../workspace/IndexStore";
+import { toVault } from "../workspace/paths";
+import type { WorkspaceSession } from "../workspace/WorkspaceSession";
 
 export interface IndexedNote {
 	fileId: string;
@@ -12,62 +13,52 @@ export interface NoteIndex {
 	notes(): IndexedNote[];
 	pathOf(fileId: string): string | null;
 	idOf(path: string): string | null;
-	/** Calls `listener` with notes added or moved by any transaction; returns unsubscribe. */
+	/** Calls `listener` with notes added, moved or re-pointed by any transaction; returns unsubscribe. */
 	observe(listener: (changed: IndexedNote[]) => void): () => void;
 }
 
-/**
- * `NoteIndex` read straight from the index doc's `files` map, whose keys are paths relative to
- * the mapped folder `root`. Lane A's IndexStore owns that map; this reader only parses it.
- */
-export class FilesMapIndex implements NoteIndex {
+/** `NoteIndex` over the session's IndexStore and its path lookups (index sync owns both). */
+export class SessionNoteIndex implements NoteIndex {
 	constructor(
-		private readonly files: Y.Map<unknown>,
+		private readonly session: WorkspaceSession,
 		private readonly root: string,
 	) {}
 
 	notes(): IndexedNote[] {
 		const out: IndexedNote[] = [];
-		for (const [key, value] of this.files) {
-			const note = this.toNote(key, value);
+		for (const { path, meta } of this.session.index?.entries() ?? []) {
+			const note = this.toNote(path, meta.id, meta.kind);
 			if (note) out.push(note);
 		}
 		return out;
 	}
 
 	pathOf(fileId: string): string | null {
-		for (const [key, value] of this.files) {
-			const note = this.toNote(key, value);
-			if (note?.fileId === fileId) return note.path;
-		}
-		return null;
+		return this.session.vaultPathOf(fileId);
 	}
 
 	idOf(path: string): string | null {
-		const prefix = `${this.root}/`;
-		if (!path.startsWith(prefix)) return null;
-		return (
-			this.toNote(path.slice(prefix.length), this.files.get(path.slice(prefix.length)))?.fileId ??
-			null
-		);
+		return this.session.fileIdOf(path);
 	}
 
 	observe(listener: (changed: IndexedNote[]) => void): () => void {
-		const handler = (event: Y.YMapEvent<unknown>) => {
+		return this.session.onIndexChange((delta: IndexDelta) => {
 			const changed: IndexedNote[] = [];
-			for (const key of event.keysChanged) {
-				const note = this.toNote(key, this.files.get(key));
-				if (note) changed.push(note);
-			}
+			for (const { path, meta } of delta.added) this.push(changed, path, meta.id, meta.kind);
+			for (const { to, meta } of delta.moved) this.push(changed, to, meta.id, meta.kind);
+			for (const { path, meta } of delta.changed) this.push(changed, path, meta.id, meta.kind);
 			if (changed.length > 0) listener(changed);
-		};
-		this.files.observe(handler);
-		return () => this.files.unobserve(handler);
+		});
 	}
 
-	private toNote(key: string, value: unknown): IndexedNote | null {
-		const meta = FileMeta.safeParse(value);
-		if (!meta.success || meta.data.kind !== "md") return null;
-		return { fileId: meta.data.id, path: `${this.root}/${key}` };
+	private push(out: IndexedNote[], wsPath: string, fileId: string, kind: string): void {
+		const note = this.toNote(wsPath, fileId, kind);
+		if (note) out.push(note);
+	}
+
+	private toNote(wsPath: string, fileId: string, kind: string): IndexedNote | null {
+		if (kind !== "md") return null;
+		const path = toVault(this.root, wsPath);
+		return path ? { fileId, path } : null;
 	}
 }

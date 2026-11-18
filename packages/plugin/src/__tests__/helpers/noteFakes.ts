@@ -1,9 +1,11 @@
 import type { HocuspocusProvider } from "@hocuspocus/provider";
+import { FileMeta } from "@teamsync/shared";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { type DiskIO, DiskWriter } from "../../doc/DiskWriter";
 import { DocManager, type DocManagerOptions } from "../../doc/DocManager";
 import type { NoteDocDeps } from "../../doc/NoteDoc";
+import type { IndexedNote, NoteIndex } from "../../doc/noteIndex";
 import { RevTracker } from "../../doc/RevTracker";
 import type { OpenDocHandle } from "../../net/ConnectionManager";
 import { SelfWriteRegistry } from "../../workspace/SelfWriteRegistry";
@@ -321,3 +323,48 @@ export async function waitUntil(fn: () => boolean, timeoutMs = 2000): Promise<vo
 }
 
 export const noteName = (fileId: string) => `ws:ws1:md:${fileId}`;
+
+/** `NoteIndex` read straight from a `files` Y.Map whose keys are relative to `root`. */
+export class FilesMapIndex implements NoteIndex {
+	constructor(
+		private readonly files: Y.Map<unknown>,
+		private readonly root: string,
+	) {}
+
+	notes(): IndexedNote[] {
+		const out: IndexedNote[] = [];
+		for (const [key, value] of this.files) {
+			const note = this.toNote(key, value);
+			if (note) out.push(note);
+		}
+		return out;
+	}
+
+	pathOf(fileId: string): string | null {
+		return this.notes().find((n) => n.fileId === fileId)?.path ?? null;
+	}
+
+	idOf(path: string): string | null {
+		const key = path.slice(this.root.length + 1);
+		return this.toNote(key, this.files.get(key))?.fileId ?? null;
+	}
+
+	observe(listener: (changed: IndexedNote[]) => void): () => void {
+		const handler = (event: Y.YMapEvent<unknown>) => {
+			const changed: IndexedNote[] = [];
+			for (const key of event.keysChanged) {
+				const note = this.toNote(key, this.files.get(key));
+				if (note) changed.push(note);
+			}
+			if (changed.length > 0) listener(changed);
+		};
+		this.files.observe(handler);
+		return () => this.files.unobserve(handler);
+	}
+
+	private toNote(key: string, value: unknown): IndexedNote | null {
+		const meta = FileMeta.safeParse(value);
+		if (!meta.success || meta.data.kind !== "md") return null;
+		return { fileId: meta.data.id, path: `${this.root}/${key}` };
+	}
+}

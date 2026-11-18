@@ -55,8 +55,8 @@ describe("load probe", () => {
 		expect(pings.sent.pings).toBe(20);
 		expect(pings.measured.msgs_in).toBe(0);
 		expect(phase("frames").measured.msgs_in).toBe(31);
-		// P1-8 adds a doc_clients row on a new client's first update: then this becomes 41.
-		expect(phase("rows").measured.app_rows_written).toBe(40);
+		// 40 log rows plus one doc_clients row for the probe's client on first sight (P1-8).
+		expect(phase("rows").measured.app_rows_written).toBe(41);
 		expect(phase("connects").measured.connects).toBe(5);
 		expect(phase("connects").measured.msgs_in).toBe(5);
 

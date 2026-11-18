@@ -20,6 +20,19 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+  relay-integration:
+    # Spawns local workerd through `wrangler dev`. The Obsidian e2e suite needs a GUI and stays local.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -F @teamsync/shared build
+      - run: pnpm -F @teamsync/relay-cf test:integration
   docker:
     runs-on: ubuntu-latest
     steps:

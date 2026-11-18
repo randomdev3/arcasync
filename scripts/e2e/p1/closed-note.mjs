@@ -34,23 +34,9 @@ function modify(v, text) {
 	);
 }
 
-/**
- * Index sync (lane A's Reconciler) adds a file found on disk to the index. Until that lane
- * merges, add the entry the way it would; afterwards the entry is already there.
- */
-async function ensureIndexed(alice) {
-	try {
-		return await waitFor(() => indexEntry(alice), { timeout: 5000, label: "seed indexed" });
-	} catch {
-		await alice.eval(
-			`const p = app.plugins.plugins.teamsync;
-			const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
-			p.session.indexDoc.getMap("files").set(args.key, { id, kind: "md", updatedBy: p.settings.user.id, updatedAt: Date.now() });
-			return true;`,
-			{ key: SEED.slice("Shared/".length) },
-		);
-		return indexEntry(alice);
-	}
+/** Index sync's Reconciler adds the seeded file to the index when alice connects. */
+function waitIndexed(alice) {
+	return waitFor(() => indexEntry(alice), { timeout: 10000, label: "seed indexed" });
 }
 
 /** Waits until alice's local changes to the note are acked and announced (rev differs from `before`). */
@@ -75,10 +61,10 @@ export default {
 	name: NAME,
 	needs: ["alice", "bob"],
 	seed: { alice: { [SEED]: "Seed text\n" } },
-	async run({ vaults, step }) {
+	async run({ vaults, step, restartServer }) {
 		const { alice, bob } = vaults;
 
-		const entry = await ensureIndexed(alice);
+		const entry = await waitIndexed(alice);
 		assert.ok(entry?.id, "seed.md has an index entry");
 		await waitDisk(bob, "Seed text\n", 15000);
 		await new Promise((r) => setTimeout(r, 5000));
@@ -86,7 +72,7 @@ export default {
 		assert.equal(diskText(bob.path, SEED), "Seed text\n");
 		step("seed enrolled once: bob's disk has it, alice's disk unchanged after 5 s");
 
-		let before = await rev(alice, entry.id);
+		let before;
 		await modify(alice, "Seed text\nline2\n");
 		await waitDisk(bob, "Seed text\nline2\n", 5000);
 		step("closed-note edit on alice reaches bob's disk within 5 s");
@@ -122,5 +108,31 @@ export default {
 		assert.equal(diskText(bob.path, SEED), "A-wins\n");
 		assert.equal(diskText(alice.path, SEED), "A-wins\n");
 		step(`divergence: bob keeps A-wins and one local copy (${settled[0]}) with B-offline`);
+
+		// Session stop/start and a relay restart with the note warm on bob.
+		const errors = [];
+		await bob.cdp("Runtime.enable");
+		const offConsole = bob.on("Runtime.consoleAPICalled", (e) => {
+			const text = e.args.map((a) => a.value ?? a.description ?? "").join(" ");
+			if (e.type === "error" && text.includes("TeamSync")) errors.push(text);
+		});
+		const command = (id) =>
+			bob.eval(`app.commands.executeCommandById(args.id); return true;`, { id });
+		await command("teamsync:disconnect");
+		await command("teamsync:connect");
+		await waitFor(
+			() => bob.eval(`return app.plugins.plugins.teamsync.connection?.status === "connected";`),
+			{ timeout: 20000, label: "bob reconnected" },
+		);
+		await modify(alice, "A-wins\nafter reconnect\n");
+		await waitDisk(bob, "A-wins\nafter reconnect\n", 15000);
+		step("bob converges after disconnect/connect");
+
+		await restartServer();
+		await modify(alice, "A-wins\nafter relay restart\n");
+		await waitDisk(bob, "A-wins\nafter relay restart\n", 30000);
+		offConsole();
+		assert.deepEqual(errors, [], "TeamSync console errors on bob");
+		step("bob converges after a relay restart; no TeamSync console errors");
 	},
 };

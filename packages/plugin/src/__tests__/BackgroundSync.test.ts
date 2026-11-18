@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { BackgroundSync } from "../doc/BackgroundSync";
 import { textHash } from "../doc/diskText";
-import { FilesMapIndex } from "../doc/noteIndex";
-import { device, FakeDisk, FakeRelay, waitUntil } from "./helpers/noteFakes";
+import { device, FakeDisk, FakeRelay, FilesMapIndex, waitUntil } from "./helpers/noteFakes";
 
 const PATH = "Shared/closed-note/seed.md";
 const KEY = "closed-note/seed.md";
