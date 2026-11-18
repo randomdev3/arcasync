@@ -2,6 +2,7 @@
 //
 // Starts the backend, prepares vaults alice, bob and carol, launches and connects alice and bob,
 // then runs every `scripts/e2e/<suite>/*.mjs` scenario (alphabetical). A scenario module exports
+// (as its default export or as named exports)
 // `{name, needs: ["alice", "bob", ...], seed?: {[vault]: {[path]: content}}, run(ctx)}` with
 // `ctx = {vaults, server, folder, step, artifacts, restartServer()}`; carol is launched only when
 // a scenario needs her (as a viewer). Each scenario works in its own folder `Shared/<name>/`
@@ -11,7 +12,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ARTIFACTS, screenshot } from "./editor.mjs";
-import { connectPlugin, prepareVaults, ROOT, VaultHandle } from "./obsidian.mjs";
+import { connectPlugin, prepareVaults, ROOT, VaultHandle, waitConnected } from "./obsidian.mjs";
 import { restartServer, SkipError, startServer } from "./server.mjs";
 
 const { values: opts } = parseArgs({
@@ -35,7 +36,12 @@ try {
 } catch {
 	files = [];
 }
-let scenarios = await Promise.all(files.map(async (f) => (await import(join(dir, f))).default));
+let scenarios = await Promise.all(
+	files.map(async (f) => {
+		const m = await import(join(dir, f));
+		return m.default ?? m;
+	}),
+);
 if (opts.only) {
 	const wanted = opts.only.split(",").map((s) => s.trim());
 	const missing = wanted.filter((w) => !scenarios.some((s) => s.name === w));
@@ -69,8 +75,13 @@ async function ensure(names) {
 	for (const name of names) {
 		const v = vaults[name];
 		if (!v) throw new Error(`unknown vault ${name}`);
-		if (!v.running) await v.launch();
-		if (connected.has(name)) continue;
+		const relaunched = !v.running;
+		if (relaunched) await v.launch();
+		if (connected.has(name)) {
+			// autoConnect reconnects a relaunched vault with its stored session.
+			if (relaunched) await waitConnected(v);
+			continue;
+		}
 		const r = await connectPlugin(v, { serverUrl: server.url, name, role: ROLES[name] });
 		if (r.status !== "connected") throw new Error(`${name} did not connect: ${JSON.stringify(r)}`);
 		connected.add(name);

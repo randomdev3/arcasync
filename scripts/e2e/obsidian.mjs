@@ -5,7 +5,7 @@
 // test process apart from the user's normal Obsidian, its vaults and its settings. Each window is
 // a Chrome DevTools Protocol page target; `VaultHandle.eval` runs async JS inside it with the global
 // `app` available.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -243,6 +243,17 @@ export class VaultHandle {
 			timeout: 10000,
 			label: `${this.name} CDP port released`,
 		});
+		// Electron helpers (renderer, GPU) can outlive a SIGKILLed main process for a moment.
+		await waitFor(() => this.processes().length === 0, {
+			timeout: 10000,
+			label: `${this.name} helper processes gone`,
+		});
+	}
+
+	/** Pids of every process (main and helpers) running on this vault's profile. */
+	processes() {
+		const r = spawnSync("pgrep", ["-f", `--user-data-dir=${this.profile}`], { encoding: "utf8" });
+		return r.stdout.split("\n").filter(Boolean).map(Number);
 	}
 
 	/** Graceful quit (SIGTERM); waits for the process to exit. */

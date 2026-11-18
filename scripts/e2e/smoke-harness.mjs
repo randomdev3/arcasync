@@ -56,7 +56,11 @@ const { "smoke-alice": alice, "smoke-bob": bob } = obsidian.vaults;
 
 try {
 	for (const v of [alice, bob]) {
-		assert.equal(await v.eval("return app.isMobile;"), false, `${v.name} starts in mobile mode`);
+		assert.equal(
+			await v.eval("return app.isMobile;"),
+			false,
+			`${v.name} starts in mobile mode (an interrupted run left it on; delete ${v.profile})`,
+		);
 	}
 	step("one Obsidian process per vault, both desktop");
 
@@ -88,6 +92,13 @@ try {
 		"relaunch should reuse the stored session",
 	);
 	step("bob quit + relaunch: same vault id, localStorage + IndexedDB kept, session reconnects");
+
+	await bob.kill();
+	assert.deepEqual(bob.processes(), [], "bob processes survived SIGKILL");
+	await bob.relaunch();
+	assert.equal(await bob.eval("return app.appId;"), idBefore, "vault id changed after kill");
+	await waitConnected(bob);
+	step("bob SIGKILL: no process left on its profile; relaunch keeps the id and reconnects");
 
 	// --- focus emulation ------------------------------------------------------------------
 	for (const v of [alice, bob]) {
