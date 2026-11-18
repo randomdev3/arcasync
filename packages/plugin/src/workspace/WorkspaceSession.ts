@@ -167,7 +167,7 @@ export class WorkspaceSession {
 		const reconciler = new Reconciler({
 			index,
 			files: new ObsidianLocalFiles(this.app, root, this.selfWrites),
-			known: new LocalStorageKnown(`teamsync:${this.vaultId}:${this.workspaceId}:known`),
+			known: new LocalStorageKnown(`teamsync:${this.vaultId}:${this.workspaceId}:known`, root),
 			userId: this.user.id,
 			isSynced: () => provider.synced,
 			isAcked: () => !provider.hasUnsyncedChanges,

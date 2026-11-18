@@ -55,7 +55,7 @@ function waitKnown(v, name) {
 			v.eval(
 				`const p = app.plugins.plugins.teamsync;
 				const raw = localStorage.getItem("teamsync:" + app.appId + ":" + p.settings.workspaceId + ":known");
-				return !!raw && args.path in JSON.parse(raw);`,
+				return !!raw && args.path in (JSON.parse(raw).files ?? {});`,
 				{ path: `index-sync/${name}` },
 			),
 		{ timeout: 10000, label: `${v.name} known lists ${name}` },

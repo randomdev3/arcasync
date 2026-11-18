@@ -94,19 +94,27 @@ export class ObsidianLocalFiles implements LocalFiles {
 	}
 }
 
-/** `KnownStore` in localStorage under `teamsync:<vaultId>:<workspaceId>:known`. */
+/**
+ * `KnownStore` in localStorage under `teamsync:<vaultId>:<workspaceId>:known`. The record names
+ * the folder it describes: after the user maps a different folder, the old record would make
+ * every indexed note look deleted offline, so a record for another root loads as empty.
+ */
 export class LocalStorageKnown implements KnownStore {
 	private last: string | null = null;
 
-	constructor(private readonly key: string) {}
+	constructor(
+		private readonly key: string,
+		private readonly root: string,
+	) {}
 
 	load(): Record<string, string> {
 		try {
 			const raw = window.localStorage.getItem(this.key);
-			const parsed = raw ? (JSON.parse(raw) as unknown) : {};
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			const parsed = (raw ? JSON.parse(raw) : null) as { root?: unknown; files?: unknown } | null;
+			const files = parsed?.root === this.root ? parsed.files : null;
+			if (files && typeof files === "object" && !Array.isArray(files)) {
 				return Object.fromEntries(
-					Object.entries(parsed).filter((e): e is [string, string] => typeof e[1] === "string"),
+					Object.entries(files).filter((e): e is [string, string] => typeof e[1] === "string"),
 				);
 			}
 		} catch (error) {
@@ -116,7 +124,7 @@ export class LocalStorageKnown implements KnownStore {
 	}
 
 	save(known: Record<string, string>): void {
-		const raw = JSON.stringify(known);
+		const raw = JSON.stringify({ root: this.root, files: known });
 		if (raw === this.last) return;
 		try {
 			window.localStorage.setItem(this.key, raw);
