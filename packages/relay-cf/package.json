@@ -4,8 +4,10 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "wrangler dev",
-		"build": "wrangler deploy --dry-run --outdir dist",
+		"dev": "wrangler dev --env dev",
+		"build": "wrangler deploy --dry-run --env production --outdir dist",
+		"deploy:production": "wrangler deploy --env production",
+		"deploy:probe": "wrangler deploy --env probe",
 		"typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
 		"test": "vitest run",
 		"test:integration": "vitest run -c vitest.integration.config.ts"

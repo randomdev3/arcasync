@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionResponse, WorkspacesResponse } from "@teamsync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 
 /** This lane's port range is 21000-21999 (the inspector takes port + 10000). */
@@ -74,5 +75,52 @@ describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
 
 	it("rejects an unknown role", async () => {
 		expect((await devLogin(relay.url, "mallory", "admin")).status).toBe(400);
+	});
+});
+
+describe("relay with TEAMSYNC_ALLOW_DEV_SECRET=0 (the dev secret is then rejected)", () => {
+	let relay: Relay;
+	let dir: string;
+
+	beforeAll(async () => {
+		dir = mkdtempSync(join(tmpdir(), "relay-config-"));
+		relay = await startRelayDev({
+			port: PORT + 100,
+			persistTo: dir,
+			vars: { TEAMSYNC_ALLOW_DEV_SECRET: "0" },
+		});
+	});
+
+	afterAll(async () => {
+		await relay?.stop();
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("reports the problem on /api/health", async () => {
+		const body = (await (await fetch(`${relay.url}/api/health`)).json()) as {
+			ok: boolean;
+			error?: string;
+		};
+		expect(body.ok).toBe(false);
+		expect(body.error).toMatch(/dev secret/);
+	});
+
+	it("answers 503 misconfigured on every other route", async () => {
+		const login = await devLogin(relay.url, "alice");
+		expect(login.status).toBe(503);
+		const body = (await login.json()) as { error: { code: string } };
+		expect(body.error.code).toBe("misconfigured");
+		expect((await fetch(`${relay.url}/api/server-info`)).status).toBe(503);
+		expect((await fetch(`${relay.url}/api/debug/stats?ws=x`)).status).toBe(503);
+		const upgradeStatus = await new Promise<number>((resolve, reject) => {
+			const socket = new WebSocket(`${relay.url.replace(/^http/, "ws")}/ws?ws=x`);
+			socket.on("unexpected-response", (_req, res) => {
+				resolve(res.statusCode ?? 0);
+				socket.terminate();
+			});
+			socket.on("open", () => reject(new Error("upgrade succeeded")));
+			socket.on("error", () => {});
+		});
+		expect(upgradeStatus).toBe(503);
 	});
 });

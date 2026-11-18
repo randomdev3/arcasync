@@ -14,6 +14,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { ApiError, Result } from "./AccountsDO";
+import { configError } from "./config";
 import type { Env } from "./env";
 
 export { AccountsDO } from "./AccountsDO";
@@ -52,6 +53,25 @@ app.use(
 
 const errorBody = (code: string, message: string, details?: unknown) => ({
 	error: { code, message, ...(details === undefined ? {} : { details }) },
+});
+
+let configErrorLogged = false;
+
+/**
+ * A deployment without a usable secret serves nothing: 503 everywhere (WebSocket upgrades
+ * included), except `/api/health`, which reports `{ok:false, error}` so the cause is visible.
+ */
+app.use("*", async (c, next) => {
+	const error = configError(c.env);
+	if (!error) return next();
+	if (!configErrorLogged) {
+		configErrorLogged = true;
+		console.error(`relay misconfigured: ${error}`);
+	}
+	if (c.req.path === `${API_PREFIX}/health`) {
+		return c.json({ ok: false, version: RELAY_VERSION, error });
+	}
+	return c.json(errorBody("misconfigured", error), 503);
 });
 
 function reply<T>(c: { json: (body: unknown, status?: number) => Response }, result: Result<T>) {

@@ -1,5 +1,9 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
+	// The top level is production-safe: a bare `wrangler deploy` ships with dev login and debug
+	// stats off and no secret, so every route answers 503 until `wrangler secret put
+	// TEAMSYNC_SECRET` (src/config.ts). Environments do not inherit vars or durable_objects,
+	// so every env repeats them (test/config.test.ts checks the resolved result).
 	"name": "teamsync-relay",
 	"main": "src/worker.ts",
 	"compatibility_date": "2026-11-01",
@@ -10,19 +14,33 @@
 		]
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountsDO", "WorkspaceRelay"] }],
-	// Local-dev defaults only. A real deployment sets TEAMSYNC_SECRET with `wrangler secret put`
-	// and turns dev login and the debug stats endpoint off.
 	"vars": {
-		"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
-		"TEAMSYNC_DEV_OPEN_LOGIN": "1",
-		"TEAMSYNC_DEBUG_STATS": "1",
+		"TEAMSYNC_DEV_OPEN_LOGIN": "0",
+		"TEAMSYNC_DEBUG_STATS": "0",
 		"TEAMSYNC_MAX_FILE_BYTES": "209715200"
 	},
-	// The Node server defaults to 8787; keep `pnpm dev` (turbo runs both) collision-free.
+	// `dev` settings are top-level only; this is the port for `wrangler dev --env dev`. The Node
+	// server defaults to 8787, so `pnpm dev` (turbo runs both) stays collision-free.
 	"dev": { "port": 8789 },
-	// `wrangler dev --env dev` (scripts/dev-server.mjs). vars and durable_objects are not inherited
-	// by environments, so they are repeated here.
+	"observability": { "enabled": false },
 	"env": {
+		// `pnpm -F @teamsync/relay-cf deploy:production` (user only).
+		"production": {
+			"name": "teamsync-relay",
+			"durable_objects": {
+				"bindings": [
+					{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
+					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
+				]
+			},
+			"vars": {
+				"TEAMSYNC_DEV_OPEN_LOGIN": "0",
+				"TEAMSYNC_DEBUG_STATS": "0",
+				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+			},
+			"observability": { "enabled": true }
+		},
+		// Local `wrangler dev --env dev` (pnpm dev, scripts/dev-server.mjs, tests). Never deployed.
 		"dev": {
 			"durable_objects": {
 				"bindings": [
@@ -32,11 +50,27 @@
 			},
 			"vars": {
 				"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
+				"TEAMSYNC_ALLOW_DEV_SECRET": "1",
+				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
+				"TEAMSYNC_DEBUG_STATS": "1",
+				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+			}
+		},
+		// Throwaway free-tier probe (R-9): open dev login and debug stats, secret via `wrangler
+		// secret put TEAMSYNC_SECRET --env probe`. Delete it after the probe.
+		"probe": {
+			"name": "teamsync-relay-probe",
+			"durable_objects": {
+				"bindings": [
+					{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
+					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
+				]
+			},
+			"vars": {
 				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
 				"TEAMSYNC_DEBUG_STATS": "1",
 				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
 			}
 		}
-	},
-	"observability": { "enabled": false }
+	}
 }
