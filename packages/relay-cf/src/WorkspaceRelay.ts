@@ -10,7 +10,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import { parseDocName } from "@teamsync/shared";
+import { KEEPALIVE_PING, KEEPALIVE_PONG, parseDocName } from "@teamsync/shared";
 import type { Env } from "./env";
 import { verifyWsToken } from "./jwt";
 import {
@@ -133,6 +133,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
+		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(KEEPALIVE_PING, KEEPALIVE_PONG));
 		this.store = new DocStore(ctx.storage.sql, (fn) => ctx.storage.transactionSync(fn));
 		this.stats = env.TEAMSYNC_DEBUG_STATS === "1" ? new Stats(ctx.storage.sql, this.store) : null;
 	}
