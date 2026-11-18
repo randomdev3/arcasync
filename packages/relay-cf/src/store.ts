@@ -6,6 +6,15 @@
  * at most `partBytes`, and the tail rows are deleted, all in one transaction. Sync replies are
  * computed on the encoded state (`Y.diffUpdate`, `Y.encodeStateVectorFromUpdate`), so an object
  * woken from hibernation only has to read rows, never rebuild a document.
+ *
+ * Compaction keeps NON-GC merged state (decision R-6): `Y.mergeUpdates` never drops deleted
+ * items, which P3 needs for Yjs snapshots (versions, diffs) and per-client attribution through
+ * `doc_clients`. GC-compaction (a transient `Y.Doc` with gc, plus materialised text for older
+ * versions) is deferred to P3 retention; a ring-slot tail (no delete rows) waits for the R-7
+ * probe to show whether deletes count as rows written on Cloudflare.
+ *
+ * The merged states are cached in a bounded LRU (`maxCachedDocs`, `maxCachedBytes`). Eviction
+ * is always safe: every accepted update is already in SQL, so an evicted doc just reloads.
  */
 import * as Y from "yjs";
 
@@ -25,6 +34,10 @@ export interface DocStoreOptions {
 	compactAfterBytes?: number;
 	/** Maximum size of one stored state part (CF caps a row at 8 MB). */
 	partBytes?: number;
+	/** LRU bound on cached documents. */
+	maxCachedDocs?: number;
+	/** LRU bound on cached bytes (merged state plus not yet merged updates). */
+	maxCachedBytes?: number;
 }
 
 interface DocEntry {
@@ -34,9 +47,13 @@ interface DocEntry {
 	tailRows: number;
 	tailBytes: number;
 	nextSeq: number;
+	/** `base` plus `pending`, for the cache byte bound. */
+	bytes: number;
 }
 
 const MiB = 1024 * 1024;
+/** A merged state this large is logged once per load: P3 retention should GC-compact it. */
+export const LARGE_STATE_BYTES = 16 * MiB;
 const EMPTY_UPDATE = new Uint8Array([0, 0]);
 
 function bytes(value: unknown): Uint8Array {
@@ -61,6 +78,11 @@ export class DocStore {
 	private readonly compactAfterRows: number;
 	private readonly compactAfterBytes: number;
 	private readonly partBytes: number;
+	private readonly maxCachedDocs: number;
+	private readonly maxCachedBytes: number;
+	private cachedBytes = 0;
+	/** Docs already reported as large since they were (re)loaded. */
+	private readonly warned = new Set<string>();
 	/** Rows written by this store (inserts, deletes, compaction), from the SQL cursors. */
 	rowsWritten = 0;
 	compactions = 0;
@@ -73,6 +95,8 @@ export class DocStore {
 		this.compactAfterRows = options.compactAfterRows ?? 500;
 		this.compactAfterBytes = options.compactAfterBytes ?? MiB;
 		this.partBytes = options.partBytes ?? MiB;
+		this.maxCachedDocs = options.maxCachedDocs ?? 64;
+		this.maxCachedBytes = options.maxCachedBytes ?? 64 * MiB;
 		sql.exec(`CREATE TABLE IF NOT EXISTS doc_updates (
 			doc TEXT NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL,
 			PRIMARY KEY (doc, seq)) WITHOUT ROWID`);
@@ -88,9 +112,19 @@ export class DocStore {
 		return rows;
 	}
 
+	/** Number of documents currently held in the cache. */
+	get cachedDocs(): number {
+		return this.docs.size;
+	}
+
 	private load(doc: string): DocEntry {
 		const cached = this.docs.get(doc);
-		if (cached) return cached;
+		if (cached) {
+			// Re-insert: Map iteration order is the LRU order (oldest first).
+			this.docs.delete(doc);
+			this.docs.set(doc, cached);
+			return cached;
+		}
 		const parts = this.run("SELECT data FROM doc_state WHERE doc = ? ORDER BY part", doc).map((r) =>
 			bytes(r.data),
 		);
@@ -99,15 +133,45 @@ export class DocStore {
 		const tailBytes = updates.reduce((n, u) => n + u.length, 0);
 		if (parts.length > 0) updates.unshift(concat(parts));
 		const last = tail[tail.length - 1];
+		const base = updates.length === 0 ? EMPTY_UPDATE : Y.mergeUpdates(updates);
 		const entry: DocEntry = {
-			base: updates.length === 0 ? EMPTY_UPDATE : Y.mergeUpdates(updates),
+			base,
 			pending: [],
 			tailRows: tail.length,
 			tailBytes,
 			nextSeq: last ? Number(last.seq) + 1 : 1,
+			bytes: base.length,
 		};
 		this.docs.set(doc, entry);
+		this.cachedBytes += entry.bytes;
+		this.warned.delete(doc);
+		this.checkSize(doc, base);
+		this.evict(doc);
 		return entry;
+	}
+
+	private resize(entry: DocEntry, bytes: number): void {
+		this.cachedBytes += bytes - entry.bytes;
+		entry.bytes = bytes;
+	}
+
+	/** Drops least recently used docs until both bounds hold; `keep` is never evicted. */
+	private evict(keep: string): void {
+		for (const [doc, entry] of this.docs) {
+			if (this.docs.size <= this.maxCachedDocs && this.cachedBytes <= this.maxCachedBytes) return;
+			if (doc === keep) continue;
+			this.docs.delete(doc);
+			this.cachedBytes -= entry.bytes;
+		}
+	}
+
+	private checkSize(doc: string, state: Uint8Array): void {
+		if (state.length <= LARGE_STATE_BYTES || this.warned.has(doc)) return;
+		this.warned.add(doc);
+		console.warn(
+			`relay: merged state of ${doc} is ${(state.length / MiB).toFixed(1)} MiB (> 16 MiB); ` +
+				"it keeps deleted content until P3 retention GC-compacts it",
+		);
 	}
 
 	/** Merged V1 state of the document (an empty update for an unknown document). */
@@ -116,6 +180,9 @@ export class DocStore {
 		if (entry.pending.length > 0) {
 			entry.base = Y.mergeUpdates([entry.base, ...entry.pending]);
 			entry.pending = [];
+			this.resize(entry, entry.base.length);
+			this.checkSize(doc, entry.base);
+			this.evict(doc);
 		}
 		return entry.base;
 	}
@@ -132,6 +199,8 @@ export class DocStore {
 		entry.pending.push(update);
 		entry.tailRows += 1;
 		entry.tailBytes += update.length;
+		this.resize(entry, entry.bytes + update.length);
+		this.evict(doc);
 		if (entry.tailRows >= this.compactAfterRows || entry.tailBytes >= this.compactAfterBytes) {
 			this.compact(doc);
 			return true;
