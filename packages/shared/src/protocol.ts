@@ -36,7 +36,14 @@ export const SessionResponse = z.object({
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
-export const DevLoginRequest = z.object({ name: z.string().min(1).max(60), device: DeviceInfo });
+export const WorkspacesResponse = z.object({ workspaces: z.array(WorkspaceSummary) });
+export type WorkspacesResponse = z.infer<typeof WorkspacesResponse>;
+
+export const DevLoginRequest = z.object({
+	name: z.string().min(1).max(60),
+	device: DeviceInfo,
+	role: Role.optional(),
+});
 export const InviteAcceptRequest = z.object({
 	token: z.string(),
 	device: DeviceInfo,
@@ -64,7 +71,13 @@ export const ServerInfo = z.object({
 	name: z.string(),
 	version: z.string(),
 	publicUrl: z.string(),
-	features: z.object({ devOpenLogin: z.boolean(), presign: z.boolean(), excalidraw: z.boolean() }),
+	features: z.object({
+		devOpenLogin: z.boolean(),
+		presign: z.boolean(),
+		excalidraw: z.boolean(),
+		textKeepalive: z.boolean().optional(),
+		presenceRenewalMs: z.number().optional(),
+	}),
 	limits: z.object({ maxFileBytes: z.number(), chunkBytes: z.number() }),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;
