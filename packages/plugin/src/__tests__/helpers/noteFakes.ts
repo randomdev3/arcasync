@@ -248,6 +248,7 @@ export interface DeviceOptions {
 	readonly?: boolean;
 	warmDocs?: number;
 	flushDelayMs?: number;
+	editorGraceMs?: number;
 	paths?: Record<string, string>;
 	/** Resolves note paths; default: the `paths` table. */
 	pathOf?: (fileId: string) => string | null;
@@ -295,6 +296,7 @@ export function device(options: DeviceOptions) {
 		pathOf: options.pathOf ?? ((fileId) => paths[fileId] ?? null),
 		warmDocs: options.warmDocs ?? 20,
 		flushDelayMs: options.flushDelayMs ?? 10,
+		editorGraceMs: options.editorGraceMs ?? 20,
 	};
 	const docs = new DocManager(managerOptions);
 	return {

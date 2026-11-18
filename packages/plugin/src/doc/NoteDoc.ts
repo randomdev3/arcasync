@@ -117,6 +117,12 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 		});
 	}
 
+	/** Runs once when the note is closed (evicted or its session stopped); returns unsubscribe. */
+	onClose(listener: () => void): () => void {
+		this.closeListeners.add(listener);
+		return () => this.closeListeners.delete(listener);
+	}
+
 	hasLocalData(): boolean {
 		return this.ytext.length > 0 || isEnrolled(this.ydoc);
 	}

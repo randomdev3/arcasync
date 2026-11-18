@@ -3,6 +3,7 @@
  * Vitest aliases it here so plugin modules can be imported in Node. Only the
  * surface the plugin actually touches is implemented.
  */
+import { StateField } from "@codemirror/state";
 
 export class Notice {
 	static messages: string[] = [];
@@ -85,6 +86,12 @@ export function normalizePath(path: string): string {
 }
 
 export class MarkdownView {}
+
+/** Obsidian's editor-info state field; never present in a test editor state. */
+export const editorInfoField = StateField.define<unknown>({
+	create: () => null,
+	update: (value) => value,
+});
 
 export abstract class AbstractInputSuggest<T> {
 	constructor(
