@@ -214,6 +214,17 @@ export default {
 			assert.equal(diskText(alice.path, OTHER), "Other note\n");
 			step("file switch away and back rebinds; bob's typing meanwhile lands once, no local copies");
 
+			// A session stop/start under an open editor unbinds it and binds it again.
+			await alice.eval(
+				"const s = app.plugins.plugins.teamsync.session; s.stop(); s.start(); return true;",
+			);
+			assert.equal(await activeLive(alice), false, "alice unbound while the session is down");
+			await waitLive(alice);
+			await typeKeys(bob, " rho");
+			expected = expected.replace("omicron!\n", "omicron! rho\n");
+			await waitAllEqual([alice, bob], expected, { timeout: 4000 });
+			step("session stop/start: alice's open editor rebinds and follows bob again");
+
 			// 6. Viewer: carol's editor is read-only and her keys change nothing.
 			await waitFor(() => diskText(carol.path, CO) === expected, {
 				timeout: 20000,
