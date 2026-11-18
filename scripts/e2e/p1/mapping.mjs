@@ -37,6 +37,28 @@ export default {
 		);
 		ctx.step(`status bar: "${status}"`);
 
+		await alice.eval('app.setting.open(); app.setting.openTabById("teamsync"); return true;');
+		try {
+			const form = await waitFor(
+				() =>
+					alice.eval(`// The settings tab may live in its own window: query its container, not document.
+						const el = app.setting.activeTab?.id === "teamsync" ? app.setting.activeTab.containerEl : null;
+						const folder = el?.querySelector(".teamsync-shared-folder");
+						const options = [...(el?.querySelectorAll("select.teamsync-workspace option") ?? [])];
+						return folder && options.length
+							? { folder: folder.value, workspaces: options.map((o) => o.textContent) } : null;`),
+				{ timeout: 5000, label: "alice settings tab shows folder and workspace" },
+			);
+			assert.equal(form.folder, "Shared");
+			assert.ok(
+				form.workspaces.some((w) => /^dev$/i.test(w)),
+				`workspaces: ${form.workspaces}`,
+			);
+			ctx.step(`settings tab: folder "${form.folder}", workspaces [${form.workspaces}]`);
+		} finally {
+			await alice.eval("app.setting.close(); return true;");
+		}
+
 		const before = await alice.eval(DOCS);
 		const notesBefore = await alice.eval(NOTES);
 		await alice.eval("const s = app.plugins.plugins.teamsync.session; s.stop(); s.start();");
