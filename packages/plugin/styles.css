@@ -59,3 +59,35 @@
 .status-bar-item.teamsync-status-bar {
 	cursor: default;
 }
+
+/*
+ * Remote carets and selections (P1-6). The DOM and inline colours come from y-codemirror.next;
+ * its baseTheme rules carry two classes, so these carry at least three to override them.
+ * The name label shows on hover (upstream) and for 2 s after the caret moves (`.is-recent`).
+ */
+.cm-editor .cm-content .cm-ySelectionCaret > .cm-ySelectionInfo {
+	top: auto;
+	bottom: 100%;
+	padding: 0 4px;
+	border-radius: var(--radius-s) var(--radius-s) var(--radius-s) 0;
+	color: #1a1a1a;
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	pointer-events: none;
+}
+
+.cm-editor .cm-content .cm-ySelectionCaret.is-recent > .cm-ySelectionInfo {
+	opacity: 1;
+}
+
+/* Until the note doc is ready its awareness may describe text the editor does not show yet. */
+.cm-editor.teamsync-carets-pending .cm-content .cm-ySelectionCaret {
+	display: none;
+}
+
+.cm-editor.teamsync-carets-pending .cm-content .cm-ySelection,
+.cm-editor.teamsync-carets-pending .cm-content .cm-yLineSelection {
+	/* biome-ignore lint/complexity/noImportantStyles: the selection colour is an inline style. */
+	background-color: transparent !important;
+}
