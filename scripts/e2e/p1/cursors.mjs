@@ -119,6 +119,32 @@ export default {
 			assert.ok(hits >= 1, `no pixel near ${bobUser.color} in ${file}`);
 			step(`pixel check: ${hits} pixel(s) near ${bobUser.color} in the caret clip`);
 
+			const pendingGate = await alice.eval(
+				'return !!document.querySelector(".cm-editor.teamsync-carets-pending");',
+			);
+			assert.equal(pendingGate, false, "alice's editor left the not-ready caret gate");
+			// The label shows for 2 s after a move (`.is-recent`), then only on hover.
+			const LABEL = `const el = document.querySelector(".cm-ySelectionCaret");
+				const info = el?.querySelector(".cm-ySelectionInfo");
+				return el && info ? { recent: el.classList.contains("is-recent"),
+					opacity: getComputedStyle(info).opacity } : null;`;
+			await setCursor(bob, { line: 0, ch: 2 });
+			await waitFor(
+				async () => {
+					const l = await alice.eval(LABEL);
+					return l?.recent && l.opacity === "1";
+				},
+				{ timeout: 3000, label: "bob's label shows after he moves" },
+			);
+			await waitFor(
+				async () => {
+					const l = await alice.eval(LABEL);
+					return l && !l.recent && l.opacity === "0";
+				},
+				{ timeout: 4000, label: "bob's label hides 2 s after he stops" },
+			);
+			step("label shows after a move and hides again when the caret rests");
+
 			await selectRange(bob, { line: 0, ch: 0 }, { line: 1, ch: 4 });
 			const marks = await waitFor(
 				async () => {
