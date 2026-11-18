@@ -81,9 +81,19 @@ export interface RequestUrlResponse {
 	text: string;
 }
 
-/** Replaced per-test with `vi.mocked(requestUrl)`. */
-export const requestUrl = async (_param: RequestUrlParam): Promise<RequestUrlResponse> => {
-	throw new Error("requestUrl is not stubbed in this test");
+/** Tests replace `requestUrlMock.impl` to stub responses. */
+export const requestUrlMock = {
+	impl: async (_param: RequestUrlParam): Promise<RequestUrlResponse> => ({
+		status: 200,
+		headers: {},
+		arrayBuffer: new ArrayBuffer(0),
+		json: {},
+		text: "{}",
+	}),
 };
+
+export function requestUrl(param: RequestUrlParam): Promise<RequestUrlResponse> {
+	return requestUrlMock.impl(param);
+}
 
 export type App = unknown;
