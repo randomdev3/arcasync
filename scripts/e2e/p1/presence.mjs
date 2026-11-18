@@ -146,7 +146,11 @@ export default {
 		ctx.step("bob: 50 mouse moves + sidebar focus → 0 own presence changes; 2 note switches → 2");
 
 		// 5. Status bar counts users.
-		const status = await waitStatus(alice, /\b2 online\b/, "alice status bar 2 online");
+		// Users online: alice, bob and any vault an earlier scenario launched (coedit's carol).
+		const others = Object.values(ctx.vaults).filter((v) => v.running && v !== alice && v !== bob);
+		const online = 2 + others.length;
+		const onlineRe = (n) => new RegExp(`\\b${n} online\\b`);
+		const status = await waitStatus(alice, onlineRe(online), `alice status bar ${online} online`);
 		ctx.step(`status bar: "${status}"`);
 
 		// 2. bob moves to y.md → dimmed `elsewhere` in alice's x.md header.
@@ -170,8 +174,12 @@ export default {
 			timeout: 3000,
 			label: "bob's avatar gone after disconnect",
 		});
-		await waitStatus(alice, /\b1 online\b/, "alice status bar 1 online after bob disconnects");
-		ctx.step(`bob disconnected: avatar gone after ${left.ms} ms, status "1 online"`);
+		await waitStatus(
+			alice,
+			onlineRe(online - 1),
+			`alice status bar ${online - 1} online after bob disconnects`,
+		);
+		ctx.step(`bob disconnected: avatar gone after ${left.ms} ms, status "${online - 1} online"`);
 		await bob.eval('app.commands.executeCommandById("teamsync:connect"); return true;');
 		await waitConnected(bob);
 		await openFile(bob, X);
@@ -221,11 +229,11 @@ export default {
 			timeout: 10000,
 			label: "bob here after relaunch",
 		});
-		await waitStatus(alice, /\b2 online\b/, "alice status bar 2 online after relaunch");
+		await waitStatus(alice, onlineRe(online), `alice status bar ${online} online after relaunch`);
 		for (const v of [alice, bob]) {
 			const s = await v.eval("return app.plugins.plugins.teamsync.connection.status;");
 			assert.equal(s, "connected", `${v.name} still connected`);
 		}
-		ctx.step("bob relaunched: here again, 2 online, both connected");
+		ctx.step(`bob relaunched: here again, ${online} online, both connected`);
 	},
 };
