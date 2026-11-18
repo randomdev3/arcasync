@@ -131,7 +131,8 @@ export class EditorBindings {
 		const docs = session?.docs;
 		if (!session || !docs) return null;
 		const fileId = session.fileIdOf(file.path);
-		if (fileId) return { docs, fileId, file };
+		// Over the device's size limit: the editor stays a plain local editor.
+		if (fileId) return docs.exceedsLimit(fileId, file.path) ? null : { docs, fileId, file };
 		// Mid-rename the editor's path and the index disagree for a moment; the note is the same.
 		const sameNote = current?.docs === docs && current.file === file;
 		return sameNote && session.vaultPathOf(current.fileId) !== null ? current : null;
@@ -281,6 +282,8 @@ export class EditorBinding implements PluginValue {
 				() => "closed" as const,
 			);
 			if ((await Promise.race([ready, cancelled])) !== "ready" || stale()) return;
+			// The synced doc turned out over the size limit; its reconcile already warned.
+			if (note.tooLarge) return;
 			attached = await docs.editorAttached(note, () => {
 				if (stale() || note.state === "closed") return false;
 				if (this.view.dom.closest(SUB_EDITOR)) return false;

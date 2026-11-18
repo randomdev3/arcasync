@@ -4,6 +4,7 @@ import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { type DiskIO, DiskWriter } from "../../doc/DiskWriter";
 import { DocManager, type DocManagerOptions } from "../../doc/DocManager";
+import { utf8Bytes } from "../../doc/diskText";
 import type { NoteDocDeps } from "../../doc/NoteDoc";
 import type { IndexedNote, NoteIndex } from "../../doc/noteIndex";
 import { RevTracker } from "../../doc/RevTracker";
@@ -247,6 +248,8 @@ export interface DeviceOptions {
 	vaultId?: string;
 	readonly?: boolean;
 	warmDocs?: number;
+	/** `limits().maxMdBytes`; file sizes come from the fake disk. */
+	maxBytes?: number;
 	flushDelayMs?: number;
 	editorGraceMs?: number;
 	paths?: Record<string, string>;
@@ -295,6 +298,11 @@ export function device(options: DeviceOptions) {
 		track: (n) => revTracker.track(n),
 		pathOf: options.pathOf ?? ((fileId) => paths[fileId] ?? null),
 		warmDocs: options.warmDocs ?? 20,
+		maxBytes: options.maxBytes,
+		sizeOf: (path) => {
+			const text = disk.files.get(path);
+			return text === undefined ? null : utf8Bytes(text);
+		},
 		flushDelayMs: options.flushDelayMs ?? 10,
 		editorGraceMs: options.editorGraceMs ?? 20,
 	};

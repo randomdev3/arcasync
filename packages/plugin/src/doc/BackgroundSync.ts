@@ -30,7 +30,9 @@ export interface BackgroundSyncOptions {
  * - a note with local changes not yet announced (`RevTracker.dirty()`) → attach it so the
  *   handshake sends them and the bump follows.
  * At most `concurrency` notes are processed at once. A rev that changes during its job is
- * queued again.
+ * queued again. A note over the device's size limit (`DocManager.exceedsLimit`, or found too
+ * large once attached) is skipped and its rev recorded, so it is not attached again until the
+ * next change.
  */
 export class BackgroundSync {
 	private readonly queue = new Set<string>();
@@ -94,7 +96,7 @@ export class BackgroundSync {
 			return;
 		}
 		const path = index.pathOf(fileId);
-		if (!path) return;
+		if (!path || docs.exceedsLimit(fileId, path)) return;
 		const note = await docs.acquire(fileId, path);
 		try {
 			await note.whenReady();
@@ -142,6 +144,10 @@ export class BackgroundSync {
 		const rev = revTracker.rev(fileId);
 		const path = index.pathOf(fileId);
 		if (!path) return;
+		if (docs.exceedsLimit(fileId, path)) {
+			revTracker.markSynced(fileId, rev);
+			return;
+		}
 		try {
 			const note = await docs.acquire(fileId, path);
 			try {
@@ -171,6 +177,7 @@ export class BackgroundSync {
 		const { revTracker, readDisk } = this.options;
 		for (const { fileId, path } of notes) {
 			if (revTracker.rev(fileId) || revTracker.isKnown(fileId)) continue;
+			if (this.options.docs.exceedsLimit(fileId, path)) continue;
 			const raw = await readDisk(path);
 			if (raw !== null && diskText(raw) !== "") this.enqueue(fileId);
 		}

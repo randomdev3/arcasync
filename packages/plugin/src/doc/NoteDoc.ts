@@ -36,6 +36,8 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 	state: NoteDocState = "loading";
 	/** Set by the editor binding (P1-4): an open editor owns the buffer and its disk saves. */
 	editorBound = false;
+	/** Set by `DocManager` after each reconcile: the file or doc is over `maxMdBytes`. */
+	tooLarge = false;
 	/** Set by `DocManager` to the first reconcile after `whenSynced`. */
 	ready: Promise<void> | null = null;
 
