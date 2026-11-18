@@ -108,7 +108,8 @@ The scenario proves the following under emulation:
 
 `bundle.test.ts` checks that `dist/main.js` loads only `obsidian` and `@codemirror/*`. A Node
 built-in, `electron`, or a dynamic `require` would throw at load time on iOS and Android. The
-one `process.env` read comes from lib0 and sits behind its `typeof process` check. The plugin
+only `process.*` reads (`argv`, `env`, `release`, `stdout`) come from lib0's environment module,
+and each one sits behind its `isNode` check (`typeof process !== "undefined" && …`). The plugin
 has no polling loop. Its only periodic timers are:
 - the provider's local connection check;
 - the presence policy's 30 s local check, which sends a renewal every 120 s while active and

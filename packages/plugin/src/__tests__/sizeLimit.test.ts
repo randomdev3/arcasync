@@ -103,6 +103,49 @@ describe("maxBytes (mobile maxMdBytes)", () => {
 		warn.mockRestore();
 	});
 
+	it("background sync of a remote doc over the limit attaches once and settles its rev", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const relay = new FakeRelay();
+		const index = new Y.Doc();
+		const files = index.getMap<unknown>("files");
+		const revs = index.getMap<unknown>("docRevs");
+		const notes = new FilesMapIndex(files, "Shared");
+		const id = newId();
+		relay.remoteEdit(noteName(id), (doc) => Y.applyUpdate(doc, enrollmentUpdate(BIG)));
+		const d = device({
+			relay,
+			disk: new FakeDisk({ "Shared/r.md": "" }),
+			maxBytes: MAX,
+			revs,
+			pathOf: (fileId) => notes.pathOf(fileId),
+		});
+		const bg = new BackgroundSync({
+			docs: d.docs,
+			revTracker: d.revTracker,
+			revs,
+			index: notes,
+			readDisk: (p) => d.writer.read(p),
+			concurrency: 1,
+			isOnline: () => true,
+		});
+		bg.start();
+		files.set("r.md", { id, kind: "md", updatedBy: "x", updatedAt: 1 });
+		revs.set(id, { at: 1, by: "alice" });
+		await waitUntil(() => d.notices.length === 1);
+		await bg.idle();
+		expect(relay.frames.attaches).toBe(1);
+		expect(d.revTracker.isChanged(id)).toBe(false);
+		expect(d.disk.files.get("Shared/r.md")).toBe("");
+
+		// A reconnect's catch-up does not attach it again; only a new rev does.
+		bg.catchUp();
+		await bg.idle();
+		expect(relay.frames.attaches).toBe(1);
+		expect(d.notices).toHaveLength(1);
+		bg.dispose();
+		warn.mockRestore();
+	});
+
 	it("an attached note whose file grows over the limit is neither enrolled nor overwritten", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const relay = new FakeRelay();
