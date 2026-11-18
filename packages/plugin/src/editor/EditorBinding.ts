@@ -17,7 +17,7 @@ import { editorInfoField, MarkdownView, type TFile } from "obsidian";
 import { yCollab, ySyncAnnotation, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
-import type { WorkspaceSession } from "../workspace/WorkspaceSession";
+import type { SessionUser, WorkspaceSession } from "../workspace/WorkspaceSession";
 
 /** Marks an editor whose buffer is bound to its note's CRDT. */
 export const LIVE_CLASS = "teamsync-live";
@@ -151,9 +151,7 @@ export class EditorBindings {
 			const state = note.awareness.getLocalState();
 			if (note === focused && user) {
 				if (state === null) {
-					note.awareness.setLocalState({
-						user: { id: user.id, name: user.name, color: user.color },
-					});
+					note.awareness.setLocalState({ user: docUser(user) });
 				}
 			} else if (state !== null) {
 				note.awareness.setLocalState(null);
@@ -174,6 +172,11 @@ export class EditorBindings {
 	}
 }
 
+/** The `user` field of a note's awareness state; its `id` must be the JWT `sub` (relay 4403). */
+function docUser(user: SessionUser): { id: string; name: string; color: string } {
+	return { id: user.id, name: user.name, color: user.color };
+}
+
 function fileOf(state: EditorState): TFile | null {
 	return state.field(editorInfoField, false)?.file ?? null;
 }
@@ -182,6 +185,8 @@ function fileOf(state: EditorState): TFile | null {
 function collabExtension(note: NoteDocHandle, undoManager: Y.UndoManager): Extension {
 	return [
 		yCollab(note.ytext, note.awareness, { undoManager }),
+		// CodeMirror owns the editor element's class list; a facet survives its rewrites.
+		EditorView.editorAttributes.of({ class: LIVE_CLASS }),
 		// Obsidian's own Mod-z runs CodeMirror's history, which would also undo remote edits.
 		Prec.highest(keymap.of(yUndoManagerKeymap)),
 		// Remote edits never enter CodeMirror's history (Obsidian's undo command, the menu).
@@ -305,7 +310,6 @@ export class EditorBinding implements PluginValue {
 		});
 		const offClose = note.onClose(() => this.unbind(true));
 		this.bound = { docs, fileId, file, note, undoManager, offClose };
-		this.view.dom.classList.add(LIVE_CLASS);
 	}
 
 	/** `reconfigure` is false while CodeMirror is replacing the state (no dispatch allowed). */
@@ -317,7 +321,6 @@ export class EditorBinding implements PluginValue {
 		if (!bound) return;
 		this.bound = null;
 		bound.offClose();
-		this.view.dom.classList.remove(LIVE_CLASS);
 		if (reconfigure && !this.destroyed) {
 			try {
 				this.view.dispatch({ effects: this.bindings.collab.reconfigure([]) });
