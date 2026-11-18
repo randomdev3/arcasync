@@ -1,18 +1,25 @@
-// Drives a real, isolated Obsidian instance for end-to-end tests.
+// Drives real, isolated Obsidian instances for end-to-end tests: one process per vault.
 //
-// A separate --user-data-dir gives us our own Electron single-instance lock, so this runs
-// alongside the user's normal Obsidian without touching its vaults or settings. Each vault
-// window is a Chrome DevTools Protocol page target; `Vault.eval` runs async JS inside it with
-// the global `app` available.
+// Each vault gets its own --user-data-dir (`.e2e/profiles/<name>`), which gives it its own Electron
+// single-instance lock. That lets the harness quit and relaunch one vault mid-test, and keeps every
+// test process apart from the user's normal Obsidian, its vaults and its settings. Each window is
+// a Chrome DevTools Protocol page target; `VaultHandle.eval` runs async JS inside it with the global
+// `app` available.
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const OBSIDIAN_BIN =
 	process.env.OBSIDIAN_BIN ?? "/Applications/Obsidian.app/Contents/MacOS/Obsidian";
+const CDP_PORT_BASE = Number(process.env.E2E_CDP_PORT ?? 9333);
+
+// Created once per harness process: vault ids are stable across `relaunch()` (so the session token
+// and IndexedDB keyed by `app.appId` survive) and fresh per run (so a new backend never sees a stale
+// token from a previous run).
+const RUN_NONCE = randomBytes(8).toString("hex");
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -27,15 +34,29 @@ export async function waitFor(fn, { timeout = 15000, interval = 200, label = "co
 	throw new Error(`timed out waiting for ${label} (last: ${JSON.stringify(last)})`);
 }
 
-/** Creates fresh vault folders under `.e2e/vaults` with the built plugin symlinked in. */
-export function prepareVaults(names, { seed = {} } = {}) {
+export function vaultId(name) {
+	return createHash("sha1")
+		.update(name + RUN_NONCE)
+		.digest("hex")
+		.slice(0, 16);
+}
+
+/**
+ * Creates vault folders under `.e2e/vaults`. Each vault is wiped first unless `keep` is set.
+ * `seed` maps vault name → {relative path: content}.
+ * The plugin is installed later by `connectPlugin`: a vault that already has plugins on its first
+ * open makes Obsidian show a "trust the author" modal, which steals keyboard focus.
+ */
+export function prepareVaults(names, { seed = {}, keep = false } = {}) {
 	const base = join(ROOT, ".e2e", "vaults");
-	rmSync(base, { recursive: true, force: true });
 	return names.map((name) => {
 		const path = join(base, name);
-		mkdirSync(join(path, ".obsidian", "plugins"), { recursive: true });
-		writeFileSync(join(path, ".obsidian", "community-plugins.json"), '["teamsync"]');
-		symlinkSync(join(ROOT, "packages", "plugin", "dist"), join(path, ".obsidian/plugins/teamsync"));
+		if (!keep) rmSync(path, { recursive: true, force: true });
+		mkdirSync(join(path, ".obsidian"), { recursive: true });
+		writeFileSync(
+			join(path, ".obsidian", "app.json"),
+			JSON.stringify({ trashOption: "local", livePreview: true }),
+		);
 		for (const [rel, content] of Object.entries(seed[name] ?? {})) {
 			mkdirSync(dirname(join(path, rel)), { recursive: true });
 			writeFileSync(join(path, rel), content);
@@ -44,41 +65,155 @@ export function prepareVaults(names, { seed = {} } = {}) {
 	});
 }
 
-class Vault {
-	constructor(name, wsUrl) {
+/** Symlinks the built plugin (`packages/plugin/dist`) into the vault. */
+function installPlugin(vaultPath) {
+	const link = join(vaultPath, ".obsidian", "plugins", "teamsync");
+	if (existsSync(link)) return;
+	mkdirSync(dirname(link), { recursive: true });
+	symlinkSync(join(ROOT, "packages", "plugin", "dist"), link);
+}
+
+async function cdpAnswers(port) {
+	try {
+		return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;
+	} catch {
+		return false;
+	}
+}
+
+/** One Obsidian process with one vault window, reachable over CDP. */
+export class VaultHandle {
+	constructor({ name, path }, { port }) {
 		this.name = name;
-		this.wsUrl = wsUrl;
+		this.path = path;
+		this.port = port;
+		this.id = vaultId(name);
+		this.profile = join(ROOT, ".e2e", "profiles", name);
+		this.child = null;
+		this.ws = null;
 		this.nextId = 1;
 		this.pending = new Map();
+		this.listeners = new Map();
 	}
 
-	async open() {
-		this.ws = new WebSocket(this.wsUrl);
-		await new Promise((res, rej) => {
-			this.ws.addEventListener("open", res, { once: true });
-			this.ws.addEventListener("error", rej, { once: true });
-		});
-		this.ws.addEventListener("message", (ev) => {
-			const msg = JSON.parse(ev.data);
-			const p = this.pending.get(msg.id);
-			if (!p) return;
-			this.pending.delete(msg.id);
-			if (msg.error) p.reject(new Error(msg.error.message));
-			else p.resolve(msg.result);
-		});
+	get running() {
+		return this.child !== null && this.child.exitCode === null && this.child.signalCode === null;
+	}
+
+	/** Starts Obsidian on this vault's profile and waits for the vault's layout to be ready. */
+	async launch() {
+		if (this.running) throw new Error(`[${this.name}] already running`);
+		if (await cdpAnswers(this.port)) {
+			throw new Error(`[${this.name}] CDP port ${this.port} is already in use; set E2E_CDP_PORT`);
+		}
+		mkdirSync(this.profile, { recursive: true });
+		writeFileSync(
+			join(this.profile, "obsidian.json"),
+			JSON.stringify({ vaults: { [this.id]: { path: this.path, ts: Date.now(), open: true } } }),
+		);
+		const child = spawn(
+			OBSIDIAN_BIN,
+			[`--user-data-dir=${this.profile}`, `--remote-debugging-port=${this.port}`],
+			{ stdio: "ignore", detached: false },
+		);
+		this.child = child;
+		this.exited = new Promise((r) => child.once("exit", r));
+		try {
+			await this.attach();
+		} catch (error) {
+			await this.kill();
+			throw error;
+		}
 		return this;
 	}
 
-	send(method, params) {
+	async attach() {
+		const target = await waitFor(
+			async () => {
+				if (!this.running) throw new Error(`[${this.name}] Obsidian exited during launch`);
+				try {
+					const list = await (await fetch(`http://127.0.0.1:${this.port}/json/list`)).json();
+					// One window per process; the vault window is index.html (the vault picker is starter.html).
+					return list.find((t) => t.type === "page" && t.url.includes("/index.html"));
+				} catch {
+					return null;
+				}
+			},
+			{ timeout: 60000, label: `${this.name} window` },
+		);
+		await this.connectSocket(target.webSocketDebuggerUrl);
+		await this.waitLayoutReady();
+		const actual = await this.eval("return { id: app.appId, path: app.vault.adapter.basePath };");
+		if (actual.path !== this.path || actual.id !== this.id) {
+			throw new Error(`[${this.name}] attached to the wrong vault: ${JSON.stringify(actual)}`);
+		}
+	}
+
+	async connectSocket(url) {
+		const ws = new WebSocket(url);
+		await new Promise((res, rej) => {
+			ws.addEventListener("open", res, { once: true });
+			ws.addEventListener("error", rej, { once: true });
+		});
+		ws.addEventListener("message", (ev) => {
+			const msg = JSON.parse(ev.data);
+			if (msg.id === undefined) {
+				for (const cb of this.listeners.get(msg.method) ?? []) cb(msg.params);
+				return;
+			}
+			const p = this.pending.get(msg.id);
+			if (!p) return;
+			this.pending.delete(msg.id);
+			if (msg.error) p.reject(new Error(`[${this.name}] ${msg.error.message}`));
+			else p.resolve(msg.result);
+		});
+		ws.addEventListener("close", () => {
+			for (const p of this.pending.values()) p.reject(new Error(`[${this.name}] CDP closed`));
+			this.pending.clear();
+		});
+		this.ws = ws;
+	}
+
+	/**
+	 * Waits for the vault's workspace layout, then enables focus emulation: y-codemirror.next only
+	 * publishes a cursor while `document.hasFocus()`, which is false in a background window.
+	 * Call again after anything that reloads the page.
+	 */
+	async waitLayoutReady({ timeout = 30000 } = {}) {
+		await waitFor(
+			async () => {
+				try {
+					return await this.eval("return !!globalThis.app?.workspace?.layoutReady");
+				} catch {
+					return false;
+				}
+			},
+			{ timeout, label: `${this.name} layout ready` },
+		);
+		await this.cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
+	}
+
+	/** Sends a raw CDP command to the vault's page target. */
+	cdp(method, params = {}) {
+		if (this.ws?.readyState !== WebSocket.OPEN) {
+			return Promise.reject(new Error(`[${this.name}] not attached`));
+		}
 		const id = this.nextId++;
 		this.ws.send(JSON.stringify({ id, method, params }));
 		return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
 	}
 
-	/** Runs `body` (the inside of an async function; `app` is in scope) and returns its JSON value. */
+	/** Subscribes to a CDP event (enable its domain first); returns unsubscribe. */
+	on(method, cb) {
+		if (!this.listeners.has(method)) this.listeners.set(method, new Set());
+		this.listeners.get(method).add(cb);
+		return () => this.listeners.get(method).delete(cb);
+	}
+
+	/** Runs `body` (the inside of an async function; `app` and `args` are in scope) and returns its JSON value. */
 	async eval(body, args = {}) {
 		const expression = `(async (args) => { ${body} })(${JSON.stringify(args)})`;
-		const r = await this.send("Runtime.evaluate", {
+		const r = await this.cdp("Runtime.evaluate", {
 			expression,
 			awaitPromise: true,
 			returnByValue: true,
@@ -90,87 +225,102 @@ class Vault {
 		return r.result.value;
 	}
 
-	close() {
+	detach() {
 		this.ws?.close();
+		this.ws = null;
 	}
+
+	async stopProcess(signal) {
+		this.detach();
+		if (!this.running) return;
+		this.child.kill(signal);
+		const done = await Promise.race([this.exited.then(() => true), sleep(15000).then(() => false)]);
+		if (!done) {
+			this.child.kill("SIGKILL");
+			await this.exited;
+		}
+		await waitFor(async () => !(await cdpAnswers(this.port)), {
+			timeout: 10000,
+			label: `${this.name} CDP port released`,
+		});
+	}
+
+	/** Graceful quit (SIGTERM); waits for the process to exit. */
+	quit() {
+		return this.stopProcess("SIGTERM");
+	}
+
+	/** Hard kill (SIGKILL), e.g. to simulate a crash. */
+	kill() {
+		return this.stopProcess("SIGKILL");
+	}
+
+	/** Restarts the same profile with the same vault id, reattaches and waits for layoutReady. */
+	async relaunch() {
+		if (this.running) await this.quit();
+		return this.launch();
+	}
+}
+
+/** Launches one vault in its own Obsidian process. */
+export function launchVault(vault, { port }) {
+	return new VaultHandle(vault, { port }).launch();
 }
 
 /**
- * Launches Obsidian with the given vaults open and returns `{vaults: {[name]: Vault}, close}`.
- * Uses a persistent profile in `.e2e/profile` so Obsidian's app-update download happens once.
+ * Launches one Obsidian process per vault (CDP port `E2E_CDP_PORT` + index) and returns
+ * `{vaults: {[name]: VaultHandle}, close}`.
  */
-export async function launchObsidian(
-	vaultDirs,
-	{ port = Number(process.env.CDP_PORT ?? 9333) } = {},
-) {
-	const profile = join(ROOT, ".e2e", "profile");
-	mkdirSync(profile, { recursive: true });
-	const vaults = {};
-	for (const v of vaultDirs) {
-		// A fresh vault id per run keeps per-vault localStorage (session tokens) from leaking across runs.
-		vaults[randomBytes(8).toString("hex")] = { path: v.path, ts: Date.now(), open: true };
-	}
-	writeFileSync(join(profile, "obsidian.json"), JSON.stringify({ vaults }));
-
-	const child = spawn(
-		OBSIDIAN_BIN,
-		[`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`],
-		{
-			stdio: "ignore",
-			detached: false,
-		},
-	);
+export async function launchObsidian(vaultDirs, { port = CDP_PORT_BASE } = {}) {
+	const handles = vaultDirs.map((v, i) => new VaultHandle(v, { port: port + i }));
 	const close = async () => {
-		for (const v of Object.values(handles)) v.close();
-		child.kill("SIGTERM");
-		await sleep(500);
+		await Promise.all(handles.map((h) => h.quit()));
 	};
-	const handles = {};
-	try {
-		const targets = await waitFor(
-			async () => {
-				try {
-					const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-					const pages = list.filter((t) => t.type === "page");
-					const all = vaultDirs.every((v) =>
-						pages.some((t) => t.title.includes(` - ${v.name} - `)),
-					);
-					return all ? pages : null;
-				} catch {
-					return null;
-				}
-			},
-			{ timeout: 45000, label: "Obsidian windows" },
-		);
-		for (const v of vaultDirs) {
-			const t = targets.find((p) => p.title.includes(` - ${v.name} - `));
-			handles[v.name] = await new Vault(v.name, t.webSocketDebuggerUrl).open();
-			await waitFor(() => handles[v.name].eval("return !!app?.workspace?.layoutReady"), {
-				label: `${v.name} layout ready`,
-			});
-		}
-	} catch (error) {
+	const results = await Promise.allSettled(handles.map((h) => h.launch()));
+	const failed = results.find((r) => r.status === "rejected");
+	if (failed) {
 		await close();
-		throw error;
+		throw failed.reason;
 	}
-	return { vaults: handles, close };
+	return { vaults: Object.fromEntries(handles.map((h) => [h.name, h])), close };
 }
 
-/** Turns off restricted mode, loads the plugin, points it at `serverUrl`, logs in as `name`, connects. */
-export async function connectPlugin(vault, { serverUrl, name }) {
+/** Waits until the plugin reports `connected`, e.g. after a relaunch with `autoConnect`. */
+export function waitConnected(vault, { timeout = 20000 } = {}) {
+	return waitFor(
+		() =>
+			vault.eval(
+				`return app.plugins.plugins.teamsync?.connection?.status === "connected" ? true : null;`,
+			),
+		{ timeout, label: `${vault.name} connected` },
+	);
+}
+
+/**
+ * Installs the plugin, turns off restricted mode, loads the plugin, points it at `serverUrl`, logs in as `name`,
+ * connects, and turns on `autoConnect` so a relaunch reconnects with the stored session.
+ * `role` and `sharedFolder` are written to `devLoginRole`/`sharedFolder` as given (plugin
+ * settings added in P1-0; older plugin builds ignore them).
+ */
+export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
+	installPlugin(vault.path);
 	return vault.eval(
 		`
+		await app.plugins.loadManifests();
 		if (!app.plugins.isEnabled()) await app.plugins.setEnable(true);
 		if (!app.plugins.plugins.teamsync) await app.plugins.enablePluginAndSave("teamsync");
 		const p = app.plugins.plugins.teamsync;
 		if (!p) throw new Error("teamsync plugin did not load");
 		p.settings.serverUrl = args.serverUrl;
 		p.settings.devLoginName = args.name;
+		p.settings.autoConnect = true;
+		if (args.role !== undefined) p.settings.devLoginRole = args.role;
+		if (args.sharedFolder !== undefined) p.settings.sharedFolder = args.sharedFolder;
 		await p.saveSettings();
 		await p.connect();
 		for (let i = 0; i < 75 && p.connection?.status !== "connected"; i++) await new Promise(r => setTimeout(r, 200));
 		return { status: p.connection?.status, message: p.connection?.message ?? null, user: p.settings.user?.name ?? null };
 	`,
-		{ serverUrl, name },
+		{ serverUrl, name, role, sharedFolder },
 	);
 }

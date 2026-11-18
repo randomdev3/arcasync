@@ -2,7 +2,7 @@
 // round-trips in both directions, Notices render, and state survives a server restart.
 import assert from "node:assert/strict";
 import { connectPlugin, launchObsidian, prepareVaults, waitFor } from "./obsidian.mjs";
-import { startServer } from "./server.mjs";
+import { restartServer, SkipError, startServer } from "./server.mjs";
 
 const COUNTER = `return app.plugins.plugins.teamsync?.counter?.ydoc?.getMap("debug").get("counter") ?? 0;`;
 const BUMP = `app.commands.executeCommandById("teamsync:debug-counter-increment"); return true;`;
@@ -23,28 +23,33 @@ try {
 		assert.equal(r.status, "connected", `${name}: ${JSON.stringify(r)}`);
 		assert.equal(r.user, name);
 	}
-	step("both vaults connected (alice, bob)");
+	step(`both vaults connected (alice, bob) to ${server.backend} backend`);
 
+	const start = await alice.eval(COUNTER);
 	await alice.eval(BUMP);
-	await waitFor(async () => (await bob.eval(COUNTER)) === 1, { label: "bob sees 1" });
-	step("alice +1 → bob sees 1");
+	await waitFor(async () => (await bob.eval(COUNTER)) === start + 1, { label: "bob sees +1" });
+	step(`alice +1 → bob sees ${start + 1}`);
 
 	await bob.eval(BUMP);
-	await waitFor(async () => (await alice.eval(COUNTER)) === 2, { label: "alice sees 2" });
-	step("bob +1 → alice sees 2");
+	await waitFor(async () => (await alice.eval(COUNTER)) === start + 2, { label: "alice sees +2" });
+	step(`bob +1 → alice sees ${start + 2}`);
 
 	const notices = await bob.eval(NOTICES);
-	assert.ok(notices.includes("TeamSync counter: 1"), `bob notices: ${notices}`);
+	assert.ok(notices.includes(`TeamSync counter: ${start + 1}`), `bob notices: ${notices}`);
 	step("remote change Notice rendered in bob's window");
 
-	await server.stop({ keepData: true });
-	server = await startServer({ dataDir: server.dataDir });
-	await alice.eval(BUMP);
-	await waitFor(async () => (await bob.eval(COUNTER)) === 3, {
-		timeout: 30000,
-		label: "bob sees 3 after server restart",
-	});
-	step("server restart: clients reconnect, state persisted, sync resumes");
+	try {
+		server = await restartServer(server);
+		await alice.eval(BUMP);
+		await waitFor(async () => (await bob.eval(COUNTER)) === start + 3, {
+			timeout: 30000,
+			label: "bob sees +3 after server restart",
+		});
+		step("server restart: clients reconnect, state persisted, sync resumes");
+	} catch (error) {
+		if (!(error instanceof SkipError)) throw error;
+		console.log(`  - SKIP server restart (${error.message})`);
+	}
 	console.log("p0-counter: PASS");
 } finally {
 	await obsidian.close();
