@@ -1,16 +1,42 @@
 <script lang="ts">
 import type { AvatarModel } from "../../presence/avatars";
 
-const { avatar }: { avatar: AvatarModel } = $props();
+const {
+	avatar,
+	following,
+	onselect,
+	onmenu,
+}: {
+	avatar: AvatarModel;
+	following: boolean;
+	/** Click (`follow` with Shift) or Enter/Space. */
+	onselect: (follow: boolean) => void;
+	onmenu: (event: MouseEvent) => void;
+} = $props();
+
+function onkeydown(event: KeyboardEvent) {
+	if (event.key !== "Enter" && event.key !== " ") return;
+	event.preventDefault();
+	onselect(event.shiftKey);
+}
 </script>
 
 <span
 	class="teamsync-avatar"
+	class:is-followed={following}
+	role="button"
+	tabindex="0"
 	data-user-id={avatar.userId}
 	data-state={avatar.state}
 	title={avatar.title}
 	aria-label={avatar.title}
 	style:--teamsync-avatar-color={avatar.color}
+	onclick={(event) => onselect(event.shiftKey)}
+	oncontextmenu={(event) => {
+		event.preventDefault();
+		onmenu(event);
+	}}
+	{onkeydown}
 >{avatar.initials}</span>
 
 <style>
@@ -28,9 +54,13 @@ const { avatar }: { avatar: AvatarModel } = $props();
 		font-size: 10px;
 		font-weight: var(--font-bold);
 		line-height: 1;
-		cursor: default;
+		cursor: pointer;
 		user-select: none;
 		transition: opacity 150ms ease;
+	}
+
+	.teamsync-avatar.is-followed {
+		box-shadow: 0 0 0 2px var(--teamsync-avatar-color);
 	}
 
 	.teamsync-avatar:first-child {

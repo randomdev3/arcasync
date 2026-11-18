@@ -6,6 +6,7 @@ import { editorExtensions } from "./editor";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
 import { ConnectionManager, type ConnectionState } from "./net/ConnectionManager";
 import { TokenStore } from "./net/TokenStore";
+import { registerNavigatorCommands } from "./presence/commands";
 import {
 	DEFAULT_SETTINGS,
 	normalizeSettings,
@@ -98,6 +99,7 @@ export default class TeamSyncPlugin extends Plugin {
 			name: "Disconnect",
 			callback: () => this.disconnect(),
 		});
+		registerNavigatorCommands(this);
 		this.addCommand({
 			id: "debug-counter-increment",
 			name: "Debug counter +1",

@@ -1,11 +1,18 @@
 import { type App, type EventRef, MarkdownView } from "obsidian";
 import Facepile from "../ui/components/Facepile.svelte";
 import { type MountedComponent, mountComponent } from "../ui/svelteHost";
+import { showUserMenu } from "../ui/userPicker";
 import { toWs } from "../workspace/paths";
 import type { IPresence } from "../workspace/types";
 import { type AvatarModel, avatarsFor } from "./avatars";
+import type { Navigator } from "./Navigator";
 
-type FacepileProps = { avatars: AvatarModel[] };
+type FacepileProps = {
+	avatars: AvatarModel[];
+	following: string | null;
+	onselect: (userId: string, follow: boolean) => void;
+	onmenu: (userId: string, event: MouseEvent) => void;
+};
 
 interface Mounted {
 	/** `display: contents` wrapper in the view header that the component renders into. */
@@ -22,18 +29,44 @@ function unmount({ host, component }: Mounted): void {
  * Keeps a facepile in the header of every open `MarkdownView`: other present users, `here` on
  * that note, dimmed when `elsewhere` or `idle`. Views are picked up on `layout-change`; avatars
  * re-render on presence changes and when a view switches notes.
+ *
+ * With a navigator, an avatar click jumps to that user, Shift-click follows them and the context
+ * menu offers both; the followed user's avatar is ringed.
  */
 export class FacepileMount {
 	private readonly mounted = new Map<MarkdownView, Mounted>();
 	private readonly refs: EventRef[] = [];
 	private renameRef: EventRef | null = null;
 	private offPresence: (() => void) | null = null;
+	private offNavigator: (() => void) | null = null;
+	private readonly onselect = (userId: string, follow: boolean) => {
+		const navigator = this.navigator;
+		if (!navigator) return;
+		if (follow) navigator.follow(userId);
+		else void navigator.jumpTo(userId);
+	};
+	private readonly onmenu = (userId: string, event: MouseEvent) => {
+		const navigator = this.navigator;
+		const devices = this.presence.users().get(userId);
+		const name = devices?.[0]?.user.name;
+		if (!navigator || !name) return;
+		showUserMenu(
+			event,
+			{ name, followed: navigator.following === userId },
+			{
+				jump: () => void navigator.jumpTo(userId),
+				follow: () => navigator.follow(userId),
+				unfollow: () => navigator.unfollow(),
+			},
+		);
+	};
 
 	constructor(
 		private readonly app: App,
 		private readonly presence: IPresence,
 		private readonly selfId: string,
 		private readonly root: string | null,
+		private readonly navigator: Navigator | null = null,
 	) {}
 
 	start(): void {
@@ -46,6 +79,7 @@ export class FacepileMount {
 		);
 		this.renameRef = vault.on("rename", refresh);
 		this.offPresence = this.presence.onChange(refresh);
+		this.offNavigator = this.navigator?.onChange(refresh) ?? null;
 		workspace.onLayoutReady(refresh);
 	}
 
@@ -55,6 +89,8 @@ export class FacepileMount {
 		this.renameRef = null;
 		this.offPresence?.();
 		this.offPresence = null;
+		this.offNavigator?.();
+		this.offNavigator = null;
 		for (const mounted of this.mounted.values()) unmount(mounted);
 		this.mounted.clear();
 	}
@@ -62,6 +98,7 @@ export class FacepileMount {
 	private refresh(): void {
 		if (this.offPresence === null) return;
 		const users = this.presence.users();
+		const following = this.navigator?.following ?? null;
 		const seen = new Set<MarkdownView>();
 		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
 			const view = leaf.view;
@@ -75,7 +112,7 @@ export class FacepileMount {
 			const avatars = file === null ? [] : avatarsFor(users, this.selfId, file, this.root);
 			const current = this.mounted.get(view);
 			if (current && current.host.parentElement === header) {
-				current.component.set({ avatars });
+				current.component.set({ avatars, following });
 				continue;
 			}
 			if (current) unmount(current);
@@ -85,7 +122,7 @@ export class FacepileMount {
 			header.insertBefore(host, header.querySelector(".view-actions"));
 			const component = mountComponent<FacepileProps>(Facepile, {
 				target: host,
-				props: { avatars },
+				props: { avatars, following, onselect: this.onselect, onmenu: this.onmenu },
 			});
 			this.mounted.set(view, { host, component });
 		}
