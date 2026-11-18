@@ -143,18 +143,25 @@ export class EditorBindings {
 		const active = this.host.activeView();
 		const notes = new Set<NoteDocHandle>();
 		let focused: NoteDocHandle | null = null;
+		let focusedView: EditorView | null = null;
 		for (const binding of this.views) {
 			const note = binding.note;
 			if (!note || note.state === "closed") continue;
 			notes.add(note);
-			if (active && binding.info === active) focused = note;
+			if (active && binding.info === active) {
+				focused = note;
+				focusedView = binding.view;
+			}
 		}
 		const user = this.host.session?.user;
 		for (const note of notes) {
 			const state = note.awareness.getLocalState();
 			if (note === focused && user) {
 				if (state === null) {
-					note.awareness.setLocalState({ user: presenceUser(user) });
+					// Publish the caret in the same update: y-codemirror only publishes it on the next
+					// view update, so a caret placed before binding would otherwise stay invisible.
+					const cursor = focusedView ? currentCursor(focusedView, note) : null;
+					note.awareness.setLocalState({ user: presenceUser(user), ...(cursor ? { cursor } : {}) });
 				}
 			} else if (state !== null) {
 				note.awareness.setLocalState(null);
@@ -173,6 +180,20 @@ export class EditorBindings {
 		this.offIndex = null;
 		this.session = null;
 	}
+}
+
+/** The focused editor's selection in y-codemirror's awareness format, or null when unfocused. */
+export function currentCursor(
+	view: EditorView,
+	note: NoteDocHandle,
+): { anchor: Y.RelativePosition; head: Y.RelativePosition } | null {
+	if (!(view.hasFocus && view.dom.ownerDocument.hasFocus())) return null;
+	if (view.state.doc.length !== note.ytext.length) return null;
+	const sel = view.state.selection.main;
+	return {
+		anchor: Y.createRelativePositionFromTypeIndex(note.ytext, sel.anchor),
+		head: Y.createRelativePositionFromTypeIndex(note.ytext, sel.head),
+	};
 }
 
 function fileOf(state: EditorState): TFile | null {
