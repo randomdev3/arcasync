@@ -4,6 +4,8 @@ import { WorkspaceSession } from "../workspace/WorkspaceSession";
 
 // The note-doc layer needs a real vault and providers; it has its own tests.
 vi.mock("../doc", () => ({ startNoteDocs: () => () => {} }));
+// Presence needs Obsidian's workspace and DOM; it has its own tests.
+vi.mock("../presence", () => ({ startPresence: () => () => {} }));
 
 /** Counts live listeners on the fake vault and provider, to prove stop() removes them all. */
 function fakes() {
