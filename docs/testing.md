@@ -77,6 +77,72 @@ Environment variables:
 On a failure every window is screenshotted. Screenshots and other artifacts go to
 `.e2e/artifacts/<suite>/<scenario>/`. `.e2e/` is git-ignored and local to each checkout.
 
+### Mobile: what emulation covers, and what needs a real device
+
+`scripts/e2e/p1/mobile-emulation.mjs` switches bob's window to Obsidian's mobile layout with
+`app.emulateMobile(true)`. The page reloads once, and the plugin restarts with
+`Platform.isMobile` and the mobile limits from `packages/plugin/src/platform.ts`:
+
+| Limit | Desktop | Mobile |
+|---|---|---|
+| `warmDocs` (released note docs kept attached) | 20 | 5 |
+| `bgConcurrency` (closed notes caught up at once) | 3 | 1 |
+| `maxMdBytes` (larger notes are not synced) | unlimited | 2 MiB |
+
+A note over `maxMdBytes` is skipped and a Notice is shown once per note. The plugin checks the
+file's size before it attaches the note, so the note costs no traffic. A doc that was synced in
+and turned out too large is checked again after each attach. In both cases nothing is enrolled
+or written to disk, and the editor on that note is a plain, unsynced editor. The path still
+syncs, so other devices get the file, but it is empty there until the note is edited somewhere
+that can sync it.
+
+The scenario proves the following under emulation:
+- The reload keeps the session token, so the plugin reconnects on its own.
+- Typing syncs both ways, to the other editor and to its disk.
+- Presence avatars show in the mobile view header.
+- Opening 30 notes in a row keeps at most `warmDocs + 1` docs attached.
+- An IME composition (`Input.imeSetComposition`, then `Input.insertText`) fires
+  `compositionstart`/`compositionend` and commits its text exactly once.
+- A 2.5 MiB note is skipped and never uploaded.
+- The relay counts no inbound messages and writes no rows while the client sits idle.
+
+`bundle.test.ts` checks that `dist/main.js` loads only `obsidian` and `@codemirror/*`. A Node
+built-in, `electron`, or a dynamic `require` would throw at load time on iOS and Android. The
+one `process.env` read comes from lib0 and sits behind its `typeof process` check. The plugin
+has no polling loop. Its only periodic timers are:
+- the provider's local connection check;
+- the presence policy's 30 s local check, which sends a renewal every 120 s while active and
+  every 900 s while idle;
+- on relay-cf, the 90 s keepalive ping, which the relay answers without waking the Durable
+  Object.
+
+The emulated window is still desktop Chromium/Electron on macOS (`is-tablet is-mobile` layout,
+Node available, desktop user agent). These checks need a real iPhone/iPad and an Android
+phone, run by hand before a mobile release:
+
+- [ ] **Background and foreground.** Background the app for 1 min and for 10+ min, then bring it
+  back. The socket reconnects once, with no reconnect storm in the relay's `connects` counter,
+  and edits made meanwhile on desktop appear.
+- [ ] **Network switch.** Move between Wi-Fi and cellular, and toggle flight mode, while typing.
+  Nothing is lost or duplicated, and the reconnect happens without a restart.
+- [ ] **CORS from `capacitor://localhost`** (iOS) and `http://localhost` (Android). `requestUrl`
+  calls (`/api/server-info`, `/api/auth/*`, `/api/workspaces`) and the WebSocket upgrade
+  succeed against a deployed relay.
+- [ ] **iOS IndexedDB eviction.** Leave the app unused for several days, or under storage
+  pressure. Notes still open correctly and reconcile from the relay, with no "local copy" files
+  created for notes that were not edited.
+- [ ] **`app.secretStorage` on mobile.** The session token survives an app kill and relaunch,
+  and is not written to `data.json`.
+- [ ] **On-screen keyboard and IME in CM6 mobile.** Test Japanese kana-kanji, Chinese pinyin,
+  Korean, swipe typing, autocorrect and dictation. Each commit appears once on desktop with no
+  preedit residue, and remote carets do not break the composition.
+- [ ] **Battery and memory with 5 warm docs.** Run a 30-minute session with a desktop peer
+  typing. Watch the OS battery and memory views; the app is not killed in the background.
+- [ ] **Timers while suspended.** After iOS suspends the WebView, the keepalive and presence
+  timers resume without a burst of messages, and peers expire the phone's presence (≤ 41 min
+  idle bound) rather than showing it forever.
+- [ ] **A note over 2 MiB** shows the Notice once, stays editable locally, and is not synced.
+
 ### Parallel worktrees
 
 Several checkouts (git worktrees) can run e2e and integration tests at the same time if each one
