@@ -18,5 +18,7 @@
 		"TEAMSYNC_DEBUG_STATS": "1",
 		"TEAMSYNC_MAX_FILE_BYTES": "209715200"
 	},
+	// The Node server defaults to 8787; keep `pnpm dev` (turbo runs both) collision-free.
+	"dev": { "port": 8789 },
 	"observability": { "enabled": false }
 }

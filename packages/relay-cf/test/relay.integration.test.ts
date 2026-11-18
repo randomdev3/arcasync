@@ -133,17 +133,18 @@ describe("WorkspaceRelay", () => {
 		d.destroy();
 
 		await sleep(HIBERNATE_MS);
-		const idle = await stats(relay.url, ws);
-		expect(idle.wakes).toBeGreaterThan(woke.wakes);
-		// An edit sent to a hibernated object, on the same sockets (no reconnect), still syncs.
+		// An edit sent to the hibernated object, on the same sockets (no reconnect), is what wakes
+		// it, and it still syncs. Stats are read only afterwards so no HTTP request wakes it first.
 		aDoc.document.getText("body").insert(7, "after");
 		await waitFor(() => bDoc.document.getText("body").toString() === "before after", {
 			label: "edit after hibernation reaches bob",
 		});
 		await waitFor(() => !aDoc.provider.hasUnsyncedChanges, { label: "ack after hibernation" });
+		const after = await stats(relay.url, ws);
+		expect(after.wakes).toBeGreaterThan(woke.wakes);
+		expect(after.connects).toBe(before.connects + 1);
 		expect(a.opens).toBe(1);
 		expect(b.opens).toBe(1);
-		expect((await stats(relay.url, ws)).connects).toBe(before.connects + 1);
 		a.destroy();
 		b.destroy();
 	});
