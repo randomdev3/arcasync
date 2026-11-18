@@ -241,8 +241,11 @@ export interface DeviceOptions {
 	warmDocs?: number;
 	flushDelayMs?: number;
 	paths?: Record<string, string>;
+	/** Resolves note paths; default: the `paths` table. */
+	pathOf?: (fileId: string) => string | null;
 	revs?: Y.Map<unknown>;
 	storage?: MemoryStorage;
+	revThrottleMs?: number;
 	notices?: string[];
 }
 
@@ -262,6 +265,7 @@ export function device(options: DeviceOptions) {
 		userId: name,
 		storage,
 		keyPrefix: `teamsync:${vaultId}:ws1`,
+		throttleMs: options.revThrottleMs,
 	});
 	const note: NoteDocDeps = {
 		vaultId,
@@ -280,7 +284,7 @@ export function device(options: DeviceOptions) {
 			notify: (m) => notices.push(m),
 		},
 		track: (n) => revTracker.track(n),
-		pathOf: (fileId) => paths[fileId] ?? null,
+		pathOf: options.pathOf ?? ((fileId) => paths[fileId] ?? null),
 		warmDocs: options.warmDocs ?? 20,
 		flushDelayMs: options.flushDelayMs ?? 10,
 	};
