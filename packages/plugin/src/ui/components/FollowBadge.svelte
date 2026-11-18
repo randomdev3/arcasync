@@ -29,7 +29,8 @@ const {
 <style>
 	.teamsync-follow-badge {
 		position: fixed;
-		top: calc(var(--header-height, 40px) + var(--size-4-2));
+		/* Bottom centre: clear of view headers, notices (top right) and the status bar (right). */
+		bottom: calc(var(--size-4-12, 48px) + env(safe-area-inset-bottom, 0px));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: var(--layer-notice);
