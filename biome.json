@@ -10,6 +10,7 @@
 			"!dev-vault-*",
 			"!**/.turbo",
 			"!**/.wrangler",
+			"!.e2e",
 			"!**/.data",
 			"!**/*.svelte"
 		]
