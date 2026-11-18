@@ -1,3 +1,5 @@
+import { Compartment, EditorState, type Extension, type TransactionSpec } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { userColor } from "@teamsync/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from "y-protocols/awareness";
@@ -5,6 +7,8 @@ import * as Y from "yjs";
 import {
 	CaretRecency,
 	caretIdentity,
+	caretLabels,
+	PENDING_CLASS,
 	RECENT_CLASS,
 	RECENT_LABEL_MS,
 	stampCarets,
@@ -183,5 +187,111 @@ describe("stampCarets", () => {
 		expect(bob.classes.has(RECENT_CLASS)).toBe(true);
 		expect(carol.classes.has(RECENT_CLASS)).toBe(false);
 		expect(otherBob.classes.has(RECENT_CLASS)).toBe(false);
+	});
+});
+
+/** A deferred `whenReady()`. */
+function deferred() {
+	let resolve!: () => void;
+	let reject!: (error: Error) => void;
+	const promise = new Promise<void>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+/**
+ * An EditorState plus the caretLabels view plugin running against a stand-in view (no DOM here):
+ * `dispatch` applies to the state, `requestMeasure` is dropped.
+ */
+function boundState(extension: Extension, compartment = new Compartment()) {
+	let state = EditorState.create({ doc: "Line one\n", extensions: compartment.of(extension) });
+	const dispatched: TransactionSpec[] = [];
+	const view = {
+		get state() {
+			return state;
+		},
+		dispatch(spec: TransactionSpec) {
+			dispatched.push(spec);
+			state = state.update(spec).state;
+		},
+		requestMeasure: () => undefined,
+	} as unknown as EditorView;
+	const plugins: Array<{ destroy(): void }> = [];
+	const start = (ext: Extension) => {
+		const plugin = (ext as unknown[]).find((e) => e instanceof ViewPlugin);
+		// `create` is CodeMirror-internal; it is what EditorView calls to instantiate the plugin.
+		plugins.push(
+			(plugin as unknown as { create(v: EditorView): { destroy(): void } }).create(view),
+		);
+	};
+	start(extension);
+	return {
+		dispatched,
+		get pending() {
+			return state
+				.facet(EditorView.editorAttributes)
+				.some((a) => typeof a === "object" && a.class === PENDING_CLASS);
+		},
+		destroy: () => {
+			for (const p of plugins) p.destroy();
+		},
+		rebind(next: Extension) {
+			for (const p of plugins.splice(0)) p.destroy();
+			view.dispatch({ effects: compartment.reconfigure(next) });
+			start(next);
+		},
+	};
+}
+
+describe("caretLabels readiness gate", () => {
+	it("hides remote carets until the note doc is ready", async () => {
+		const ready = deferred();
+		const bound = boundState(
+			caretLabels({ awareness: new Awareness(new Y.Doc()), ready: ready.promise }),
+		);
+		expect(bound.pending).toBe(true);
+		ready.resolve();
+		await ready.promise;
+		expect(bound.pending).toBe(false);
+		expect(bound.dispatched).toHaveLength(1);
+		bound.destroy();
+	});
+
+	it("starts pending again when the compartment is rebound to another note", async () => {
+		const bound = boundState(
+			caretLabels({ awareness: new Awareness(new Y.Doc()), ready: Promise.resolve() }),
+		);
+		await Promise.resolve();
+		expect(bound.pending).toBe(false);
+		const next = deferred();
+		bound.rebind(caretLabels({ awareness: new Awareness(new Y.Doc()), ready: next.promise }));
+		expect(bound.pending).toBe(true);
+		next.resolve();
+		await next.promise;
+		expect(bound.pending).toBe(false);
+		bound.destroy();
+	});
+
+	it("stays pending when the doc never becomes ready or the editor is gone first", async () => {
+		const failed = deferred();
+		const a = boundState(
+			caretLabels({ awareness: new Awareness(new Y.Doc()), ready: failed.promise }),
+		);
+		failed.reject(new Error("closed"));
+		await failed.promise.catch(() => undefined);
+		expect(a.pending).toBe(true);
+		expect(a.dispatched).toEqual([]);
+
+		const late = deferred();
+		const b = boundState(
+			caretLabels({ awareness: new Awareness(new Y.Doc()), ready: late.promise }),
+		);
+		b.destroy();
+		late.resolve();
+		await late.promise;
+		expect(b.dispatched).toEqual([]);
+		a.destroy();
 	});
 });

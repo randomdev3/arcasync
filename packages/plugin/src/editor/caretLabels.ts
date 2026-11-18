@@ -132,21 +132,6 @@ export function stampCarets(root: ParentNode, recent: CaretIdentity[]): void {
 	}
 }
 
-const setPending = StateEffect.define<boolean>();
-
-const pendingField = StateField.define<boolean>({
-	create: () => true,
-	update(value, tr) {
-		for (const effect of tr.effects) if (effect.is(setPending)) value = effect.value;
-		return value;
-	},
-	provide: (field) =>
-		EditorView.editorAttributes.from(
-			field,
-			(pending): Record<string, string> => (pending ? { class: PENDING_CLASS } : {}),
-		),
-});
-
 export interface CaretLabelsConfig {
 	/** The note doc's awareness, the same one given to `yCollab`. */
 	awareness: Awareness;
@@ -161,11 +146,12 @@ class CaretLabelsView implements PluginValue {
 	constructor(
 		private readonly view: EditorView,
 		config: CaretLabelsConfig,
+		readyEffect: StateEffect<null>,
 	) {
 		this.recency = new CaretRecency(config.awareness, () => this.schedule());
 		config.ready.then(
 			() => {
-				if (!this.destroyed) this.view.dispatch({ effects: setPending.of(false) });
+				if (!this.destroyed) this.view.dispatch({ effects: readyEffect });
 			},
 			() => undefined,
 		);
@@ -199,5 +185,16 @@ class CaretLabelsView implements PluginValue {
  * too, via styles.css) and hides remote carets until the note doc is ready.
  */
 export function caretLabels(config: CaretLabelsConfig): Extension {
-	return [pendingField, ViewPlugin.define((view) => new CaretLabelsView(view, config))];
+	// Per call, so every bind (including a rebind in the same compartment) starts pending.
+	const ready = StateEffect.define<null>();
+	const pending = StateField.define<boolean>({
+		create: () => true,
+		update: (value, tr) => value && !tr.effects.some((e) => e.is(ready)),
+		provide: (field) =>
+			EditorView.editorAttributes.from(
+				field,
+				(on): Record<string, string> => (on ? { class: PENDING_CLASS } : {}),
+			),
+	});
+	return [pending, ViewPlugin.define((view) => new CaretLabelsView(view, config, ready.of(null)))];
 }
