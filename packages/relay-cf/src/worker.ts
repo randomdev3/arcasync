@@ -92,7 +92,7 @@ api.get("/server-info", (c) =>
 api.post("/auth/dev-login", async (c) => {
 	const body = DevLoginRequest.safeParse(await jsonBody(c.req.raw));
 	if (!body.success) return c.json(errorBody("bad_request", "Invalid request"), 400);
-	return reply(c, await accounts(c.env).devLogin(body.data.name, body.data.device));
+	return reply(c, await accounts(c.env).devLogin(body.data.name, body.data.device, body.data.role));
 });
 
 api.get("/auth/me", async (c) =>

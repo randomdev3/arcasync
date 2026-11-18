@@ -159,7 +159,8 @@ export class AccountsDO extends DurableObject<Env> {
 		return this.sql.exec<UserRow>("SELECT * FROM users WHERE id = ?", id).toArray()[0];
 	}
 
-	async devLogin(name: string, device: DeviceInfo): Promise<Result<SessionResponse>> {
+	/** `role` applies only when this creates the membership; existing memberships keep theirs. */
+	async devLogin(name: string, device: DeviceInfo, role?: Role): Promise<Result<SessionResponse>> {
 		if (this.env.TEAMSYNC_DEV_OPEN_LOGIN !== "1") {
 			return fail(403, "forbidden", "Dev login is disabled");
 		}
@@ -188,7 +189,7 @@ export class AccountsDO extends DurableObject<Env> {
 			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
 			workspaceId,
 			user.id,
-			firstMember ? "editor" : "owner",
+			role ?? (firstMember ? "editor" : "owner"),
 		);
 
 		let deviceRow = this.sql
