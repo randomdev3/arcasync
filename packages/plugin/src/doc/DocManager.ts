@@ -113,10 +113,14 @@ export class DocManager implements IDocManager {
 		return this.entries.get(fileId)?.note ?? null;
 	}
 
-	/** Reconciles a note's disk file and doc; serialised per note. */
-	reconcile(note: NoteDoc): Promise<ReconcileResult> {
+	/**
+	 * Reconciles a note's disk file and doc; serialised per note. With `unlessBound` it defers
+	 * when an editor has bound the note by the time it runs (a flush queued just before the bind).
+	 */
+	reconcile(note: NoteDoc, { unlessBound = false } = {}): Promise<ReconcileResult> {
 		const entry = this.entries.get(note.fileId);
 		const run = async (): Promise<ReconcileResult> => {
+			if (unlessBound && note.editorBound) return { action: "defer" };
 			let result: ReconcileResult = { action: "missing" };
 			for (let i = 0; i < RECONCILE_ATTEMPTS && note.state !== "closed"; i++) {
 				const path = this.options.pathOf(note.fileId) ?? note.path;
@@ -250,7 +254,8 @@ export class DocManager implements IDocManager {
 		entry.flushTimer = setTimeout(() => {
 			entry.flushTimer = null;
 			if (note.state !== "ready" || note.editorBound) return;
-			this.reconcile(note).catch((error) =>
+			// An editor may bind while this waits for the note's lock; it owns the disk then.
+			this.reconcile(note, { unlessBound: true }).catch((error) =>
 				console.error(`[TeamSync] writing ${note.path} failed`, error),
 			);
 		}, this.options.flushDelayMs ?? 1000);

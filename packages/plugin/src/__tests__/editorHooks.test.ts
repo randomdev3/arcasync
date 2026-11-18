@@ -72,6 +72,32 @@ describe("DocManager editor hooks", () => {
 		expect(d.disk.files.get(PATH)).toBe("v1\n");
 	});
 
+	it("a flush queued before the editor bound does not write the bound note's doc", async () => {
+		const { d, note, remote } = await boundNote("v1\n");
+		let open = () => {};
+		const gate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		const read = d.disk.read.bind(d.disk);
+		d.disk.read = async (path) => {
+			await gate;
+			return read(path);
+		};
+		// A reconcile holds the note's lock while a remote edit's disk flush comes due.
+		remote((t) => t.insert(3, "r1\n"));
+		const reconciling = d.docs.reconcile(note);
+		const attached = d.docs.editorAttached(note, () => true);
+		await sleep(40);
+		open();
+		await reconciling;
+		expect(await attached).toBe(true);
+		expect(d.disk.files.get(PATH)).toBe("v1\nr1\n");
+		// From here the editor owns the disk: the queued flush must not write this.
+		remote((t) => t.insert(t.length, "r2\n"));
+		await sleep(50);
+		expect(d.disk.files.get(PATH)).toBe("v1\nr1\n");
+	});
+
 	it("an attach that gave up does not bind", async () => {
 		const { d, note } = await boundNote("v1\n");
 		expect(await d.docs.editorAttached(note, () => false)).toBe(false);
