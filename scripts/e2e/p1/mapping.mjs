@@ -7,6 +7,8 @@ const SESSION = `const s = app.plugins.plugins.teamsync?.session;
 	return s ? { synced: s.started && s.indexProvider.synced, root: s.root } : null;`;
 const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? null;`;
 const DOCS = "return app.plugins.plugins.teamsync.connections.docs.size;";
+const NOTES = `return app.vault.getMarkdownFiles().map((f) => f.path)
+	.filter((p) => p.startsWith("Shared/")).sort();`;
 
 export default {
 	name: "mapping",
@@ -36,13 +38,17 @@ export default {
 		ctx.step(`status bar: "${status}"`);
 
 		const before = await alice.eval(DOCS);
+		const notesBefore = await alice.eval(NOTES);
 		await alice.eval("const s = app.plugins.plugins.teamsync.session; s.stop(); s.start();");
 		await waitFor(async () => (await alice.eval(SESSION))?.synced, {
 			timeout: 10000,
 			label: "alice index doc re-synced after restart",
 		});
+		await alice.eval("await app.plugins.plugins.teamsync.session.settled();");
 		const after = await alice.eval(DOCS);
 		assert.equal(after, before, "open providers after a session stop/start");
-		ctx.step(`session stop/start: ${after} provider(s) before and after`);
+		// The restarted session starts from an empty index doc; it must not act on it before sync.
+		assert.deepEqual(await alice.eval(NOTES), notesBefore, "notes under Shared after restart");
+		ctx.step(`session stop/start: ${after} provider(s) and ${notesBefore.length} note(s) kept`);
 	},
 };
