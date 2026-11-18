@@ -296,7 +296,8 @@ export default class TeamSyncPlugin extends Plugin {
 	private openConnection(workspaceId: string): void {
 		this.disconnect();
 		const connections = new ConnectionManager({
-			url: websocketUrl(this.settings.serverUrl, WS_PATH),
+			// `?ws=` routes the socket to the workspace's relay; the Node server ignores it.
+			url: `${websocketUrl(this.settings.serverUrl, WS_PATH)}?ws=${encodeURIComponent(workspaceId)}`,
 			tokenStore: this.tokens,
 		});
 		this.connections = connections;
