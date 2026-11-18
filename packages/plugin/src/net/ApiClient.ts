@@ -3,6 +3,7 @@ import {
 	ApiError as ApiErrorSchema,
 	type DeviceInfo,
 	MeResponse,
+	type Role,
 	ServerInfo,
 	SessionResponse,
 	type WorkspaceSummary,
@@ -61,10 +62,11 @@ export class ApiClient {
 		return this.request("/server-info", { schema: ServerInfo, auth: false });
 	}
 
-	devLogin(name: string, device: DeviceInfo): Promise<SessionResponse> {
+	/** `role` applies only when the server creates a new membership for this user. */
+	devLogin(name: string, device: DeviceInfo, role?: Role): Promise<SessionResponse> {
 		return this.request("/auth/dev-login", {
 			method: "POST",
-			body: { name, device },
+			body: { name, device, role },
 			schema: SessionResponse,
 			auth: false,
 		});

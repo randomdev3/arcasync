@@ -66,4 +66,23 @@ describe("ApiClient", () => {
 		expect(error).toMatchObject({ status: 401, code: "no_session" });
 		expect(calls).toHaveLength(0);
 	});
+
+	it("sends the requested dev-login role, and omits it when unset", async () => {
+		const user = {
+			id: "u1",
+			name: "carol",
+			email: null,
+			color: "#fff",
+			avatarUrl: null,
+			isAdmin: false,
+		};
+		const calls = respond(200, { sessionToken: "t", user, workspaces: [] });
+		const device = { name: "vault", platform: "macos", vaultId: "v1" } as const;
+
+		await api(null).devLogin("carol", device, "viewer");
+		await api(null).devLogin("carol", device);
+
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ name: "carol", device, role: "viewer" });
+		expect(JSON.parse(String(calls[1]?.body))).toEqual({ name: "carol", device });
+	});
 });

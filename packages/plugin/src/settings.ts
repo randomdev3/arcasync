@@ -1,4 +1,4 @@
-import type { WorkspaceSummary } from "@teamsync/shared";
+import { Role, type WorkspaceSummary } from "@teamsync/shared";
 
 export interface TeamSyncSettings {
 	/** Base URL of the TeamSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
@@ -13,6 +13,19 @@ export interface TeamSyncSettings {
 	workspaces: WorkspaceSummary[];
 	/** Connect on plugin load. */
 	autoConnect: boolean;
+	/**
+	 * Vault folder synced with a workspace. An empty `workspaceId` is bound to the workspace the
+	 * next successful connect resolves.
+	 */
+	sharedFolder: SharedFolder | null;
+	/** Role asked for when dev-login creates a new membership; `""` = server default. */
+	devLoginRole: "" | Role;
+}
+
+export interface SharedFolder {
+	/** Vault-relative folder path without leading or trailing slashes. */
+	path: string;
+	workspaceId: string;
 }
 
 export const DEFAULT_SETTINGS: TeamSyncSettings = {
@@ -22,6 +35,8 @@ export const DEFAULT_SETTINGS: TeamSyncSettings = {
 	user: null,
 	workspaces: [],
 	autoConnect: false,
+	sharedFolder: null,
+	devLoginRole: "",
 };
 
 /**
@@ -40,7 +55,18 @@ export function normalizeSettings(raw: unknown): TeamSyncSettings {
 		user: data.user ?? null,
 		workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
 		autoConnect: data.autoConnect === true,
+		sharedFolder: normalizeSharedFolder(data.sharedFolder),
+		devLoginRole: Role.safeParse(data.devLoginRole).data ?? "",
 	};
+}
+
+function normalizeSharedFolder(value: unknown): SharedFolder | null {
+	if (!value || typeof value !== "object") return null;
+	const { path, workspaceId } = value as Partial<SharedFolder>;
+	if (typeof path !== "string") return null;
+	const trimmed = path.trim().replace(/^\/+|\/+$/g, "");
+	if (!trimmed) return null;
+	return { path: trimmed, workspaceId: typeof workspaceId === "string" ? workspaceId : "" };
 }
 
 /** `http(s)://host` → `ws(s)://host`, with any trailing slash removed. */
