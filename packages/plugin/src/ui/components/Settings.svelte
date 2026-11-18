@@ -10,6 +10,11 @@ const STATUS_LABEL = {
 	disconnected: "Not connected",
 	error: "Error",
 } as const;
+
+function folderSuggest(input: HTMLInputElement) {
+	const destroy = $vm.onFolderInputMount(input);
+	return { destroy };
+}
 </script>
 
 <div class="teamsync-settings">
@@ -42,6 +47,43 @@ const STATUS_LABEL = {
 				value={$vm.devLoginName}
 				onchange={(event) => $vm.onDevLoginNameChange(event.currentTarget.value)}
 			/>
+		</div>
+	{/if}
+
+	<div class="teamsync-row">
+		<div class="teamsync-row-info">
+			<div class="teamsync-row-name">Shared folder</div>
+			<div class="teamsync-row-desc">
+				Vault folder synced with the workspace. Leave empty to sync nothing.
+			</div>
+		</div>
+		<input
+			type="text"
+			class="teamsync-shared-folder"
+			spellcheck="false"
+			placeholder="Shared"
+			value={$vm.sharedFolderPath}
+			use:folderSuggest
+			onchange={(event) => $vm.onSharedFolderChange(event.currentTarget.value)}
+		/>
+	</div>
+
+	{#if $vm.workspaces.length > 0}
+		<div class="teamsync-row">
+			<div class="teamsync-row-info">
+				<div class="teamsync-row-name">Workspace</div>
+				<div class="teamsync-row-desc">The shared folder syncs with this workspace.</div>
+			</div>
+			<select
+				class="dropdown teamsync-workspace"
+				disabled={$vm.busy}
+				value={$vm.workspaceId}
+				onchange={(event) => $vm.onWorkspaceChange(event.currentTarget.value)}
+			>
+				{#each $vm.workspaces as workspace (workspace.id)}
+					<option value={workspace.id}>{workspace.name}</option>
+				{/each}
+			</select>
 		</div>
 	{/if}
 

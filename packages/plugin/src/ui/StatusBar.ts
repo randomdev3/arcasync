@@ -4,18 +4,20 @@ export interface StatusBarModel {
 	status: ConnectionStatus;
 	message: string | null;
 	userName: string | null;
-	/** Number of other clients present on the workspace index doc. */
+	workspaceName: string | null;
+	/** Clients present on the workspace index doc, this one included. */
 	online: number;
 }
 
 const PREFIX = "TeamSync";
 
-/** Renders `TeamSync: connected as alice (2 online)` in the Obsidian status bar. */
+/** Renders `TeamSync: alice · Dev · 2 online` in the Obsidian status bar. */
 export class StatusBar {
 	private model: StatusBarModel = {
 		status: "disconnected",
 		message: null,
 		userName: null,
+		workspaceName: null,
 		online: 0,
 	};
 
@@ -31,13 +33,12 @@ export class StatusBar {
 
 	/** Exposed for tests and for the settings tab's status line. */
 	get text(): string {
-		const { status, message, userName, online } = this.model;
+		const { status, message, userName, workspaceName, online } = this.model;
 		if (status === "error") return `${PREFIX}: error${message ? ` — ${message}` : ""}`;
 		if (status === "connecting") return `${PREFIX}: connecting…`;
 		if (status === "disconnected") return `${PREFIX}: offline`;
-		const who = userName ? ` as ${userName}` : "";
-		const others = online > 0 ? ` (${online} online)` : "";
-		return `${PREFIX}: connected${who}${others}`;
+		const parts = [userName ?? "connected", workspaceName, online > 0 ? `${online} online` : null];
+		return `${PREFIX}: ${parts.filter(Boolean).join(" · ")}`;
 	}
 
 	private render(): void {

@@ -49,6 +49,10 @@ export class WorkspaceSession {
 	private doc: Y.Doc | null = null;
 	private docAwareness: Awareness | null = null;
 	private handle: OpenDocHandle | null = null;
+	private readonly onlineListeners = new Set<() => void>();
+	private readonly emitOnline = () => {
+		for (const listener of this.onlineListeners) listener();
+	};
 
 	constructor(options: WorkspaceSessionOptions) {
 		this.app = options.app;
@@ -79,6 +83,17 @@ export class WorkspaceSession {
 		return this.handle.provider;
 	}
 
+	/** Clients present on the index doc (this one included); 0 while stopped. */
+	get online(): number {
+		return this.docAwareness?.getStates().size ?? 0;
+	}
+
+	/** Fires when `online` may have changed; survives stop/start. Returns unsubscribe. */
+	onOnlineChange(listener: () => void): () => void {
+		this.onlineListeners.add(listener);
+		return () => this.onlineListeners.delete(listener);
+	}
+
 	start(): void {
 		if (this.handle) return;
 		const doc = new Y.Doc();
@@ -86,15 +101,19 @@ export class WorkspaceSession {
 		this.doc = doc;
 		this.docAwareness = awareness;
 		this.handle = this.connections.openDoc(this.indexName, doc, awareness);
+		awareness.on("change", this.emitOnline);
+		this.emitOnline();
 	}
 
 	stop(): void {
 		this.selfWrites.clear();
+		this.docAwareness?.off("change", this.emitOnline);
 		this.handle?.close();
 		this.handle = null;
 		this.docAwareness?.destroy();
 		this.docAwareness = null;
 		this.doc?.destroy();
 		this.doc = null;
+		this.emitOnline();
 	}
 }

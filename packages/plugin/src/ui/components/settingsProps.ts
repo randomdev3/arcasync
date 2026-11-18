@@ -15,10 +15,19 @@ export type SettingsViewProps = {
 	statusMessage: string | null;
 	signedInAs: string | null;
 	workspaceName: string | null;
+	/** Workspaces this account belongs to, for the workspace select. */
+	workspaces: { id: string; name: string }[];
+	workspaceId: string;
+	/** Vault folder synced with the workspace; `""` when none is mapped. */
+	sharedFolderPath: string;
 	/** A request is in flight; buttons are disabled. */
 	busy: boolean;
 	onServerUrlChange(value: string): void;
 	onDevLoginNameChange(value: string): void;
+	onSharedFolderChange(path: string): void;
+	onWorkspaceChange(workspaceId: string): void;
+	/** Attaches the vault-folder autocomplete to the folder input; returns its cleanup. */
+	onFolderInputMount(input: HTMLInputElement): () => void;
 	onConnect(): void;
 	onDisconnect(): void;
 	onSignOut(): void;
