@@ -5,6 +5,10 @@ Real-time team collaboration for Obsidian with a single self-hosted server.
 Google-Docs-grade co-editing, presence with jump-to-user and follow mode, named version history
 with author attribution, full-vault sync (including binaries), and live multi-user Excalidraw.
 
+Working today (P2): invite and device-code sign-in with owner tools, live role changes, attachments
+synced through R2 chunks, 3-way merge of offline note edits, several workspaces per vault, and bulk
+clone for devices that are far behind.
+
 ## Layout
 
 | Package | Role |
