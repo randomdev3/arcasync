@@ -1,7 +1,7 @@
 {
 	"id": "arcasync",
 	"name": "ArcaSync",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"minAppVersion": "1.11.4",
 	"description": "Realtime multiplayer sync for shared Obsidian vaults.",
 	"author": "ArcaSync",
