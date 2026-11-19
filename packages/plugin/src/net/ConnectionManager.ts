@@ -174,9 +174,10 @@ export class ConnectionManager {
 
 	/**
 	 * A doc's Auth was refused (provider 4.7.0 never retries by itself). The token is dropped and
-	 * the doc re-authenticates once after `AUTH_RETRY_DELAY_MS` by detaching and re-attaching its
-	 * provider, which re-runs Auth and SyncStep1 (the relay drops frames queued behind a refused
-	 * Auth, so `sendToken()` alone would never sync).
+	 * the doc re-authenticates once after `AUTH_RETRY_DELAY_MS`: `sendToken()` then `startSync()`.
+	 * SyncStep1 must be resent because the relay drops frames queued behind a refused Auth. Not
+	 * `detach()` + `attach()`: detach sends a Close that the relay queues for the unauthenticated
+	 * doc and replays after the new Auth, dropping the doc again.
 	 */
 	private authFailed(name: string, provider: HocuspocusProvider, reason: string): void {
 		if (this.removed) return;
@@ -186,11 +187,12 @@ export class ConnectionManager {
 			return;
 		}
 		this.retried.add(name);
-		const timer = setTimeout(() => {
+		const timer = setTimeout(async () => {
 			this.retryTimers.delete(name);
 			if (this.removed || this.docs.get(name)?.provider !== provider) return;
-			provider.detach();
-			provider.attach();
+			await provider.sendToken();
+			if (this.removed || this.docs.get(name)?.provider !== provider) return;
+			provider.startSync();
 		}, AUTH_RETRY_DELAY_MS);
 		this.retryTimers.set(name, timer);
 	}

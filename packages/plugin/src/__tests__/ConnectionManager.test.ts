@@ -85,6 +85,7 @@ const fakes = vi.hoisted(() => {
 		static all: FakeProvider[] = [];
 		attaches = 0;
 		detaches = 0;
+		syncs = 0;
 		readonly sentTokens: string[] = [];
 		authorizedScope: string | undefined;
 		constructor(readonly config: ProviderConfig) {
@@ -103,13 +104,20 @@ const fakes = vi.hoisted(() => {
 		destroy(): void {
 			this.detach();
 		}
-		/** `sendToken()`: a throwing token callback becomes `authenticationFailed`. */
-		async onOpen(): Promise<void> {
+		/** A throwing token callback becomes `authenticationFailed`, as in 4.7.0. */
+		async sendToken(): Promise<void> {
 			try {
 				this.sentTokens.push(await this.config.token());
 			} catch (error) {
 				this.emit("authenticationFailed", { reason: String(error) });
 			}
+		}
+		startSync(): void {
+			this.syncs++;
+		}
+		async onOpen(): Promise<void> {
+			await this.sendToken();
+			this.startSync();
 		}
 		deny(): void {
 			this.emit("authenticationFailed", { reason: "permission-denied" });
@@ -203,19 +211,22 @@ describe("ConnectionManager membership changes", () => {
 		const { fetch, invalidate, manager, socket, provider } = setup(mint);
 		socket.open();
 		await vi.advanceTimersByTimeAsync(0);
+		expect(provider.syncs).toBe(1);
 
 		provider.deny();
 		expect(invalidate).toHaveBeenCalledWith(WS);
 		await vi.advanceTimersByTimeAsync(AUTH_RETRY_DELAY_MS - 1);
-		expect(provider.attaches).toBe(1);
+		expect(provider.sentTokens).toEqual(["t1"]);
 		await vi.advanceTimersByTimeAsync(1);
-		expect([provider.detaches, provider.attaches]).toEqual([1, 2]);
+		// Auth with a fresh token, then SyncStep1 again; no detach (its Close would be replayed).
 		expect(provider.sentTokens).toEqual(["t1", "t2"]);
+		expect(provider.syncs).toBe(2);
+		expect([provider.detaches, provider.attaches]).toEqual([0, 1]);
 
 		// Refused again: no second retry, and the failure shows.
 		provider.deny();
 		await vi.advanceTimersByTimeAsync(10_000);
-		expect(provider.attaches).toBe(2);
+		expect(provider.sentTokens).toHaveLength(2);
 		expect(fetch).toHaveBeenCalledTimes(2);
 		expect(manager.currentState.status).toBe("error");
 	});
@@ -226,12 +237,13 @@ describe("ConnectionManager membership changes", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		provider.deny();
 		await vi.advanceTimersByTimeAsync(AUTH_RETRY_DELAY_MS);
-		expect(provider.attaches).toBe(2);
+		expect(provider.sentTokens).toHaveLength(2);
 
 		socket.close(CLOSE_MEMBERSHIP_CHANGED);
 		await vi.advanceTimersByTimeAsync(1000);
+		expect(provider.sentTokens).toHaveLength(3);
 		provider.deny();
 		await vi.advanceTimersByTimeAsync(AUTH_RETRY_DELAY_MS);
-		expect(provider.attaches).toBe(3);
+		expect(provider.sentTokens).toHaveLength(4);
 	});
 });
