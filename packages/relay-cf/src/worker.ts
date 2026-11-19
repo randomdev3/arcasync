@@ -206,6 +206,18 @@ api.delete("/workspaces/:id/invites/:inviteId", async (c) =>
 	),
 );
 
+/**
+ * Files listing and bulk clone are answered by the workspace's DO, which verifies the WS-JWT
+ * (D6); the Worker forwards the raw request, so it parses no JSON and streams the response.
+ */
+const toRelay = (c: Ctx) => {
+	const id = c.req.param("id") ?? "";
+	if (!WORKSPACE_ID.test(id)) return badRequest(c);
+	return c.env.RELAY.getByName(id).fetch(c.req.raw);
+};
+api.get("/workspaces/:id/files", toRelay);
+api.post("/workspaces/:id/docs", toRelay);
+
 api.get("/workspaces/:id/members", async (c) =>
 	reply(c, await accounts(c.env).members(bearer(c), c.req.param("id"))),
 );

@@ -13,12 +13,17 @@
 import { DurableObject } from "cloudflare:workers";
 import {
 	CLOSE_MEMBERSHIP_CHANGED,
+	CloneRequest,
+	docName,
 	KEEPALIVE_PING,
 	KEEPALIVE_PONG,
 	parseDocName,
 } from "@teamsync/shared";
+import { CloneRateLimiter, cloneDocs } from "./clone";
 import type { Env } from "./env";
-import { verifyWsToken } from "./jwt";
+import { errorBody } from "./errors";
+import { FILES_TABLE, listFiles, projectFiles } from "./files";
+import { verifyWsToken, type WsClaims } from "./jwt";
 import {
 	type AwarenessEntry,
 	awarenessRemoval,
@@ -32,6 +37,7 @@ import {
 	SyncStep,
 } from "./protocol";
 import { type DocDebug, DocStore } from "./store";
+import { bearerClaims } from "./wsAuth";
 
 interface DocAuth {
 	ro: boolean;
@@ -71,13 +77,29 @@ interface Counters {
 	msgs_out: number;
 	connects: number;
 	closes: number;
+	clone_requests: number;
+	clone_docs: number;
 }
+
+const ZERO: Counters = {
+	msgs_in: 0,
+	msgs_out: 0,
+	connects: 0,
+	closes: 0,
+	clone_requests: 0,
+	clone_docs: 0,
+};
+
+/** `GET /api/workspaces/:id/files` and `POST /api/workspaces/:id/docs`, forwarded by the worker. */
+const REST_PATH = /^\/api\/workspaces\/([A-Za-z0-9_-]{1,64})\/(files|docs)$/;
 
 /** Dev-only counters for the G4 measurements, kept in one SQLite row (its writes are excluded). */
 class Stats {
-	private pending: Counters = { msgs_in: 0, msgs_out: 0, connects: 0, closes: 0 };
+	private pending: Counters = { ...ZERO };
 	private flushedRows = 0;
 	private flushedCompactions = 0;
+	/** Rows written outside the store (the `files` projection). */
+	private extraRows = 0;
 
 	constructor(
 		private readonly sql: SqlStorage,
@@ -89,6 +111,13 @@ class Stats {
 			connects INTEGER NOT NULL DEFAULT 0, closes INTEGER NOT NULL DEFAULT 0,
 			app_rows_written INTEGER NOT NULL DEFAULT 0, compactions INTEGER NOT NULL DEFAULT 0,
 			awake_ms_est INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0)`);
+		for (const column of ["clone_requests", "clone_docs"]) {
+			try {
+				sql.exec(`ALTER TABLE relay_stats ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
+			} catch (err) {
+				if (!String(err).includes("duplicate column")) throw err;
+			}
+		}
 		sql.exec("INSERT INTO relay_stats (id) VALUES (1) ON CONFLICT DO NOTHING");
 		sql.exec("UPDATE relay_stats SET wakes = wakes + 1");
 	}
@@ -97,15 +126,20 @@ class Stats {
 		this.pending[key] += n;
 	}
 
+	addRows(n: number): void {
+		this.extraRows += n;
+	}
+
 	flush(): void {
 		const now = Date.now();
 		const p = this.pending;
-		const rows = this.store.rowsWritten - this.flushedRows;
+		const rows = this.store.rowsWritten - this.flushedRows + this.extraRows;
 		const compactions = this.store.compactions - this.flushedCompactions;
 		this.sql.exec(
 			`UPDATE relay_stats SET msgs_in = msgs_in + ?, msgs_out = msgs_out + ?,
 			 connects = connects + ?, closes = closes + ?, app_rows_written = app_rows_written + ?,
-			 compactions = compactions + ?,
+			 compactions = compactions + ?, clone_requests = clone_requests + ?,
+			 clone_docs = clone_docs + ?,
 			 awake_ms_est = awake_ms_est + CASE WHEN last_at = 0 THEN 0 ELSE MIN(? - last_at, ?) END,
 			 last_at = ?`,
 			p.msgs_in,
@@ -114,12 +148,15 @@ class Stats {
 			p.closes,
 			rows,
 			compactions,
+			p.clone_requests,
+			p.clone_docs,
 			now,
 			IDLE_BEFORE_HIBERNATION_MS,
 			now,
 		);
-		this.pending = { msgs_in: 0, msgs_out: 0, connects: 0, closes: 0 };
-		this.flushedRows += rows;
+		this.pending = { ...ZERO };
+		this.flushedRows = this.store.rowsWritten;
+		this.extraRows = 0;
 		this.flushedCompactions += compactions;
 	}
 
@@ -129,7 +166,8 @@ class Stats {
 
 	reset(): void {
 		this.sql.exec(`UPDATE relay_stats SET wakes = 0, msgs_in = 0, msgs_out = 0, connects = 0,
-			closes = 0, app_rows_written = 0, compactions = 0, awake_ms_est = 0, last_at = 0`);
+			closes = 0, app_rows_written = 0, compactions = 0, awake_ms_est = 0, last_at = 0,
+			clone_requests = 0, clone_docs = 0`);
 	}
 }
 
@@ -144,6 +182,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 	private readonly awareness = new Map<string, Map<string, Map<number, AwarenessEntry>>>();
 	/** userId → last revocation (ms); loaded from `revocations` on the first Auth of a wake. */
 	private revoked: Map<string, number> | null = null;
+	private readonly cloneLimiter = new CloneRateLimiter();
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -153,6 +192,13 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		ctx.storage.sql.exec(
 			"CREATE TABLE IF NOT EXISTS revocations (user_id TEXT PRIMARY KEY, at INTEGER NOT NULL)",
 		);
+		ctx.storage.sql.exec(FILES_TABLE);
+	}
+
+	/** D5: a token issued at or before the user's last revocation second is refused. */
+	private isRevoked(claims: WsClaims): boolean {
+		const revokedAt = this.revocations().get(claims.sub);
+		return revokedAt !== undefined && claims.iat <= Math.floor(revokedAt / 1000);
 	}
 
 	private revocations(): Map<string, number> {
@@ -192,9 +238,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 	}
 
 	async fetch(request: Request): Promise<Response> {
-		if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-			return new Response("Expected a WebSocket upgrade", { status: 426 });
-		}
+		if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return this.rest(request);
 		const workspaceId = new URL(request.url).searchParams.get("ws");
 		if (!workspaceId) return new Response("Missing ?ws=", { status: 400 });
 		const pair = new WebSocketPair();
@@ -348,9 +392,13 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		try {
 			const claims = await verifyWsToken(token, this.env.TEAMSYNC_SECRET);
 			const att = this.attachment(ws);
-			const revokedAt = this.revocations().get(claims.sub);
-			const stale = revokedAt !== undefined && claims.iat <= Math.floor(revokedAt / 1000);
-			if (ref && att && !stale && claims.ws === ref.workspaceId && claims.ws === att.ws) {
+			if (
+				ref &&
+				att &&
+				!this.isRevoked(claims) &&
+				claims.ws === ref.workspaceId &&
+				claims.ws === att.ws
+			) {
 				readOnly = claims.role === "viewer";
 				uid = claims.sub;
 			}
@@ -565,6 +613,70 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		for (const peer of this.peers(doc, att.id)) {
 			this.send(peer.ws, encode.awareness(peer.address, removal));
 		}
+	}
+
+	// --- REST: files listing and bulk clone (D6: the WS-JWT is verified here, not in the Worker) ---
+
+	private async rest(request: Request): Promise<Response> {
+		const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+			Response.json(body, { status, headers });
+		const match = REST_PATH.exec(new URL(request.url).pathname);
+		const op = match?.[2];
+		const workspaceId = match?.[1];
+		if (
+			!workspaceId ||
+			!(
+				(op === "files" && request.method === "GET") ||
+				(op === "docs" && request.method === "POST")
+			)
+		) {
+			return json(errorBody("not_found", "Not found"), 404);
+		}
+		const claims = await bearerClaims(
+			request.headers.get("authorization"),
+			this.env.TEAMSYNC_SECRET,
+		);
+		if (!claims || claims.ws !== workspaceId || this.isRevoked(claims)) {
+			return json(errorBody("unauthorized", "Missing or invalid workspace token"), 401);
+		}
+		if (op === "files") {
+			this.projectFiles(workspaceId);
+			this.stats?.flush();
+			return json({ files: listFiles(this.ctx.storage.sql) });
+		}
+		const retryAfter = this.cloneLimiter.take(claims.sub);
+		if (retryAfter > 0) {
+			return json(errorBody("rate_limited", "Too many clone requests"), 429, {
+				"retry-after": String(retryAfter),
+			});
+		}
+		let raw: unknown;
+		try {
+			raw = await request.json();
+		} catch {
+			raw = undefined;
+		}
+		const body = CloneRequest.safeParse(raw);
+		if (!body.success) return json(errorBody("bad_request", "Invalid request"), 400);
+		const result = cloneDocs(this.store, workspaceId, body.data);
+		if (!result.ok) return json(errorBody("bad_request", result.message), 400);
+		this.stats?.count("clone_requests");
+		this.stats?.count("clone_docs", result.docs);
+		this.stats?.flush();
+		return new Response(result.body, {
+			headers: { "content-type": "application/octet-stream" },
+		});
+	}
+
+	/** D11: brings `files` in line with the index doc; writes only the differing rows. */
+	private projectFiles(workspaceId: string): void {
+		const index = this.store.state(docName({ workspaceId, kind: "index" }));
+		const { rowsWritten } = projectFiles(
+			this.ctx.storage.sql,
+			(fn) => this.ctx.storage.transactionSync(fn),
+			index,
+		);
+		this.stats?.addRows(rowsWritten);
 	}
 
 	// --- dev-only instrumentation (worker gates these on TEAMSYNC_DEBUG_STATS) ---

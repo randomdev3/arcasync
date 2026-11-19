@@ -23,6 +23,7 @@ export function serverInfo(env: ServerInfoEnv, publicUrl: string): ServerInfo {
 			presenceRenewalMs: PRESENCE_RENEWAL_MS,
 			accounts: true,
 			chunks: !!env.CHUNKS,
+			bulkClone: true,
 		},
 		limits: { maxFileBytes: Number(env.TEAMSYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
 	};

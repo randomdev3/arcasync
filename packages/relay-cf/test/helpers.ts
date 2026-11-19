@@ -235,6 +235,8 @@ export interface RelayStats {
 	app_rows_written: number;
 	compactions: number;
 	awake_ms_est: number;
+	clone_requests: number;
+	clone_docs: number;
 	sockets: number;
 	databaseSize: number;
 }
