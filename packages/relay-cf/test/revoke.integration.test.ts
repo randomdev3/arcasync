@@ -251,9 +251,10 @@ describe("revocation", () => {
 		c.destroy();
 		const me = await request(relay.url, "GET", "/api/auth/me", { token: carol.sessionToken });
 		expect([401, 403]).toContain(me.status);
-		expect(
+		const reentry = InviteCreated.parse(
 			await post(relay.url, `/api/admin/users/${carol.user.id}/enable`, {}, alice.sessionToken),
-		).toEqual({ ok: true });
+		);
+		expect(reentry.maxUses).toBe(1);
 		// Enabling does not resurrect revoked sessions.
 		const after = await request(relay.url, "GET", "/api/auth/me", { token: carol.sessionToken });
 		expect(after.status).toBe(401);
