@@ -13,7 +13,7 @@ JSON
   [ -f "$VAULT/Shared/Welcome.md" ] || printf '# Welcome\n\nThis folder is shared via ArcaSync.\n' > "$VAULT/Shared/Welcome.md"
   echo "prepared $VAULT"
 done
-cat <<TXT
+cat <<'TXT'
 
 Next:
   1. pnpm dev   (Cloudflare relay on http://localhost:8789, plugin watch -> packages/plugin/dist;
