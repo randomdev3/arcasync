@@ -63,6 +63,11 @@ export class TeamSyncSettingsTab extends PluginSettingTab {
 				void this.plugin.setWorkspace(workspaceId);
 			},
 			onFolderInputMount: (input, onPick) => this.plugin.attachFolderSuggest(input, onPick),
+			onJoinInvite: (link, name) => {
+				void this.plugin.joinWithInvite(link, name);
+			},
+			onDeviceSignIn: () => this.plugin.signInWithDevice(),
+			onApproveDevice: () => this.plugin.approveDevice(),
 			onConnect: () => {
 				void this.plugin.connect();
 			},

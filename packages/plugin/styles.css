@@ -36,6 +36,22 @@
 	min-width: 18em;
 }
 
+.teamsync-settings .teamsync-invite {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--size-4-2);
+}
+
+.teamsync-user-code {
+	font-family: var(--font-monospace);
+	font-size: 2em;
+	letter-spacing: 0.1em;
+	text-align: center;
+	user-select: all;
+	padding: var(--size-4-2) 0;
+}
+
 .teamsync-settings .teamsync-mappings {
 	display: flex;
 	flex-direction: column;

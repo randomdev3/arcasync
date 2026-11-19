@@ -1,6 +1,15 @@
-import type { DeviceInfo, ServerInfo } from "@teamsync/shared";
+import type { DeviceInfo, ServerInfo, SessionResponse } from "@teamsync/shared";
 import { WS_PATH } from "@teamsync/shared";
-import { Notice, normalizePath, Platform, Plugin } from "obsidian";
+import {
+	type Modal,
+	Notice,
+	normalizePath,
+	type ObsidianProtocolData,
+	Platform,
+	Plugin,
+} from "obsidian";
+import { DeviceLogin } from "./auth/DeviceLogin";
+import { inviteFromParams, parseInviteLink, sameServer } from "./auth/invites";
 import { CounterDebug } from "./debug/CounterDebug";
 import { editorExtensions } from "./editor";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
@@ -17,8 +26,12 @@ import {
 	websocketUrl,
 } from "./settings";
 import { SecretStore } from "./storage/SecretStore";
+import { ApproveDeviceModal } from "./ui/ApproveDeviceModal";
+import { ConfirmModal } from "./ui/ConfirmModal";
 import type { SettingsViewState } from "./ui/components/settingsProps";
+import { DeviceCodeModal } from "./ui/DeviceCodeModal";
 import { FolderSuggest } from "./ui/FolderSuggest";
+import { InviteModal } from "./ui/InviteModal";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { containingRoot, foldersOverlap } from "./workspace/paths";
@@ -58,6 +71,24 @@ function cleanFolder(value: string): string {
 	return path === "/" ? "" : path;
 }
 
+/** A user-facing sentence for a failed invite accept or redeem. */
+function inviteErrorMessage(error: unknown): string {
+	if (error instanceof ApiRequestError) {
+		switch (error.code) {
+			case "not_found":
+				return "This invite does not exist or was revoked";
+			case "invite_expired":
+				return "This invite has expired";
+			case "invite_used":
+				return "This invite was already used";
+			case "name_taken":
+				return "That name is taken; pick another";
+		}
+		return error.message;
+	}
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** The server may send `expiresAt` in seconds or milliseconds; normalise to ms. */
 function toEpochMs(expiresAt: number): number {
 	return expiresAt < 1e12 ? expiresAt * 1000 : expiresAt;
@@ -67,8 +98,14 @@ export default class TeamSyncPlugin extends Plugin {
 	settings: TeamSyncSettings = { ...DEFAULT_SETTINGS };
 
 	private secrets!: SecretStore;
-	private api!: ApiClient;
+	/** Public so e2e can read `api.requestCounts`. */
+	readonly api = new ApiClient({
+		getBaseUrl: () => this.settings.serverUrl,
+		getSessionToken: () => this.secrets?.get() ?? null,
+	});
 	private tokens!: TokenStore;
+	/** Sign-in and approval modals; closed on unload so a device-code poll never outlives us. */
+	private readonly modals = new Set<Modal>();
 	private statusBar: StatusBar | null = null;
 	/** Connected workspaces by id: one per mapped folder, or the primary when none is mapped. */
 	private readonly live = new Map<string, LiveWorkspace>();
@@ -92,10 +129,6 @@ export default class TeamSyncPlugin extends Plugin {
 
 		await this.loadSettings();
 		this.secrets = new SecretStore(this.app);
-		this.api = new ApiClient({
-			getBaseUrl: () => this.settings.serverUrl,
-			getSessionToken: () => this.secrets.get(),
-		});
 		this.tokens = new TokenStore({
 			fetchToken: async (workspaceId) => {
 				const response = await this.api.wsToken(workspaceId);
@@ -119,6 +152,19 @@ export default class TeamSyncPlugin extends Plugin {
 			name: "Disconnect",
 			callback: () => this.disconnect(),
 		});
+		this.addCommand({
+			id: "sign-out",
+			name: "Sign out",
+			callback: () => {
+				void this.signOut();
+			},
+		});
+		this.addCommand({
+			id: "approve-device",
+			name: "Approve a device sign-in",
+			callback: () => this.approveDevice(),
+		});
+		this.registerObsidianProtocolHandler("teamsync", (params) => this.handleLink(params));
 		registerNavigatorCommands(this);
 		this.addCommand({
 			id: "debug-counter-increment",
@@ -152,6 +198,8 @@ export default class TeamSyncPlugin extends Plugin {
 			}
 		};
 
+		for (const modal of [...this.modals]) teardownStep("modal.close", () => modal.close());
+		this.modals.clear();
 		teardownStep("counter.close", () => this.counter?.close());
 		this.counter = null;
 		this.counterSession = null;
@@ -303,6 +351,8 @@ export default class TeamSyncPlugin extends Plugin {
 			serverUrl: this.settings.serverUrl,
 			devLoginName: this.settings.devLoginName,
 			devOpenLogin: this.serverInfo?.features.devOpenLogin ?? false,
+			accounts: this.serverInfo?.features.accounts ?? false,
+			signedIn: this.signedIn,
 			serverError: this.serverError,
 			status: this.connection.status,
 			statusMessage: this.connection.message ?? null,
@@ -388,18 +438,31 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 	}
 
+	/** Signed out: dev-login when the server allows it and a name is set; never a silent fallback. */
 	private async devLogin(info: ServerInfo): Promise<void> {
-		if (!info.features.devOpenLogin) {
-			throw new Error("Not signed in, and this server does not allow open login");
-		}
 		const name = this.settings.devLoginName.trim();
-		if (!name) throw new Error("Enter a display name in TeamSync settings first");
+		if (!info.features.devOpenLogin || !name) {
+			if (info.features.accounts) {
+				throw new Error("Not signed in — paste an invite link or sign in from another device");
+			}
+			if (!info.features.devOpenLogin) {
+				throw new Error("Not signed in, and this server does not allow open login");
+			}
+			throw new Error("Enter a display name in TeamSync settings first");
+		}
 		const session = await this.api.devLogin(
 			name,
 			this.deviceInfo(),
 			this.settings.devLoginRole || undefined,
 		);
+		await this.storeSession(session);
+	}
+
+	/** Keeps a new session (the token in SecretStore, never `data.json`) and its identity. */
+	private async storeSession(session: SessionResponse): Promise<void> {
 		this.secrets.set(session.sessionToken);
+		this.tokens.invalidate();
+		this.me = null;
 		this.settings.user = {
 			id: session.user.id,
 			name: session.user.name,
@@ -407,6 +470,140 @@ export default class TeamSyncPlugin extends Plugin {
 		};
 		this.settings.workspaces = session.workspaces;
 		await this.saveSettings();
+	}
+
+	get signedIn(): boolean {
+		return Boolean(this.secrets?.get());
+	}
+
+	// --- sign-in ------------------------------------------------------------
+
+	/** A real (non-dev) sign-in finished: keep the session, connect, and reconnect on restart. */
+	private async completeSignIn(session: SessionResponse): Promise<void> {
+		this.settings.autoConnect = true;
+		await this.storeSession(session);
+		this.notifyView();
+		await this.connect();
+	}
+
+	/**
+	 * Joins with an invite link or bare token. Signed out, it creates the account `name` and
+	 * connects; signed in, it adds the invite's workspace. Returns whether it joined.
+	 */
+	async joinWithInvite(input: string, name = ""): Promise<boolean> {
+		const invite = parseInviteLink(input);
+		if (!invite) {
+			new Notice("TeamSync: that is not a TeamSync invite link or code");
+			return false;
+		}
+		const sameRelay = !invite.server || sameServer(invite.server, this.settings.serverUrl);
+		try {
+			if (this.signedIn) {
+				if (!sameRelay) {
+					new Notice(
+						`TeamSync: this invite is for ${invite.server}. Sign out first to switch servers.`,
+					);
+					return false;
+				}
+				const before = new Set(this.settings.workspaces.map((w) => w.id));
+				const workspaces = await this.api.redeemInvite(invite.token);
+				await this.updateSettings({ workspaces });
+				const joined = workspaces.filter((w) => !before.has(w.id)).map((w) => w.name);
+				new Notice(
+					joined.length > 0 ? `TeamSync: joined ${joined.join(", ")}` : "TeamSync: invite redeemed",
+				);
+				return true;
+			}
+			const displayName = name.trim();
+			if (!displayName) {
+				new Notice("TeamSync: enter your name to join");
+				return false;
+			}
+			if (!sameRelay && invite.server) await this.setServerUrl(invite.server);
+			const session = await this.api.acceptInvite(invite.token, displayName, this.deviceInfo());
+			await this.completeSignIn(session);
+			return true;
+		} catch (error) {
+			new Notice(`TeamSync: ${inviteErrorMessage(error)}`);
+			return false;
+		}
+	}
+
+	/** Opens the device-code sign-in ("Sign in with another device"). */
+	signInWithDevice(): void {
+		if (this.signedIn) {
+			new Notice("TeamSync: already signed in");
+			return;
+		}
+		const login = new DeviceLogin({ api: this.api, device: this.deviceInfo() });
+		this.openModal(
+			new DeviceCodeModal(this.app, {
+				login,
+				onSession: (session) => this.completeSignIn(session),
+			}),
+		);
+	}
+
+	/** Opens "Approve a device sign-in", optionally pre-filled with a code. */
+	approveDevice(code = ""): void {
+		if (!this.signedIn) {
+			new Notice("TeamSync: sign in first to approve another device");
+			return;
+		}
+		this.openModal(new ApproveDeviceModal(this.app, this.api, code));
+	}
+
+	/** `obsidian://teamsync?server=…&invite=…` or `obsidian://teamsync?approve=<code>`. */
+	private handleLink(params: ObsidianProtocolData): void {
+		if (params.approve) {
+			this.approveDevice(params.approve);
+			return;
+		}
+		const invite = inviteFromParams({ server: params.server, invite: params.invite });
+		if (!invite) {
+			new Notice("TeamSync: this link is not a valid TeamSync invite");
+			return;
+		}
+		const server = invite.server ?? this.settings.serverUrl;
+		const switching = !sameServer(server, this.settings.serverUrl);
+		const signOutFirst = switching && this.signedIn;
+		// Never act on a link without asking: it may come from anyone.
+		this.openModal(
+			new ConfirmModal(this.app, {
+				title: "Join a TeamSync server",
+				message: signOutFirst
+					? `Join ${server}? You will be signed out of ${this.settings.serverUrl}.`
+					: `Join ${server}?`,
+				confirmText: "Continue",
+				onConfirm: () => void this.openInvite(server, invite.token, switching),
+			}),
+		);
+	}
+
+	private async openInvite(server: string, token: string, switching: boolean): Promise<void> {
+		if (switching) {
+			// A session belongs to one server; its token must never be sent to another.
+			if (this.signedIn) await this.signOut();
+			await this.setServerUrl(server);
+		}
+		const link = `obsidian://teamsync?server=${encodeURIComponent(server)}&invite=${token}`;
+		this.openModal(
+			new InviteModal(this.app, {
+				link,
+				askName: !this.signedIn,
+				join: (value, name) => this.joinWithInvite(value, name),
+			}),
+		);
+	}
+
+	private openModal(modal: Modal): void {
+		const onClose = modal.onClose.bind(modal);
+		modal.onClose = () => {
+			this.modals.delete(modal);
+			onClose();
+		};
+		this.modals.add(modal);
+		modal.open();
 	}
 
 	private async fetchMe(): Promise<MeResult> {
@@ -545,6 +742,15 @@ export default class TeamSyncPlugin extends Plugin {
 
 	async signOut(): Promise<void> {
 		this.disconnect();
+		if (this.signedIn) {
+			try {
+				// Before clearing: the client reads the token for the Authorization header.
+				await this.api.logout();
+			} catch (error) {
+				// Offline or already revoked: the local session is dropped either way.
+				console.warn("[TeamSync] logout request failed", error);
+			}
+		}
 		this.secrets.clear();
 		this.tokens.invalidate();
 		this.me = null;

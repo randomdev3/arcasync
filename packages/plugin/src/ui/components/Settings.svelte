@@ -35,6 +35,15 @@ const newWorkspace = $derived(
 		: ((unmapped.find((w) => w.id === $vm.workspaceId) ?? unmapped[0])?.id ?? ""),
 );
 
+let inviteLink = $state("");
+let inviteName = $state("");
+
+function join() {
+	if (!inviteLink.trim()) return;
+	$vm.onJoinInvite(inviteLink, inviteName);
+	inviteLink = "";
+}
+
 function addMapping(path: string) {
 	if (!path.trim()) return;
 	$vm.onMappingAdd(path, newWorkspace);
@@ -72,6 +81,63 @@ function addMapping(path: string) {
 				value={$vm.devLoginName}
 				onchange={(event) => $vm.onDevLoginNameChange(event.currentTarget.value)}
 			/>
+		</div>
+	{/if}
+
+	{#if $vm.accounts}
+		<div class="teamsync-row">
+			<div class="teamsync-row-info">
+				<div class="teamsync-row-name">
+					{$vm.signedIn ? "Join another workspace" : "Join with an invite"}
+				</div>
+				<div class="teamsync-row-desc">Paste the invite link or code you were sent.</div>
+			</div>
+			<div class="teamsync-invite">
+				<input
+					type="text"
+					class="teamsync-invite-input"
+					spellcheck="false"
+					placeholder="obsidian://teamsync?…"
+					bind:value={inviteLink}
+				/>
+				{#if !$vm.signedIn}
+					<input
+						type="text"
+						class="teamsync-invite-name"
+						spellcheck="false"
+						placeholder="Your name"
+						bind:value={inviteName}
+					/>
+				{/if}
+				<button class="mod-cta teamsync-invite-join" disabled={$vm.busy} onclick={join}>
+					Join
+				</button>
+			</div>
+		</div>
+
+		<div class="teamsync-row">
+			<div class="teamsync-row-info">
+				{#if $vm.signedIn}
+					<div class="teamsync-row-name">Approve a device</div>
+					<div class="teamsync-row-desc">
+						Let another device sign in as you with the code it shows.
+					</div>
+				{:else}
+					<div class="teamsync-row-name">Sign in with another device</div>
+					<div class="teamsync-row-desc">
+						Get a code here and approve it on a device where you are signed in.
+					</div>
+				{/if}
+			</div>
+			{#if $vm.signedIn}
+				<button class="teamsync-approve-device-open" onclick={() => $vm.onApproveDevice()}>
+					Approve a device sign-in…
+				</button>
+			{:else}
+				<button class="teamsync-device-signin" onclick={() => $vm.onDeviceSignIn()}>
+					Sign in with another device
+				</button>
+			{/if}
 		</div>
 	{/if}
 
