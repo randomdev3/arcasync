@@ -103,8 +103,12 @@ export class BackgroundSync {
 		if (this.disposed) return;
 		if (this.running.has(fileId)) this.again.add(fileId);
 		else this.queue.add(fileId);
-		// After the current task: one index transaction enqueues many notes, and the bulk clone
-		// threshold must see all of them.
+		// Without bulk clone, start right away (P1 timing). With it, after the current task: one
+		// index transaction enqueues many notes, and the clone threshold must see all of them.
+		if (!this.options.clone) {
+			this.pump();
+			return;
+		}
 		if (this.pumpScheduled) return;
 		this.pumpScheduled = true;
 		queueMicrotask(() => {

@@ -168,9 +168,9 @@ export class RevTracker {
 	private bump(fileId: string): void {
 		const rev: DocRev = { at: this.now(), by: this.userId };
 		this.lastBump.set(fileId, rev.at);
-		this.revs.set(fileId, rev);
-		// Our own bump needs no catch-up here.
+		// Our own bump needs no catch-up here; recorded first, so observers see it as caught up.
 		this.markSynced(fileId, rev);
+		this.revs.set(fileId, rev);
 		if (this.acked.has(fileId)) {
 			this.acked.delete(fileId);
 			this.dirtySet.delete(fileId);

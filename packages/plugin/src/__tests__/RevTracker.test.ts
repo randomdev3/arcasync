@@ -51,6 +51,19 @@ describe("RevTracker", () => {
 		expect(tracker.changed()).toEqual([]);
 	});
 
+	it("an observer of docRevs already sees its own bump as caught up", () => {
+		const { revs, tracker } = setup();
+		const n = note();
+		tracker.track(n);
+		const seen: boolean[] = [];
+		// BackgroundSync queues notes from this observer; a self-bump must not re-attach a note.
+		revs.observe(() => seen.push(tracker.isChanged("n1")));
+		n.text.insert(0, "local");
+		n.provider.setUnsynced(1);
+		n.provider.setUnsynced(0);
+		expect(seen).toEqual([false]);
+	});
+
 	it("throttles to one bump per 5 s per note, with one trailing bump", () => {
 		const { revs, tracker } = setup();
 		const n = note();
