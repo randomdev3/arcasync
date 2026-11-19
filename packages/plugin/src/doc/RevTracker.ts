@@ -113,6 +113,10 @@ export class RevTracker {
 		return [...this.dirtySet];
 	}
 
+	isDirty(fileId: string): boolean {
+		return this.dirtySet.has(fileId);
+	}
+
 	/** Watches an attached note; returns the function that stops watching. */
 	track(note: TrackedNote): () => void {
 		const { fileId, ydoc, provider } = note;

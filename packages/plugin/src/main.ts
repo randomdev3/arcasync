@@ -14,6 +14,8 @@ import { CounterDebug } from "./debug/CounterDebug";
 import { editorExtensions } from "./editor";
 import { ChunkClient } from "./files/ChunkClient";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
+import type { WorkspaceAuth } from "./net/bearer";
+import { CloneClient } from "./net/CloneClient";
 import { ConnectionManager, type ConnectionState } from "./net/ConnectionManager";
 import { TokenStore } from "./net/TokenStore";
 import { limits, type PlatformLimits } from "./platform";
@@ -781,6 +783,9 @@ export default class TeamSyncPlugin extends Plugin {
 			user,
 			vaultId: this.secrets.vaultId,
 			binaries: this.binaryOptions(workspaceId),
+			clone: this.serverInfo?.features.bulkClone
+				? new CloneClient({ auth: this.workspaceAuth(workspaceId), workspaceId })
+				: null,
 		});
 		const started = session;
 		const offOnline = started.onOnlineChange(() => this.renderStatusBar());
@@ -804,14 +809,17 @@ export default class TeamSyncPlugin extends Plugin {
 		const info = this.serverInfo;
 		if (!info?.features.chunks) return null;
 		return {
-			chunks: new ChunkClient({
-				auth: {
-					baseUrl: () => this.settings.serverUrl,
-					token: () => this.tokens.get(workspaceId),
-					invalidate: () => this.tokens.invalidate(workspaceId),
-				},
-			}),
+			chunks: new ChunkClient({ auth: this.workspaceAuth(workspaceId) }),
 			maxBytes: Math.min(limits().maxBinaryBytes, info.limits.maxFileBytes),
+		};
+	}
+
+	/** Chunk and clone requests authenticate with the workspace's WS-JWT (D6). */
+	private workspaceAuth(workspaceId: string): WorkspaceAuth {
+		return {
+			baseUrl: () => this.settings.serverUrl,
+			token: () => this.tokens.get(workspaceId),
+			invalidate: () => this.tokens.invalidate(workspaceId),
 		};
 	}
 

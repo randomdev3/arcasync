@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { textHash } from "../doc/diskText";
 import { enrollmentUpdate } from "../doc/enroll";
 import { device, FakeDisk, FakeRelay, noteName, sleep, waitUntil } from "./helpers/noteFakes";
 
@@ -149,5 +150,39 @@ describe("DocManager", () => {
 		d.docs.destroy();
 		await waitUntil(() => note.state === "closed");
 		await expect(d.docs.acquire(id, "Shared/a.md")).rejects.toThrow();
+	});
+
+	it("hydrate writes the cloned state to disk through DiskWriter without a provider", async () => {
+		const relay = new FakeRelay();
+		const path = "Shared/h.md";
+		const d = device({ relay, disk: new FakeDisk({ [path]: "" }) });
+		const id = newId();
+		d.paths[id] = path;
+		seeded(relay, id, "hello\n");
+		const state = Y.encodeStateAsUpdate(relay.server(noteName(id)));
+
+		expect(await d.docs.hydrate(id, path, state)).toEqual({ action: "write-doc" });
+		expect(d.disk.files.get(path)).toBe("hello\n");
+		// The write went through DiskWriter, so the watcher drops its vault event.
+		expect(d.selfWrites.consume(path, "modify", await textHash("hello\n"))).toBe(true);
+		expect(relay.frames.attaches).toBe(0);
+		expect(d.docs.stats).toEqual({ attaches: 0, hydrates: 1 });
+		expect(d.docs.attachedCount()).toBe(0);
+
+		// A disk edit since then would change the doc: hydrate leaves both alone.
+		d.disk.files.set(path, "hello\nedited offline\n");
+		expect(await d.docs.hydrate(id, path, state)).toEqual({ action: "defer" });
+		expect(d.disk.files.get(path)).toBe("hello\nedited offline\n");
+
+		// The cloned state and the merge base are in IndexedDB for the attach that follows.
+		const note = await d.docs.acquire(id, path);
+		expect(await note.getLastSyncedText()).toBe("hello\n");
+		await note.whenReady();
+		expect(relay.text(noteName(id))).toBe("hello\nedited offline\n");
+		expect(d.docs.stats.attaches).toBe(1);
+
+		// An attached note belongs to its provider.
+		expect(await d.docs.hydrate(id, path, state)).toBeNull();
+		d.docs.release(note);
 	});
 });

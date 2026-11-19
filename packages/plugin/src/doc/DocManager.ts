@@ -1,13 +1,15 @@
+import * as Y from "yjs";
 import type { IDocManager, NoteDocHandle } from "../workspace/types";
 import { diskText, textHash, utf8Bytes } from "./diskText";
 import {
+	CLONE_ORIGIN,
 	DISK_ORIGIN,
 	ENROLL_ORIGIN,
 	type ReconcileDeps,
 	type ReconcileResult,
 	reconcileNote,
 } from "./enroll";
-import { NoteDoc, type NoteDocDeps } from "./NoteDoc";
+import { LocalNote, NoteDoc, type NoteDocDeps } from "./NoteDoc";
 
 export interface DocManagerOptions {
 	note: NoteDocDeps;
@@ -31,6 +33,12 @@ export interface DocManagerOptions {
 	editorGraceMs?: number;
 	/** Opens a note doc; tests inject a fake. */
 	openNote?: (fileId: string, path: string, deps: NoteDocDeps) => Promise<NoteDoc>;
+}
+
+/** Counters for tests and e2e: provider attaches and provider-less hydrates (bulk clone). */
+export interface DocStats {
+	attaches: number;
+	hydrates: number;
 }
 
 interface Entry {
@@ -73,7 +81,10 @@ export class DocManager implements IDocManager {
 	private readonly warm: string[] = [];
 	/** Notes already reported as over `maxBytes`. */
 	private readonly warned = new Set<string>();
+	/** Hydrates in flight; an `acquire` of the same note waits for its hydrate. */
+	private readonly hydrating = new Map<string, Promise<void>>();
 	private destroyed = false;
+	readonly stats: DocStats = { attaches: 0, hydrates: 0 };
 
 	constructor(private readonly options: DocManagerOptions) {}
 
@@ -221,6 +232,49 @@ export class DocManager implements IDocManager {
 		return result;
 	}
 
+	/**
+	 * Bulk clone (P2-12): applies `update` (server state) to the note's IndexedDB copy without a
+	 * provider and reconciles the disk to it. Returns null, doing nothing, when the note is
+	 * attached (its provider owns it). A reconcile that would change the doc returns `defer`
+	 * untouched: only an attached note can send that change.
+	 */
+	async hydrate(fileId: string, path: string, update: Uint8Array): Promise<ReconcileResult | null> {
+		if (this.destroyed || this.entries.has(fileId) || this.hydrating.has(fileId)) return null;
+		const run = async (): Promise<ReconcileResult> => {
+			const note = await LocalNote.open(fileId, this.options.note);
+			try {
+				Y.applyUpdate(note.ydoc, update, CLONE_ORIGIN);
+				if (this.overLimit({ fileId, ytext: note.ytext }, path)) return { action: "too-large" };
+				return await reconcileNote(note, path, this.options.reconcile, { docWrites: false });
+			} finally {
+				note.close();
+			}
+		};
+		const result = run();
+		const done = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.hydrating.set(fileId, done);
+		try {
+			const outcome = await result;
+			this.stats.hydrates++;
+			return outcome;
+		} finally {
+			if (this.hydrating.get(fileId) === done) this.hydrating.delete(fileId);
+		}
+	}
+
+	/** State vector of the note's IndexedDB copy (opened and closed again, no provider). */
+	async stateVector(fileId: string): Promise<Uint8Array> {
+		const note = await LocalNote.open(fileId, this.options.note);
+		try {
+			return Y.encodeStateVector(note.ydoc);
+		} finally {
+			note.close();
+		}
+	}
+
 	/** Detaches everything now. Unacked changes stay in IndexedDB and sync on the next attach. */
 	destroy(): void {
 		this.destroyed = true;
@@ -244,7 +298,11 @@ export class DocManager implements IDocManager {
 			editorHashes: [],
 			graceTimer: null,
 		};
-		entry.note = openNote(fileId, path, this.options.note).then((note) => {
+		const opened = (this.hydrating.get(fileId) ?? Promise.resolve()).then(() => {
+			this.stats.attaches++;
+			return openNote(fileId, path, this.options.note);
+		});
+		entry.note = opened.then((note) => {
 			entry.resolved = note;
 			if (this.entries.get(fileId) !== entry) {
 				note.close();
@@ -357,7 +415,7 @@ export class DocManager implements IDocManager {
 	}
 
 	/** The note's file or doc is over `maxBytes`; a UTF-8 count only when the length allows it. */
-	private overLimit(note: NoteDoc, path: string): boolean {
+	private overLimit(note: { fileId: string; ytext: Y.Text }, path: string): boolean {
 		const max = this.options.maxBytes ?? Number.POSITIVE_INFINITY;
 		if (!Number.isFinite(max)) return false;
 		if (this.exceedsLimit(note.fileId, path)) return true;

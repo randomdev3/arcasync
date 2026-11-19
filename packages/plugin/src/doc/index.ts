@@ -1,8 +1,8 @@
-import { INDEX_REVS } from "@teamsync/shared";
+import { docName, INDEX_REVS, parseDocName } from "@teamsync/shared";
 import { Notice } from "obsidian";
 import { limits } from "../platform";
 import type { WorkspaceSession } from "../workspace/WorkspaceSession";
-import { BackgroundSync } from "./BackgroundSync";
+import { BackgroundSync, type CloneSource } from "./BackgroundSync";
 import { DiskWriter, ObsidianDisk } from "./DiskWriter";
 import { DocManager } from "./DocManager";
 import { SessionNoteIndex } from "./noteIndex";
@@ -62,6 +62,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		concurrency: bgConcurrency,
 		isOnline: () => connections.currentState.status === "connected" && indexProvider.synced,
 		settled: () => session.settled(),
+		clone: cloneSource(session),
 	});
 	session.docs = docs;
 	background.start();
@@ -87,5 +88,24 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		revTracker.dispose();
 		docs.destroy();
 		if (session.docs === docs) session.docs = null;
+	};
+}
+
+/** The session's bulk clone client by file id, or null without `features.bulkClone`. */
+function cloneSource(session: WorkspaceSession): CloneSource | null {
+	const client = session.clone;
+	if (!client) return null;
+	const { workspaceId } = session;
+	const idOf = (doc: string) => parseDocName(doc)?.fileId ?? doc;
+	return {
+		async clone(docs) {
+			const result = await client.clone(
+				docs.map(({ fileId, sv }) => ({ doc: docName({ workspaceId, kind: "md", fileId }), sv })),
+			);
+			return {
+				entries: result.entries.map(({ doc, update }) => ({ fileId: idOf(doc), update })),
+				remaining: result.remaining.map(idOf),
+			};
+		},
 	};
 }

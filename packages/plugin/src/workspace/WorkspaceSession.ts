@@ -5,6 +5,7 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { startNoteDocs } from "../doc";
 import { type ChunkTransfer, FileSyncer } from "../files/FileSyncer";
+import type { CloneClient } from "../net/CloneClient";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
 import { startPresence } from "../presence";
 import { DiskWatcher } from "./DiskWatcher";
@@ -32,6 +33,8 @@ export interface WorkspaceSessionOptions {
 	vaultId: string;
 	/** Binary sync through R2 chunks (`features.chunks`); without it binaries are ignored. */
 	binaries?: BinaryOptions | null;
+	/** Bulk clone of notes (`features.bulkClone`); without it each note is attached to catch up. */
+	clone?: CloneClient | null;
 }
 
 export interface BinaryOptions {
@@ -61,6 +64,7 @@ export class WorkspaceSession {
 	readonly user: SessionUser;
 	readonly vaultId: string;
 	readonly binaries: BinaryOptions | null;
+	readonly clone: CloneClient | null;
 	readonly indexName: string;
 	readonly selfWrites = new SelfWriteRegistry();
 
@@ -91,6 +95,7 @@ export class WorkspaceSession {
 		this.user = options.user;
 		this.vaultId = options.vaultId;
 		this.binaries = options.binaries ?? null;
+		this.clone = options.clone ?? null;
 		this.indexName = docName({ workspaceId: options.workspaceId, kind: "index" });
 	}
 

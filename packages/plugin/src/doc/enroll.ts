@@ -8,6 +8,8 @@ import { merge3 } from "./merge3";
 export const ENROLL_ORIGIN = "teamsync:enroll";
 /** Transaction origin of a disk edit of a closed note applied to its doc. */
 export const DISK_ORIGIN = "teamsync:disk";
+/** Transaction origin of server state applied from a bulk clone (P2-12). */
+export const CLONE_ORIGIN = "teamsync:clone";
 
 const META = "meta";
 const ENROLLED = "enrolled";
@@ -139,11 +141,15 @@ export interface ReconcileResult {
  * Brings one note's disk file and doc into agreement (see `decide`). Callers serialise calls per
  * note. Only `DiskWriter` touches the vault, always compare-and-swap against the raw content
  * read here, so an edit landing in between makes this return `retry` instead of losing it.
+ *
+ * With `docWrites: false` (a note without a provider, P2-12) nothing is written to the doc: an
+ * action that would (`enroll`, `apply-disk`, `merged`) returns `defer` and touches nothing.
  */
 export async function reconcileNote(
 	note: ReconcileNote,
 	path: string,
 	deps: ReconcileDeps,
+	{ docWrites = true }: { docWrites?: boolean } = {},
 ): Promise<ReconcileResult> {
 	const raw = await deps.writer.read(path);
 	const disk = raw === null ? null : diskText(raw);
@@ -173,6 +179,10 @@ export async function reconcileNote(
 			base = stored;
 			action = decide({ ...input, hasBase: true });
 		}
+	}
+
+	if (!docWrites && (action === "enroll" || action === "apply-disk" || action === "merged")) {
+		return { action: "defer" };
 	}
 
 	if (action === "merged") {
