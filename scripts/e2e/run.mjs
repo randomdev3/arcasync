@@ -38,7 +38,7 @@ const { values: opts } = parseArgs({
 	},
 });
 
-const VAULTS = ["alice", "bob", "carol", "dave", "dave-phone", "erin"];
+const VAULTS = ["alice", "bob", "carol", "dave", "dave-phone", "erin", "frank"];
 const ROLES = { carol: "viewer" };
 /** Every vault maps this folder; each scenario works in `Shared/<name>/`. */
 const SHARED_FOLDER = "Shared";
