@@ -5,6 +5,8 @@
 FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+# pnpm 11 refuses to replace node_modules without a TTY unless it knows it runs in CI.
+ENV CI=true
 RUN corepack enable
 WORKDIR /app
 
