@@ -239,8 +239,11 @@ describe("accounts", () => {
 				await post(relay.url, "/api/workspaces", { name: "Team" }, dave.sessionToken),
 			);
 			expect(created).toMatchObject({ name: "Team", slug: "team-2", role: "owner" });
-			const me = MeResponse.parse(await get(relay.url, "/api/auth/me", dave.sessionToken));
-			expect(me.workspaces.map((w) => w.slug).sort()).toEqual(["team", "team-2"]);
+			// `/api/workspaces`, not the 60 s-cached `/me` (D10).
+			const { workspaces } = WorkspacesResponse.parse(
+				await get(relay.url, "/api/workspaces", dave.sessionToken),
+			);
+			expect(workspaces.map((w) => w.slug).sort()).toEqual(["team", "team-2"]);
 
 			const inv = await invite({ role: "editor" });
 			const leo = SessionResponse.parse((await accept(inv.token, "leo")).body);
