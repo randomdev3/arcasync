@@ -35,13 +35,18 @@ export async function request(
 	base: string,
 	method: string,
 	path: string,
-	{ body, token }: { body?: unknown; token?: string } = {},
-): Promise<{ status: number; body: unknown }> {
+	{
+		body,
+		token,
+		headers = {},
+	}: { body?: unknown; token?: string; headers?: Record<string, string> } = {},
+): Promise<{ status: number; body: unknown; headers: Headers }> {
 	const res = await fetch(`${base}${path}`, {
 		method,
 		headers: {
 			...(body === undefined ? {} : { "Content-Type": "application/json" }),
 			...(token ? { Authorization: `Bearer ${token}` } : {}),
+			...headers,
 		},
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
@@ -50,7 +55,11 @@ export async function request(
 	try {
 		parsed = text ? JSON.parse(text) : null;
 	} catch {}
-	return { status: res.status, body: parsed };
+	// Not enumerable, so `toEqual({ status, body })` assertions keep matching.
+	return Object.defineProperty({ status: res.status, body: parsed }, "headers", {
+		value: res.headers,
+		enumerable: false,
+	}) as { status: number; body: unknown; headers: Headers };
 }
 
 /** The `error.code` of an API error body. */
