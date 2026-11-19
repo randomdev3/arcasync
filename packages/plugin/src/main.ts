@@ -57,6 +57,8 @@ function platformName(): DeviceInfo["platform"] {
 
 /** One connected workspace: its own socket and session. */
 interface LiveWorkspace {
+	/** The workspace's name when it connected (a removal may already have dropped it from settings). */
+	name: string;
 	connections: ConnectionManager;
 	session: WorkspaceSession;
 	/** Stops the session and closes the socket. */
@@ -772,6 +774,7 @@ export default class TeamSyncPlugin extends Plugin {
 		const started = session;
 		const offOnline = started.onOnlineChange(() => this.renderStatusBar());
 		this.live.set(workspaceId, {
+			name: this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId,
 			connections,
 			session: started,
 			stop: () => {
@@ -801,7 +804,7 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 		const entry = this.live.get(workspaceId);
 		if (entry?.connections !== connections) return;
-		const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId;
+		const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? entry.name;
 		this.live.delete(workspaceId);
 		entry.stop();
 		new Notice(`TeamSync: you were removed from ${name}`);
