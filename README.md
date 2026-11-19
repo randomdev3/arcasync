@@ -1,4 +1,4 @@
-# TeamSync
+# ArcaSync
 
 Real-time team collaboration for Obsidian with a single self-hosted server.
 
@@ -23,4 +23,4 @@ bash scripts/dev-vault.sh   # creates dev-vault-a/ and dev-vault-b/ with the plu
 ```
 
 Open each dev vault in Obsidian ("Open folder as vault"), enable community plugins, connect both to
-`http://localhost:8787` via Settings → TeamSync.
+`http://localhost:8787` via Settings → ArcaSync.

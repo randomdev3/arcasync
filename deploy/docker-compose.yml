@@ -8,10 +8,10 @@ services:
     environment:
       ARCASYNC_PORT: "8787"
       ARCASYNC_DATA_DIR: /data
-      ARCASYNC_DB_URL: postgres://teamsync:${POSTGRES_PASSWORD}@postgres:5432/teamsync
+      ARCASYNC_DB_URL: postgres://arcasync:${POSTGRES_PASSWORD}@postgres:5432/arcasync
       ARCASYNC_BLOB_BACKEND: s3
       S3_ENDPOINT: http://minio:9000
-      S3_BUCKET: teamsync
+      S3_BUCKET: arcasync
       S3_REGION: us-east-1
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
@@ -33,13 +33,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: teamsync
+      POSTGRES_USER: arcasync
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: teamsync
+      POSTGRES_DB: arcasync
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U teamsync"]
+      test: ["CMD-SHELL", "pg_isready -U arcasync"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,7 +66,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
-      mc mb --ignore-existing local/teamsync"
+      mc mb --ignore-existing local/arcasync"
 
   caddy:
     image: caddy:2-alpine

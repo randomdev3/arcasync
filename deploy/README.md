@@ -1,4 +1,4 @@
-# Deploying TeamSync
+# Deploying ArcaSync
 
 ## VPS with docker-compose
 
@@ -22,4 +22,4 @@ to the server. Postgres and MinIO are internal only.
 ## Backups
 
 `pg_dump` nightly plus a bucket mirror (`mc mirror` / `rclone`). See P6 in the roadmap for the
-`teamsync export/import` tooling.
+`arcasync export/import` tooling.

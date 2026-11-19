@@ -28,12 +28,12 @@ bash scripts/dev-vault.sh
 ```
 
 This creates `dev-vault-a/` and `dev-vault-b/`, each with the built plugin symlinked into
-`.obsidian/plugins/teamsync` and a `Shared/` folder. Then:
+`.obsidian/plugins/arcasync` and a `Shared/` folder. Then:
 
 1. In Obsidian, use "Open folder as vault" for `dev-vault-a`, and again for `dev-vault-b` (a
    second window).
-2. Settings → Community plugins: enable "TeamSync" (trust the plugin).
-3. Settings → TeamSync: server URL `http://localhost:8789`, then dev login as `alice` in one
+2. Settings → Community plugins: enable "ArcaSync" (trust the plugin).
+3. Settings → ArcaSync: server URL `http://localhost:8789`, then dev login as `alice` in one
    vault and `bob` in the other. Map the `Shared` folder.
 
 After a plugin rebuild, reload it in Obsidian (disable and enable it, or run "Reload app without
