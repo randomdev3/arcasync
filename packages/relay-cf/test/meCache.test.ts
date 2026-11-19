@@ -62,3 +62,15 @@ describe("meCache", () => {
 		expect(calls).toBe(3);
 	});
 });
+
+describe("meCache.dropWhere", () => {
+	it("drops every entry whose value matches", () => {
+		const cache = createMeCache<{ user: string }>({ ttlMs: 60_000, max: 256 });
+		cache.set("a1", { user: "a" });
+		cache.set("b1", { user: "b" });
+		cache.set("a2", { user: "a" });
+		cache.dropWhere((v) => v.user === "a");
+		expect(cache.size).toBe(1);
+		expect(cache.get("b1")).toEqual({ user: "b" });
+	});
+});

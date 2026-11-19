@@ -12,9 +12,14 @@ import {
 	InviteAcceptRequest,
 	InviteCreateRequest,
 	InviteRedeemRequest,
+	LoginRequest,
 	ME_CACHE_TTL_MS,
 	MemberUpdateRequest,
 	type MeResponse,
+	PasswordChangeRequest,
+	PinAcceptRequest,
+	PinCreateRequest,
+	PinRedeemRequest,
 	parseDocName,
 	WorkspaceCreateRequest,
 	WS_PATH,
@@ -70,6 +75,8 @@ app.use(
 		origin: (origin, c) => (origin && isAllowedOrigin(origin, c.env) ? origin : ALLOWED_ORIGINS[0]),
 		allowHeaders: ["Authorization", "Content-Type", "X-Workspace-Id"],
 		allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+		// 429 and 423 carry it; the website shows the wait.
+		exposeHeaders: ["Retry-After"],
 		// Bearer tokens only, never cookies: no `Access-Control-Allow-Credentials`.
 		credentials: false,
 		// Preflights are Worker requests too: let browsers cache them as long as they will (2 h).
@@ -96,10 +103,16 @@ app.use("*", async (c, next) => {
 	return c.json(errorBody("misconfigured", error), 503);
 });
 
-function reply<T>(c: { json: (body: unknown, status?: number) => Response }, result: Result<T>) {
+function reply<T>(
+	c: { json: (body: unknown, status?: number, headers?: Record<string, string>) => Response },
+	result: Result<T>,
+) {
 	if (result.ok) return c.json(result.value);
 	const e: ApiError = result.error;
-	return c.json(errorBody(e.code, e.message), e.status);
+	if (e.retryAfter === undefined) return c.json(errorBody(e.code, e.message), e.status);
+	return c.json(errorBody(e.code, e.message, { retryAfter: e.retryAfter }), e.status, {
+		"Retry-After": String(e.retryAfter),
+	});
 }
 
 async function jsonBody(req: Request): Promise<unknown> {
@@ -132,6 +145,14 @@ const links = (c: Ctx): LinkBase => ({
 });
 
 const accounts = (env: Env) => env.ACCOUNTS.getByName(ACCOUNTS_NAME);
+/**
+ * The client's IP for brute-force limits: `CF-Connecting-IP`, set by Cloudflare. Requests
+ * without it share one bucket. With debug stats on (dev, tests), `X-Test-Client-IP` overrides it.
+ */
+const clientIp = (c: Ctx) =>
+	(c.env.ARCASYNC_DEBUG_STATS === "1" ? c.req.header("x-test-client-ip") : undefined) ??
+	c.req.header("cf-connecting-ip") ??
+	"unknown";
 /** Per isolate (D10); dropped for the caller on logout and invite redeem. */
 const meCache = createMeCache<z.infer<typeof MeResponse>>({ ttlMs: ME_CACHE_TTL_MS, max: 256 });
 const api = new Hono<{ Bindings: Env }>();
@@ -171,6 +192,58 @@ api.post("/auth/logout", async (c) => {
 	if (token) meCache.drop(token);
 	return reply(c, result);
 });
+
+api.post("/auth/login", async (c) => {
+	const body = await parseBody(c, LoginRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).login(body, clientIp(c)));
+});
+
+api.post("/auth/password", async (c) => {
+	const body = await parseBody(c, PasswordChangeRequest);
+	if (!body) return badRequest(c);
+	const token = bearer(c);
+	const result = await accounts(c.env).changePassword(token, body.current, body.new, clientIp(c));
+	if (!result.ok) return reply(c, result);
+	// `hasPassword` changed, and the user's other sessions are revoked: drop what this isolate
+	// cached for them (other isolates serve theirs for up to ME_CACHE_TTL_MS).
+	const { userId } = result.value;
+	if (token) meCache.drop(token);
+	meCache.dropWhere((me) => me.user.id === userId);
+	return c.json({ ok: true });
+});
+
+api.post("/auth/pin/accept", async (c) => {
+	const body = await parseBody(c, PinAcceptRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).acceptPin(body, clientIp(c)));
+});
+
+api.post("/invites/redeem-pin", async (c) => {
+	const body = await parseBody(c, PinRedeemRequest);
+	if (!body) return badRequest(c);
+	const token = bearer(c);
+	if (token) meCache.drop(token);
+	const result = await accounts(c.env).redeemPin(token, body.pin, clientIp(c));
+	if (token) meCache.drop(token);
+	return reply(c, result);
+});
+
+api.get("/workspaces/:id/pins", async (c) =>
+	reply(c, await accounts(c.env).listPins(bearer(c), c.req.param("id"))),
+);
+
+api.post("/workspaces/:id/pins", async (c) => {
+	const body = await parseBody(c, PinCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).createPin(bearer(c), c.req.param("id"), body));
+});
+
+api.delete("/workspaces/:id/pins/:pinId", async (c) =>
+	reply(c, await accounts(c.env).revokePin(bearer(c), c.req.param("id"), c.req.param("pinId"))),
+);
+
+api.post("/admin/pins/unlock", async (c) => reply(c, await accounts(c.env).unlockPins(bearer(c))));
 
 api.get("/workspaces", async (c) =>
 	reply(c, await accounts(c.env).workspaces(bearerToken(c.req.header("authorization")))),
@@ -305,6 +378,28 @@ api.get("/debug/accounts", async (c) => {
 api.post("/debug/accounts/expire-invite", async (c) => {
 	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	return c.json(await accounts(c.env).debugExpireInvite(c.req.query("id") ?? ""));
+});
+
+/** Dev-only: age the brute-force counters and the PIN lock by `?ms=`, as if time passed. */
+api.post("/debug/accounts/age-limits", async (c) => {
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const ms = Number(c.req.query("ms"));
+	if (!(Number.isSafeInteger(ms) && ms >= 0)) return badRequest(c);
+	return c.json(await accounts(c.env).debugAgeLimits(ms));
+});
+
+/** Dev-only: expire a PIN now. */
+api.post("/debug/accounts/expire-pin", async (c) => {
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	return c.json(await accounts(c.env).debugExpirePin(c.req.query("id") ?? ""));
+});
+
+/** Dev-only: `?n=` password hashes in AccountsDO, for measuring their cost from outside. */
+api.post("/debug/accounts/hash", async (c) => {
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const n = Number(c.req.query("n") ?? 1);
+	if (!(Number.isInteger(n) && n >= 0 && n <= 100)) return badRequest(c);
+	return c.json(await accounts(c.env).debugHashTiming(n));
 });
 
 /** Dev-only relay instrumentation (G4). Each call is itself one DO request. */

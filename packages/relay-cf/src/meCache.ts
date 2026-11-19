@@ -7,6 +7,8 @@ export interface MeCache<T> {
 	get(token: string): T | undefined;
 	set(token: string, value: T): void;
 	drop(token: string): void;
+	/** Drops every entry whose value matches (e.g. all of one user's sessions). */
+	dropWhere(match: (value: T) => boolean): void;
 	readonly size: number;
 }
 
@@ -41,6 +43,9 @@ export function createMeCache<T>({
 		},
 		drop(token) {
 			entries.delete(token);
+		},
+		dropWhere(match) {
+			for (const [token, entry] of entries) if (match(entry.value)) entries.delete(token);
 		},
 		get size() {
 			return entries.size;

@@ -24,6 +24,8 @@ export function serverInfo(env: ServerInfoEnv, publicUrl: string): ServerInfo {
 			accounts: true,
 			chunks: !!env.CHUNKS,
 			bulkClone: true,
+			passwords: true,
+			pins: true,
 		},
 		limits: { maxFileBytes: Number(env.ARCASYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
 	};

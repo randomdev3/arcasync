@@ -15,16 +15,40 @@ import type {
 	InviteCreated,
 	InviteCreateRequest,
 	InvitesResponse,
+	LoginRequest,
 	MembersResponse,
 	MeResponse,
+	PinAcceptRequest,
+	PinCreateRequest,
+	PinSummary,
+	PinsResponse,
 	Role,
 	SessionResponse,
 	User,
 	WorkspaceSummary,
 	WorkspacesResponse,
 } from "@arcasync/shared";
-import { DEVICE_CODE_INTERVAL_S, DEVICE_CODE_TTL_S, WS_TOKEN_TTL_SECONDS } from "@arcasync/shared";
+import {
+	DEVICE_CODE_INTERVAL_S,
+	DEVICE_CODE_TTL_S,
+	passwordProblem,
+	WS_TOKEN_TTL_SECONDS,
+} from "@arcasync/shared";
 import type { z } from "zod";
+import {
+	type Limit,
+	LOGIN_FAILURE_ROWS_MAX,
+	LOGIN_IP_LIMIT,
+	LOGIN_NAME_LIMIT,
+	nameKey,
+	PIN_GLOBAL_LIMIT,
+	PIN_IP_LIMIT,
+	PIN_LOCK_MS,
+	retryAfter,
+} from "./accounts/limits";
+import { dummyVerify, hashPassword, type PasswordHash, verifyPassword } from "./accounts/passwords";
+import { newPin } from "./accounts/pins";
+import { migratePinsAndPasswords } from "./accounts/schema";
 import {
 	constantTimeEqual,
 	hashSecret,
@@ -43,19 +67,34 @@ const MIN_BOOTSTRAP_TOKEN_LENGTH = 32;
 const ROLE_RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const DEVICE_LOOKUPS_PER_MINUTE = 5;
 const REENTRY_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** At most this many usable PINs server-wide. */
+const PIN_MAX_ACTIVE = 10;
+/** Used, revoked and expired PINs stay listed this long, then are deleted. */
+const PIN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+const PINS_LOCKED_UNTIL = "pins_locked_until";
 
 export interface ApiError {
-	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 429 | 503;
+	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 423 | 429 | 503;
 	code: string;
 	message: string;
+	/** Seconds; the Worker sends it as `Retry-After` (429, 423). */
+	retryAfter?: number;
 }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
-const fail = (status: ApiError["status"], code: string, message: string): Result<never> => ({
+const fail = (
+	status: ApiError["status"],
+	code: string,
+	message: string,
+	retryAfter?: number,
+): Result<never> => ({
 	ok: false,
-	error: { status, code, message },
+	error: { status, code, message, ...(retryAfter === undefined ? {} : { retryAfter }) },
 });
+
+const invalidPin = () => fail(404, "invalid_pin", "Wrong or expired PIN");
+const invalidCredentials = () => fail(401, "invalid_credentials", "Wrong name or password");
 
 const PALETTE = [
 	"#e8534a",
@@ -141,6 +180,27 @@ interface InviteRow extends Record<string, SqlStorageValue> {
 	user_id: string | null;
 }
 
+interface PinRow extends Record<string, SqlStorageValue> {
+	id: string;
+	pin: string;
+	workspace_id: string;
+	role: string;
+	admin: number;
+	expires_at: number;
+	created_by: string;
+	created_at: number;
+	used_at: number | null;
+	used_by: string | null;
+	revoked_at: number | null;
+}
+
+interface PasswordRow extends Record<string, SqlStorageValue> {
+	hash: string;
+	salt: string;
+	iterations: number;
+	rounds: number;
+}
+
 interface DeviceCodeRow extends Record<string, SqlStorageValue> {
 	id: string;
 	user_code: string;
@@ -218,6 +278,7 @@ export class AccountsDO extends DurableObject<Env> {
 		} catch (err) {
 			if (!String(err).includes("duplicate column")) throw err;
 		}
+		migratePinsAndPasswords(this.sql);
 	}
 
 	private hashToken(token: string): Promise<string> {
@@ -408,6 +469,59 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	/**
+	 * The user a sign-in name means: the exact name, else the one user whose name matches it
+	 * case-insensitively (`nameKey`; SQLite's NOCASE is ASCII-only, so this scans the few users).
+	 * Two users differing only in case (possible before names were checked case-insensitively)
+	 * match only by their exact names.
+	 */
+	private userBySignInName(name: string): UserRow | undefined {
+		const key = nameKey(name);
+		const matches = this.sql
+			.exec<UserRow>("SELECT * FROM users")
+			.toArray()
+			.filter((u) => nameKey(u.name) === key);
+		return matches.find((u) => u.name === name) ?? (matches.length === 1 ? matches[0] : undefined);
+	}
+
+	/** A new account's name is taken if any user has it up to case. */
+	private nameTaken(name: string): boolean {
+		const key = nameKey(name);
+		return this.sql
+			.exec<{ name: string }>("SELECT name FROM users")
+			.toArray()
+			.some((u) => nameKey(u.name) === key);
+	}
+
+	private passwordOf(userId: string): PasswordRow | undefined {
+		return this.sql
+			.exec<PasswordRow>(
+				"SELECT hash, salt, iterations, rounds FROM user_passwords WHERE user_id = ?",
+				userId,
+			)
+			.toArray()[0];
+	}
+
+	private setPasswordRow(userId: string, hash: PasswordHash): void {
+		this.sql.exec(
+			`INSERT INTO user_passwords (user_id, hash, salt, iterations, rounds, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, salt = excluded.salt,
+			 iterations = excluded.iterations, rounds = excluded.rounds, updated_at = excluded.updated_at`,
+			userId,
+			hash.hash,
+			hash.salt,
+			hash.iterations,
+			hash.rounds,
+			Date.now(),
+		);
+	}
+
+	/** Limit buckets store a peppered hash of the client IP, never the address. */
+	private async ipKey(ip: string): Promise<string> {
+		return (await hashSecret(this.env.ARCASYNC_SECRET, `ip:${ip}`)).slice(0, 32);
+	}
+
+	/**
 	 * `role` applies only when this creates the membership; existing memberships keep theirs.
 	 * `workspace` joins (or creates) that slug instead of `dev`.
 	 */
@@ -482,6 +596,7 @@ export class AccountsDO extends DurableObject<Env> {
 			user: toApiUser(user),
 			device: { id: row.device_id, name: row.device_name, platform: row.platform },
 			workspaces: this.workspacesFor(user.id),
+			hasPassword: this.passwordOf(user.id) !== undefined,
 		});
 	}
 
@@ -684,9 +799,7 @@ export class AccountsDO extends DurableObject<Env> {
 		if (!found.ok) return found;
 		const invite = found.value;
 		if (invite.user_id !== null) return this.reenter(invite, req.device, sessionHash, sessionToken);
-		if (this.sql.exec("SELECT 1 FROM users WHERE name = ?", req.name).toArray()[0]) {
-			return fail(409, "name_taken", "That name is taken");
-		}
+		if (this.nameTaken(req.name)) return fail(409, "name_taken", "That name is taken");
 		const userId = crypto.randomUUID();
 		this.sql.exec(
 			"INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)",
@@ -713,7 +826,10 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(userId) });
 	}
 
-	/** A re-entry invite signs in as its user (the request's `name` is ignored); synchronous. */
+	/**
+	 * A re-entry invite signs in as its user (the request's `name` is ignored); synchronous. It
+	 * also clears the user's password, so a locked-out user sets a new one without the old.
+	 */
 	private reenter(
 		invite: InviteRow,
 		device: DeviceInfo,
@@ -725,7 +841,11 @@ export class AccountsDO extends DurableObject<Env> {
 		if (user.disabled_at) return fail(403, "forbidden", "Account disabled");
 		this.insertSession(user.id, this.deviceFor(user.id, device), sessionHash);
 		this.sql.exec("UPDATE invites SET uses = uses + 1 WHERE id = ?", invite.id);
-		this.audit(user.id, "user.reenter", user.id, { inviteId: invite.id });
+		const passwordCleared =
+			this.sql
+				.exec("DELETE FROM user_passwords WHERE user_id = ? RETURNING user_id", user.id)
+				.toArray().length > 0;
+		this.audit(user.id, "user.reenter", user.id, { inviteId: invite.id, passwordCleared });
 		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(user.id) });
 	}
 
@@ -961,6 +1081,505 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ entries, next: entries.length === limit && last ? last.id : null });
 	}
 
+	// --- PIN invites ---
+
+	/** Lock end (ms) while PIN entry is locked server-wide, else null. */
+	private pinsLockedUntil(now: number): number | null {
+		const row = this.sql
+			.exec<{ value: string }>("SELECT value FROM server_settings WHERE key = ?", PINS_LOCKED_UNTIL)
+			.toArray()[0];
+		const until = row ? Number(row.value) : 0;
+		return until > now ? until : null;
+	}
+
+	/**
+	 * Before any PIN is looked up: 423 while locked, 429 when this IP already has
+	 * `PIN_IP_LIMIT.max` wrong PINs in the window. Shared by accept and redeem.
+	 */
+	private pinGate(ip: string, now: number): Result<null> {
+		const until = this.pinsLockedUntil(now);
+		if (until !== null) {
+			return fail(
+				423,
+				"pins_locked",
+				"PIN entry is locked after too many wrong PINs; ask an admin",
+				Math.ceil((until - now) / 1000),
+			);
+		}
+		const times = this.sql
+			.exec<{ at: number }>(
+				"SELECT at FROM pin_failures WHERE ip = ? AND at > ?",
+				ip,
+				now - PIN_IP_LIMIT.windowMs,
+			)
+			.toArray()
+			.map((r) => r.at);
+		const wait = retryAfter(times, now, PIN_IP_LIMIT);
+		if (wait !== null)
+			return fail(429, "rate_limited", "Too many wrong PINs; try again later", wait);
+		return ok(null);
+	}
+
+	/** A wrong PIN: counted per IP, and server-wide toward the lock (audited when it trips). */
+	private recordPinFailure(ip: string, now: number): void {
+		this.sql.exec("DELETE FROM pin_failures WHERE at <= ?", now - PIN_GLOBAL_LIMIT.windowMs);
+		this.sql.exec("INSERT INTO pin_failures (at, ip) VALUES (?, ?)", now, ip);
+		const count = (where: string, ...args: SqlStorageValue[]) =>
+			this.sql
+				.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pin_failures WHERE ${where}`, ...args)
+				.one().n;
+		const forIp = count("ip = ? AND at > ?", ip, now - PIN_IP_LIMIT.windowMs);
+		if (forIp === PIN_IP_LIMIT.max) this.audit(null, "pin.limited", "ip", { failures: forIp });
+		const total = count("at > ?", now - PIN_GLOBAL_LIMIT.windowMs);
+		if (total >= PIN_GLOBAL_LIMIT.max) {
+			const until = now + PIN_LOCK_MS;
+			this.sql.exec(
+				`INSERT INTO server_settings (key, value) VALUES (?, ?)
+				 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+				PINS_LOCKED_UNTIL,
+				String(until),
+			);
+			// The lock now governs; a fresh window starts when it ends.
+			this.sql.exec("DELETE FROM pin_failures");
+			this.audit(null, "pin.lock", "pins", { failures: total, until });
+		}
+	}
+
+	/** The usable PIN with these digits (unused, unrevoked, unexpired, workspace alive). */
+	private activePin(pin: string, now: number): PinRow | undefined {
+		return this.sql
+			.exec<PinRow>(
+				`SELECT p.* FROM invite_pins p JOIN workspaces w ON w.id = p.workspace_id
+				 WHERE p.pin = ? AND p.used_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?
+				 AND w.deleted_at IS NULL`,
+				pin,
+				now,
+			)
+			.toArray()[0];
+	}
+
+	private toPinSummary(row: PinRow & { used_by_name?: string | null }): PinSummary {
+		return {
+			id: row.id,
+			pin: row.pin,
+			workspaceId: row.workspace_id,
+			role: row.role as Role,
+			admin: row.admin === 1,
+			createdAt: row.created_at,
+			createdBy: row.created_by,
+			expiresAt: row.expires_at,
+			usedAt: row.used_at,
+			usedBy: row.used_by_name ?? null,
+			revoked: row.revoked_at !== null,
+		};
+	}
+
+	/** Owner or admin; `admin` PINs only for server admins. At most 10 usable server-wide. */
+	async createPin(
+		token: string | null,
+		workspaceId: string,
+		req: PinCreateRequest,
+	): Promise<Result<PinSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		if (req.admin && user.is_admin !== 1) {
+			return fail(403, "forbidden", "Only server admins create admin PINs");
+		}
+		const now = Date.now();
+		const keepSince = now - PIN_KEEP_MS;
+		this.sql.exec(
+			"DELETE FROM invite_pins WHERE expires_at < ? OR used_at < ? OR revoked_at < ?",
+			keepSince,
+			keepSince,
+			keepSince,
+		);
+		const active = this.sql
+			.exec<{ n: number }>(
+				`SELECT COUNT(*) AS n FROM invite_pins
+				 WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+				now,
+			)
+			.one().n;
+		if (active >= PIN_MAX_ACTIVE) {
+			return fail(409, "too_many_pins", `At most ${PIN_MAX_ACTIVE} PINs can be open at once`);
+		}
+		const pin = newPin((candidate) => this.activePin(candidate, now) !== undefined);
+		if (!pin) return fail(409, "too_many_pins", "No free PIN; revoke one first");
+		const row: PinRow = {
+			id: crypto.randomUUID(),
+			pin,
+			workspace_id: workspaceId,
+			role: req.role,
+			admin: req.admin ? 1 : 0,
+			expires_at: now + req.expiresInSec * 1000,
+			created_by: user.id,
+			created_at: now,
+			used_at: null,
+			used_by: null,
+			revoked_at: null,
+		};
+		this.sql.exec(
+			`INSERT INTO invite_pins (id, pin, workspace_id, role, admin, expires_at, created_by,
+			 created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.id,
+			row.pin,
+			row.workspace_id,
+			row.role,
+			row.admin,
+			row.expires_at,
+			row.created_by,
+			row.created_at,
+		);
+		// Never the digits: the audit log outlives the PIN.
+		this.audit(user.id, "pin.create", row.id, {
+			workspaceId,
+			role: req.role,
+			admin: req.admin,
+			expiresAt: row.expires_at,
+		});
+		return ok(this.toPinSummary(row));
+	}
+
+	/** The workspace's PINs, newest first, with the server-wide lock state. */
+	async listPins(token: string | null, workspaceId: string): Promise<Result<PinsResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		if (!this.canManage(s.value.user, workspaceId)) {
+			return fail(403, "forbidden", "Owner or admin only");
+		}
+		const pins = this.sql
+			.exec<PinRow & { used_by_name: string | null }>(
+				`SELECT p.*, u.name AS used_by_name FROM invite_pins p LEFT JOIN users u ON u.id = p.used_by
+				 WHERE p.workspace_id = ? ORDER BY p.created_at DESC`,
+				workspaceId,
+			)
+			.toArray()
+			.map((r) => this.toPinSummary(r));
+		const lockedUntil = this.pinsLockedUntil(Date.now());
+		return ok({ pins, locked: lockedUntil !== null, lockedUntil });
+	}
+
+	async revokePin(
+		token: string | null,
+		workspaceId: string,
+		pinId: string,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		const row = this.sql
+			.exec<PinRow>(
+				"SELECT * FROM invite_pins WHERE id = ? AND workspace_id = ?",
+				pinId,
+				workspaceId,
+			)
+			.toArray()[0];
+		if (!row) return fail(404, "not_found", "Unknown PIN");
+		if (row.revoked_at === null && row.used_at === null) {
+			this.sql.exec("UPDATE invite_pins SET revoked_at = ? WHERE id = ?", Date.now(), pinId);
+			this.audit(user.id, "pin.revoke", pinId, { workspaceId });
+		}
+		return ok({ ok: true });
+	}
+
+	/** Admin only: lifts the server-wide PIN lock and forgets the counted failures. */
+	async unlockPins(token: string | null): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const wasLocked = this.pinsLockedUntil(Date.now()) !== null;
+		this.sql.exec("DELETE FROM server_settings WHERE key = ?", PINS_LOCKED_UNTIL);
+		this.sql.exec("DELETE FROM pin_failures");
+		this.audit(user.id, "pin.unlock", "pins", { wasLocked });
+		return ok({ ok: true });
+	}
+
+	/**
+	 * Unauthenticated: a new user joins with a PIN and sets a password. The body's shape and the
+	 * password rules are checked before the PIN, so a 400 says nothing about it; every wrong,
+	 * used, revoked or expired PIN is the same 404 `invalid_pin`.
+	 */
+	async acceptPin(req: PinAcceptRequest, clientIp: string): Promise<Result<SessionResponse>> {
+		this.calls += 1;
+		const problem = passwordProblem(req.password);
+		if (problem) return fail(400, "weak_password", problem);
+		const ip = await this.ipKey(clientIp);
+		const sessionToken = newOpaqueToken();
+		const sessionHash = await this.hashToken(sessionToken);
+		const color = await userColor(req.name);
+
+		// Synchronous: lock, IP limit and PIN lookup (a wrong PIN never costs a hash).
+		const now = Date.now();
+		const gate = this.pinGate(ip, now);
+		if (!gate.ok) return gate;
+		const found = this.activePin(req.pin, now);
+		if (!found) {
+			this.recordPinFailure(ip, now);
+			return invalidPin();
+		}
+		if (this.nameTaken(req.name)) return fail(409, "name_taken", "That name is taken");
+
+		const password = await hashPassword(this.env.ARCASYNC_SECRET, req.password);
+
+		// Synchronous again: other requests ran during the hash, so check the PIN and name anew.
+		const pin = this.activePin(req.pin, Date.now());
+		if (!pin || pin.id !== found.id) return invalidPin();
+		if (this.nameTaken(req.name)) return fail(409, "name_taken", "That name is taken");
+		const userId = crypto.randomUUID();
+		this.sql.exec(
+			"INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)",
+			userId,
+			req.name,
+			color,
+			pin.admin,
+		);
+		this.sql.exec(
+			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)",
+			pin.workspace_id,
+			userId,
+			pin.role,
+		);
+		this.setPasswordRow(userId, password);
+		this.insertSession(userId, this.deviceFor(userId, req.device), sessionHash);
+		this.sql.exec(
+			"UPDATE invite_pins SET used_at = ?, used_by = ? WHERE id = ?",
+			Date.now(),
+			userId,
+			pin.id,
+		);
+		this.audit(userId, "pin.accept", pin.id, {
+			workspaceId: pin.workspace_id,
+			role: pin.role,
+			admin: pin.admin === 1,
+		});
+		const user = this.userById(userId);
+		if (!user) return fail(400, "bad_request", "Could not create user");
+		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(userId) });
+	}
+
+	/** Authenticated: joins the PIN's workspace (a role never drops); same limits as accept. */
+	async redeemPin(
+		token: string | null,
+		pinDigits: string,
+		clientIp: string,
+	): Promise<Result<WorkspacesResponse>> {
+		this.calls += 1;
+		const ip = await this.ipKey(clientIp);
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const now = Date.now();
+		const gate = this.pinGate(ip, now);
+		if (!gate.ok) return gate;
+		const pin = this.activePin(pinDigits, now);
+		if (!pin) {
+			this.recordPinFailure(ip, now);
+			return invalidPin();
+		}
+		const offered = pin.role as Role;
+		const current = this.roleIn(user.id, pin.workspace_id);
+		const role = current && ROLE_RANK[current] >= ROLE_RANK[offered] ? current : offered;
+		this.sql.exec(
+			`INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)
+			 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`,
+			pin.workspace_id,
+			user.id,
+			role,
+		);
+		if (pin.admin === 1) this.sql.exec("UPDATE users SET is_admin = 1 WHERE id = ?", user.id);
+		this.sql.exec(
+			"UPDATE invite_pins SET used_at = ?, used_by = ? WHERE id = ?",
+			now,
+			user.id,
+			pin.id,
+		);
+		this.audit(user.id, "pin.redeem", pin.id, {
+			workspaceId: pin.workspace_id,
+			role,
+			previousRole: current ?? null,
+			admin: pin.admin === 1,
+		});
+		const workspaces = this.workspacesFor(user.id);
+		if (current && current !== role) await this.revokeSockets(pin.workspace_id, user.id);
+		return ok({ workspaces });
+	}
+
+	// --- passwords ---
+
+	/**
+	 * Sign-in limits before any hash: 429 while the name or the IP has its maximum of failures in
+	 * the window. Old rows are pruned and the table is capped here.
+	 */
+	private loginGate(key: string, ip: string, now: number): Result<null> {
+		const since = now - LOGIN_NAME_LIMIT.windowMs;
+		this.sql.exec("DELETE FROM login_failures WHERE at <= ?", since);
+		this.sql.exec(
+			"DELETE FROM login_failures WHERE id <= (SELECT MAX(id) FROM login_failures) - ?",
+			LOGIN_FAILURE_ROWS_MAX,
+		);
+		const times = (column: "name_key" | "ip", value: string) =>
+			this.sql
+				.exec<{ at: number }>(
+					`SELECT at FROM login_failures WHERE ${column} = ? AND at > ?`,
+					value,
+					since,
+				)
+				.toArray()
+				.map((r) => r.at);
+		const waits = [
+			retryAfter(times("name_key", key), now, LOGIN_NAME_LIMIT),
+			retryAfter(times("ip", ip), now, LOGIN_IP_LIMIT),
+		].filter((w): w is number => w !== null);
+		if (waits.length > 0) {
+			return fail(
+				429,
+				"rate_limited",
+				"Too many failed sign-ins; try again later",
+				Math.max(...waits),
+			);
+		}
+		return ok(null);
+	}
+
+	/**
+	 * Counts an attempt before its (slow, async) hash, so parallel guesses all see each other.
+	 * A successful attempt deletes its own row only.
+	 */
+	private recordLoginAttempt(key: string, ip: string, now: number): number {
+		return this.sql
+			.exec<{ id: number }>(
+				"INSERT INTO login_failures (at, name_key, ip) VALUES (?, ?, ?) RETURNING id",
+				now,
+				key,
+				ip,
+			)
+			.one().id;
+	}
+
+	/** Failures are audited in aggregate: one row when a name or IP reaches its limit. */
+	private auditLoginFailure(key: string, ip: string, now: number, actorId: string | null): void {
+		const count = (column: "name_key" | "ip", value: string, limit: Limit) =>
+			this.sql
+				.exec<{ n: number }>(
+					`SELECT COUNT(*) AS n FROM login_failures WHERE ${column} = ? AND at > ?`,
+					value,
+					now - limit.windowMs,
+				)
+				.one().n;
+		const byName = count("name_key", key, LOGIN_NAME_LIMIT);
+		if (byName === LOGIN_NAME_LIMIT.max) {
+			this.audit(actorId, "auth.login.limited", key, { scope: "name", failures: byName });
+		}
+		const byIp = count("ip", ip, LOGIN_IP_LIMIT);
+		if (byIp === LOGIN_IP_LIMIT.max) {
+			this.audit(actorId, "auth.login.limited", "ip", { scope: "ip", failures: byIp });
+		}
+	}
+
+	/**
+	 * Unauthenticated name + password sign-in. Unknown name, no password, wrong password and a
+	 * disabled account are all 401 `invalid_credentials`, after the same hashing work.
+	 */
+	async login(req: LoginRequest, clientIp: string): Promise<Result<SessionResponse>> {
+		this.calls += 1;
+		const key = nameKey(req.name);
+		const ip = await this.ipKey(clientIp);
+		const sessionToken = newOpaqueToken();
+		const sessionHash = await this.hashToken(sessionToken);
+
+		const now = Date.now();
+		const gate = this.loginGate(key, ip, now);
+		if (!gate.ok) return gate;
+		const attempt = this.recordLoginAttempt(key, ip, now);
+		const found = this.userBySignInName(req.name);
+		const stored = found ? this.passwordOf(found.id) : undefined;
+		const pepper = this.env.ARCASYNC_SECRET;
+		const good = stored
+			? await verifyPassword(pepper, req.password, stored)
+			: await dummyVerify(pepper, req.password);
+
+		// Re-read after the hash: the account may have been disabled or its password changed.
+		const user = found ? this.userById(found.id) : undefined;
+		const current = user ? this.passwordOf(user.id) : undefined;
+		if (!good || !user || user.disabled_at || !current || current.hash !== stored?.hash) {
+			this.auditLoginFailure(key, ip, Date.now(), null);
+			return invalidCredentials();
+		}
+		this.sql.exec("DELETE FROM login_failures WHERE id = ?", attempt);
+		this.insertSession(user.id, this.deviceFor(user.id, req.device), sessionHash);
+		this.audit(user.id, "user.login", user.id, {
+			device: { name: req.device.name, platform: req.device.platform },
+		});
+		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(user.id) });
+	}
+
+	/**
+	 * Sets a password (none yet) or changes it (`current` must match; a wrong one is 403
+	 * `invalid_credentials`, not 401, which clients read as a dead session). Revokes the user's
+	 * other sessions. Wrong `current` values count toward the name's sign-in limit.
+	 */
+	async changePassword(
+		token: string | null,
+		current: string | undefined,
+		next: string,
+		clientIp: string,
+	): Promise<Result<{ ok: true; userId: string }>> {
+		this.calls += 1;
+		const ip = await this.ipKey(clientIp);
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user, row } = s.value;
+		const problem = passwordProblem(next);
+		if (problem) return fail(400, "weak_password", problem);
+		const pepper = this.env.ARCASYNC_SECRET;
+		const stored = this.passwordOf(user.id);
+		if (stored) {
+			const key = nameKey(user.name);
+			const now = Date.now();
+			const gate = this.loginGate(key, ip, now);
+			if (!gate.ok) return gate;
+			if (current === undefined) {
+				return fail(403, "invalid_credentials", "Enter your current password");
+			}
+			const attempt = this.recordLoginAttempt(key, ip, now);
+			if (!(await verifyPassword(pepper, current, stored))) {
+				this.auditLoginFailure(key, ip, Date.now(), user.id);
+				return fail(403, "invalid_credentials", "Wrong current password");
+			}
+			this.sql.exec("DELETE FROM login_failures WHERE id = ?", attempt);
+		}
+		const hash = await hashPassword(pepper, next);
+
+		// Re-check after the hashes: a concurrent change must not be silently overwritten.
+		const fresh = this.userById(user.id);
+		if (!fresh || fresh.disabled_at) return fail(403, "forbidden", "Account disabled");
+		if (this.passwordOf(user.id)?.hash !== stored?.hash) {
+			return fail(409, "conflict", "The password changed meanwhile; try again");
+		}
+		this.setPasswordRow(user.id, hash);
+		const revoked = this.sql
+			.exec(
+				`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND revoked_at IS NULL
+				 RETURNING id`,
+				Date.now(),
+				user.id,
+				row.session_id,
+			)
+			.toArray().length;
+		this.audit(user.id, stored ? "user.password.change" : "user.password.set", user.id, {
+			revokedSessions: revoked,
+		});
+		return ok({ ok: true, userId: user.id });
+	}
+
 	// --- P2 device-code sign-in (D2) ---
 
 	private deviceCodeTtlS(): number {
@@ -1099,6 +1718,33 @@ export class AccountsDO extends DurableObject<Env> {
 
 	async debugAccounts(): Promise<{ calls: number }> {
 		return { calls: this.calls };
+	}
+
+	/** Moves every limit row and the PIN lock `ms` into the past, as if that much time passed. */
+	async debugAgeLimits(ms: number): Promise<{ ok: true }> {
+		this.sql.exec("UPDATE pin_failures SET at = at - ?", ms);
+		this.sql.exec("UPDATE login_failures SET at = at - ?", ms);
+		this.sql.exec(
+			"UPDATE server_settings SET value = CAST(CAST(value AS INTEGER) - ? AS TEXT) WHERE key = ?",
+			ms,
+			PINS_LOCKED_UNTIL,
+		);
+		return { ok: true };
+	}
+
+	async debugExpirePin(id: string): Promise<{ ok: boolean }> {
+		const changed = this.sql
+			.exec("UPDATE invite_pins SET expires_at = ? WHERE id = ? RETURNING id", Date.now() - 1, id)
+			.toArray().length;
+		return { ok: changed > 0 };
+	}
+
+	/** Dev measurement: `n` password hashes inside this object (time it from the caller). */
+	async debugHashTiming(n: number): Promise<{ n: number }> {
+		for (let i = 0; i < n; i++) {
+			await hashPassword(this.env.ARCASYNC_SECRET, "correct horse battery staple");
+		}
+		return { n };
 	}
 
 	async debugExpireInvite(id: string): Promise<{ ok: boolean }> {
