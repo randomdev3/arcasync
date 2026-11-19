@@ -47,7 +47,7 @@ export function initThemeToggle(): void {
 		render();
 		window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: mode }));
 	});
-	// "Auto" follows the system live; tell listeners (the loom) when it flips.
+	// "Auto" follows the system live; tell listeners (the display) when it flips.
 	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
 		if (mode === "system") window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: mode }));
 	});

@@ -13,14 +13,15 @@
 	<body>
 		<!--@header-->
 		<main id="main" tabindex="-1">
-			<div class="wrap flow" data-flow>
+			<div class="wrap page">
+				<p class="label page__rail">ArcaSync / Sign in</p>
+				<div class="flow" data-flow>
 				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
 
 				<section data-state="idle">
 					<div class="flow-head">
 						<p class="kicker">no passwords</p>
 						<h1>Sign in</h1>
-						<!--@thread-->
 					</div>
 					<p class="lede">
 						ArcaSync has no passwords. You approve this browser from an Obsidian where you're
@@ -36,7 +37,6 @@
 				<section data-state="starting" hidden>
 					<div class="flow-head">
 						<h1>Sign in</h1>
-						<!--@thread-->
 					</div>
 					<div class="btn-row">
 						<button class="btn btn--primary" type="button" aria-busy="true" disabled>Getting a code…</button>
@@ -45,20 +45,18 @@
 
 				<section data-state="waiting" hidden>
 					<div class="flow-head">
-						<p class="kicker">waiting for approval</p>
+						<p class="kicker"><span class="live" aria-hidden="true"></span>waiting for approval</p>
 						<h1>Approve this code in Obsidian</h1>
-						<!--@thread-->
 					</div>
 					<div class="card code-card">
-						<p class="card__eyebrow">Your code</p>
+						<div class="meta-row">
+							<span>Your code</span>
+							<span>Expires in <span class="mono" data-expires aria-live="off">10:00</span></span>
+						</div>
 						<span class="code-display" id="user-code" role="img" data-code>BCDF-GHJK</span>
 						<div class="btn-row">
 							<button class="btn btn--small" type="button" data-copy="user-code">Copy code</button>
 							<a class="btn btn--small" href="/signin" data-open-approve>Open in Obsidian</a>
-						</div>
-						<div class="meta-row">
-							<span>Expires in <span class="mono" data-expires aria-live="off">10:00</span></span>
-							<span>Waiting for approval…</span>
 						</div>
 					</div>
 					<ol class="steps">
@@ -75,27 +73,25 @@
 					<div class="flow-head">
 						<p class="kicker">approved</p>
 						<h1 class="big-who"><span class="dot" data-user-dot></span><span data-approved-text>Signed in</span></h1>
-						<!--@thread-->
 					</div>
 					<p class="lede">Taking you on…</p>
 				</section>
 
 				<section data-state="denied" hidden>
 					<div class="flow-head">
-						<h1 tabindex="-1">The sign-in was denied in Obsidian.</h1>
-						<!--@thread-->
+						<h1 tabindex="-1">The sign-in was denied in Obsidian</h1>
 					</div>
 					<div class="btn-row"><button class="btn btn--primary" type="button" data-restart>Start again</button></div>
 				</section>
 
 				<section data-state="expired" hidden>
 					<div class="flow-head">
-						<h1 tabindex="-1">That code expired.</h1>
-						<!--@thread-->
+						<h1 tabindex="-1">That code expired</h1>
 					</div>
 					<p class="lede">Codes last 10 minutes.</p>
 					<div class="btn-row"><button class="btn btn--primary" type="button" data-restart>Get a new code</button></div>
 				</section>
+				</div>
 			</div>
 		</main>
 		<!--@footer-->

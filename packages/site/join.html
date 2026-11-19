@@ -14,14 +14,15 @@
 	<body>
 		<!--@header-->
 		<main id="main" tabindex="-1">
-			<div class="wrap flow flow--wide" data-flow>
+			<div class="wrap page">
+				<p class="label page__rail">ArcaSync / Join</p>
+				<div class="flow flow--wide" data-flow>
 				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
 
 				<section data-state="no-invite">
 					<div class="flow-head">
 						<p class="kicker">invite-only</p>
 						<h1>Join ArcaSync</h1>
-						<!--@thread-->
 					</div>
 					<p class="lede">ArcaSync is invite-only. Paste the invite link you were sent.</p>
 					<form class="field" data-paste-form novalidate>
@@ -51,20 +52,15 @@
 
 				<section data-state="checking-session" hidden>
 					<div class="flow-head">
-						<h1>Checking who you are…</h1>
-						<!--@thread-->
+						<h1>Checking who you are</h1>
 					</div>
-					<div class="skeleton" aria-hidden="true">
-						<div class="skeleton__line"></div>
-						<div class="skeleton__line"></div>
-					</div>
+					<div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
 				</section>
 
 				<section data-state="choose" hidden>
 					<div class="flow-head">
 						<p class="kicker">an invite to ArcaSync</p>
 						<h1>You're invited</h1>
-						<!--@thread-->
 					</div>
 					<div class="callout callout--warn">
 						<strong>Use one or the other.</strong> This invite works once, so whichever you use first
@@ -73,7 +69,7 @@
 					</div>
 					<div class="choose-grid">
 						<form class="card card--primary" data-join-form novalidate>
-							<p class="card__eyebrow">A · recommended</p>
+							<p class="card__eyebrow">A <span class="badge">recommended</span></p>
 							<h2 class="card__title">Create your account here</h2>
 							<div class="field">
 								<label for="name">Your name</label>
@@ -114,7 +110,6 @@
 					<div class="flow-head">
 						<p class="kicker">you're in</p>
 						<h1 class="big-who"><span class="dot" data-user-dot></span><span data-welcome>Welcome</span></h1>
-						<!--@thread-->
 					</div>
 					<div class="card">
 						<h2 class="card__title">Your workspaces</h2>
@@ -142,7 +137,6 @@
 					<div class="flow-head">
 						<p class="kicker">an invite to ArcaSync</p>
 						<h1>Add a workspace</h1>
-						<!--@thread-->
 					</div>
 					<p class="lede">
 						You're signed in as <strong class="who"><span class="dot" data-me-dot></span><span data-me-name></span></strong>.
@@ -168,7 +162,6 @@
 					<div class="flow-head">
 						<p class="kicker">invite</p>
 						<h1 data-error-title tabindex="-1">This invite can't be used</h1>
-						<!--@thread-->
 					</div>
 					<p class="lede" data-error-action></p>
 					<div class="btn-row">
@@ -176,6 +169,7 @@
 						<a class="btn" href="/guide#sign-in">Read the guide</a>
 					</div>
 				</section>
+				</div>
 			</div>
 		</main>
 		<!--@footer-->

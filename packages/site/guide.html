@@ -25,7 +25,7 @@
 
 				<nav class="toc" aria-label="On this page">
 					<details class="toc__details" open>
-						<summary>On this page</summary>
+						<summary class="toc__summary">On this page</summary>
 						<ol class="toc__list">
 							<li><a href="#before">Before you start</a></li>
 							<li><a href="#install">Install the plugin</a></li>
@@ -40,8 +40,8 @@
 
 				<article class="guide__body">
 					<section id="before" aria-labelledby="before-h">
-						<h2 id="before-h"><span class="guide__num">1</span>Before you start</h2>
-						<ul>
+						<h2 id="before-h"><span class="guide__num" aria-hidden="true">01</span>Before you start</h2>
+						<ul class="bullets">
 							<li>Obsidian <strong>1.11.4</strong> or newer, on desktop or mobile.</li>
 							<li>
 								An invite link from whoever runs your ArcaSync server. Accounts are invite-only. Invites
@@ -51,7 +51,7 @@
 					</section>
 
 					<section id="install" aria-labelledby="install-h">
-						<h2 id="install-h"><span class="guide__num">2</span>Install the plugin</h2>
+						<h2 id="install-h"><span class="guide__num" aria-hidden="true">02</span>Install the plugin</h2>
 						<h3 id="brat">With BRAT <span class="badge">recommended</span></h3>
 						<p>
 							ArcaSync isn't in the community plugin list. BRAT installs it from GitHub and keeps it
@@ -105,7 +105,7 @@
 					</section>
 
 					<section id="connect" aria-labelledby="connect-h">
-						<h2 id="connect-h"><span class="guide__num">3</span>Point it at the server</h2>
+						<h2 id="connect-h"><span class="guide__num" aria-hidden="true">03</span>Point it at the server</h2>
 						<p>Open <strong>Settings → ArcaSync → Server URL</strong> and paste:</p>
 						<div class="copy-row">
 							<span class="copy-row__value" id="server-url">{{relay}}</span>
@@ -119,13 +119,13 @@
 					</section>
 
 					<section id="sign-in" aria-labelledby="sign-in-h">
-						<h2 id="sign-in-h"><span class="guide__num">4</span>Sign in</h2>
+						<h2 id="sign-in-h"><span class="guide__num" aria-hidden="true">04</span>Sign in</h2>
 						<p>Pick the row that matches you.</p>
 						<div class="rows">
 							<div class="row-card">
 								<h3>I have an invite and no account yet</h3>
 								<p>Any one of these:</p>
-								<ul>
+								<ul class="bullets">
 									<li>
 										Open the invite link and click <strong>Open in Obsidian</strong>. Confirm
 										<strong>Join an ArcaSync server</strong>, enter your name and join.
@@ -164,7 +164,7 @@
 					</section>
 
 					<section id="share" aria-labelledby="share-h">
-						<h2 id="share-h"><span class="guide__num">5</span>Share a folder</h2>
+						<h2 id="share-h"><span class="guide__num" aria-hidden="true">05</span>Share a folder</h2>
 						<ol class="steps">
 							<li>
 								Go to <strong>Settings → ArcaSync → Shared folders → Add folder</strong>.
@@ -180,8 +180,8 @@
 					</section>
 
 					<section id="together" aria-labelledby="together-h">
-						<h2 id="together-h"><span class="guide__num">6</span>Working together</h2>
-						<ul>
+						<h2 id="together-h"><span class="guide__num" aria-hidden="true">06</span>Working together</h2>
+						<ul class="bullets">
 							<li>Coloured carets with names are live, and so are selections.</li>
 							<li>Avatars of who's here appear in the status bar and on the folder.</li>
 							<li>
@@ -194,7 +194,7 @@
 					</section>
 
 					<section id="trouble" aria-labelledby="trouble-h">
-						<h2 id="trouble-h"><span class="guide__num">7</span>Troubleshooting</h2>
+						<h2 id="trouble-h"><span class="guide__num" aria-hidden="true">07</span>Troubleshooting</h2>
 						<div class="faq">
 							<details>
 								<summary>“This link is not a valid ArcaSync invite”</summary>

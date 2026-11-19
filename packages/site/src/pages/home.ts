@@ -43,42 +43,39 @@ form.addEventListener("submit", (event) => {
 	location.assign("/join");
 });
 
-// --- The loom: progressive enhancement over the static SVG -----------------------------------
+// --- The display: the canvas takes over from the build-time still -----------------------------
 
-const art = $("[data-loom]");
-const canvas = $<HTMLCanvasElement>("[data-loom-canvas]");
+const figure = $("[data-display]");
+const screen = $("[data-display-screen]");
+const canvas = $<HTMLCanvasElement>("[data-display-canvas]");
+const statusLabel = $("[data-display-status]");
+const onlineLabel = $("[data-display-online]");
 
-function webglAvailable(): boolean {
-	try {
-		const probe = document.createElement("canvas");
-		const gl = probe.getContext("webgl2") ?? probe.getContext("webgl");
-		if (!gl) return false;
-		gl.getExtension("WEBGL_lose_context")?.loseContext();
-		return true;
-	} catch {
-		return false;
-	}
-}
+const sentence = (text: string) => text.charAt(0) + text.slice(1).toLowerCase();
 
-function fallBack() {
-	art.classList.remove("is-live");
-}
-
-async function startLoom() {
+async function startDisplay() {
 	const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
-	if (connection?.saveData || !webglAvailable()) return;
+	if (connection?.saveData) return;
 	const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 	try {
-		const { createLoom } = await import("../loom/loom");
-		const loom = await createLoom(canvas, { reducedMotion: motion.matches, onFail: fallBack });
-		art.classList.add("is-live");
-		motion.addEventListener("change", (e) => loom.setReducedMotion(e.matches));
+		const { createDisplay } = await import("../matrix/display");
+		const display = createDisplay(screen, canvas, {
+			reducedMotion: motion.matches,
+			onStatus: (status, online) => {
+				statusLabel.textContent = sentence(status);
+				onlineLabel.textContent = String(online);
+			},
+		});
+		if (!display) return;
+		figure.classList.add("is-live");
+		motion.addEventListener("change", (e) => display.setReducedMotion(e.matches));
 		window.addEventListener(THEME_EVENT, () => {
 			// Let the new custom properties apply before reading them.
-			requestAnimationFrame(() => loom.recolor());
+			requestAnimationFrame(() => display.recolor());
 		});
+		(window as Window & { __display?: unknown }).__display = display;
 	} catch {
-		fallBack();
+		// The still frame stays.
 	}
 }
 
@@ -87,5 +84,5 @@ function whenIdle(fn: () => void) {
 	else setTimeout(fn, 200);
 }
 
-if (document.readyState === "complete") whenIdle(() => void startLoom());
-else window.addEventListener("load", () => whenIdle(() => void startLoom()), { once: true });
+if (document.readyState === "complete") whenIdle(() => void startDisplay());
+else window.addEventListener("load", () => whenIdle(() => void startDisplay()), { once: true });

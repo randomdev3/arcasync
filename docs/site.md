@@ -6,7 +6,7 @@ invites and sign-in. It is hosted on **Cloudflare Pages** at **https://arca-sync
 
 | Path | Page | Relay calls |
 |---|---|---|
-| `/` | Landing page with the loom (three.js, lazy) | none |
+| `/` | Landing page with the display (a 2D canvas, lazy) | none |
 | `/guide` | Install, connect, sign in, share, troubleshooting | none |
 | `/join?invite=…` | Create an account from an invite, or add its workspace to the signed-in account; "Open in Obsidian" as the alternative | `accept`, or `me` + `redeem` |
 | `/signin` | Sign this browser in with a device code approved in Obsidian | `device/start`, `device/poll` |
@@ -17,6 +17,22 @@ invites and sign-in. It is hosted on **Cloudflare Pages** at **https://arca-sync
 Static files cost no Worker requests: Pages serves them. Only the relay calls above count, a few per
 human action (sign-in polls about every 5 s while waiting, at most about 120 per sign-in). Preflights
 are cached for 2 hours.
+
+## Look
+
+Monochrome with one red signal, set in dots. Tokens are in `src/styles/tokens.css` (dark is the
+primary theme). Fonts are self-hosted through `@fontsource`: Doto for display type, Geist for text,
+Geist Mono for labels and codes.
+
+- **Logo.** A 5×7 dot-matrix A whose crossbar is a single red dot, and `ARCASYNC` in the same
+  glyphs. The glyph table is `src/matrix/glyphs.ts`; `vite.config.ts` draws the header logo, the
+  pictograms, `/favicon.svg`, `/logo.svg` and `/mark.svg` from it, so there are no image files.
+- **The display.** The landing page's centrepiece: three people co-writing a note on a dot lattice.
+  `src/matrix/scene.ts` is the scene (no DOM, deterministic, unit-tested); `src/matrix/display.ts`
+  draws it on a 2D canvas, on a pitch of whole device pixels, redrawing only the dots that changed.
+  It stops when off-screen or in a hidden tab. With reduced motion it shows one still frame, and
+  without JavaScript (or with data saver on) the page keeps the same frame as an SVG that the build
+  renders from the scene. Moving the mouse over it adds the visitor's own caret.
 
 ## Configuration
 
@@ -75,7 +91,8 @@ point at a site that isn't there yet.
 ## Security notes
 
 - CSP: `default-src 'none'`, scripts, styles and fonts from `'self'` only, `connect-src` the relay,
-  `frame-ancestors 'none'`. No inline scripts or `style` attributes, no third-party origins.
+  `frame-ancestors 'none'`. No inline scripts or `style` attributes, no third-party origins. The
+  generated SVG is coloured by classes, or by attributes in the standalone files.
 - The session token is kept in `localStorage["arcasync.session"]` and sent as a bearer. It can
   approve devices, so "Sign out" revokes it on the relay and `/account` names the browser device.
   An `HttpOnly` cookie would be stronger but needs cookie auth and CSRF handling in the relay

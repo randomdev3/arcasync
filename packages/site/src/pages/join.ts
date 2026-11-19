@@ -31,15 +31,15 @@ const flow = createJoinFlow(
 
 const PAGE_ERRORS: Record<string, { title: string; action: string }> = {
 	not_found: {
-		title: "This invite doesn't exist or was revoked.",
+		title: "This invite doesn't exist or was revoked",
 		action: "Ask whoever sent it for a new one.",
 	},
 	invite_expired: {
-		title: "This invite has expired.",
+		title: "This invite has expired",
 		action: "Ask whoever sent it for a new one.",
 	},
 	invite_used: {
-		title: "This invite has already been used.",
+		title: "This invite has already been used",
 		action: "If that was you, sign in instead. Otherwise ask for a new invite.",
 	},
 	forbidden: { title: DISABLED_COPY, action: "" },

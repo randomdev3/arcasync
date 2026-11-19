@@ -1,251 +1,455 @@
-/* --- Hero: text on the left, the loom full-bleed on the right ------------------------------- */
+/* --- Hero: the headline in dots, then the display ------------------------------------------- */
 
 .hero {
-	position: relative;
-	isolation: isolate;
-	min-height: clamp(560px, 82vh, 780px);
-	display: flex;
-	align-items: center;
-	overflow: hidden;
-	border-bottom: 1px solid var(--rule);
+	padding-top: var(--s7);
 }
 
-.hero__art {
-	position: absolute;
-	inset: 0 0 0 auto;
-	width: 62%;
-	z-index: -1;
-}
-
-.loom-static,
-.hero__canvas {
-	position: absolute;
-	inset: 0;
-	width: 100%;
-	height: 100%;
-	display: block;
-}
-
-.hero__canvas {
-	opacity: 0;
-	transition: opacity var(--t-loom) var(--ease);
-}
-
-.hero__art.is-live .hero__canvas {
-	opacity: 1;
-}
-
-.loom-static {
-	transition: opacity var(--t-loom) var(--ease);
-}
-
-.hero__art.is-live .loom-static {
-	opacity: 0;
-}
-
-.loom-page {
-	fill: var(--paper-2);
-	stroke: var(--rule);
-}
-
-.loom-rule {
-	stroke: var(--rule);
-	stroke-width: 1;
-}
-
-.loom-flag {
-	fill: #1b1a17;
-	font-family: var(--font-mono);
-	font-size: 12px;
-	font-weight: 600;
-}
-
-/* Fade the art's left edge into the paper, under the text. */
-.hero__art::after {
-	content: "";
-	position: absolute;
-	inset: 0;
-	background: linear-gradient(90deg, var(--paper) 0%, transparent 28%);
-	pointer-events: none;
-}
-
-.hero__grid {
+.hero__top {
 	display: grid;
 	grid-template-columns: repeat(12, minmax(0, 1fr));
-	padding-block: var(--s8);
+	column-gap: var(--col-gap);
+	row-gap: var(--s5);
+	align-items: end;
 }
 
-.hero__text {
-	grid-column: 1 / span 6;
+.hero__kicker {
+	grid-column: 1 / -1;
+}
+
+.hero h1 {
+	grid-column: 1 / -1;
+	/* Twelve characters to a line; the face is 0.6em wide. */
+	font-size: min(6.5rem, calc((100vw - 2 * var(--gutter)) / 7.4));
+	line-height: 0.98;
+	white-space: nowrap;
+}
+
+.hero__side {
+	grid-column: 1 / -1;
 	display: grid;
 	gap: var(--s5);
 }
 
-.hero h1 {
-	max-width: 11ch;
-}
-
-.hero h1 em {
-	color: var(--ink);
-}
-
 .hero__lede {
-	font-size: 1.1875rem;
-	line-height: 1.55;
-	color: var(--ink-2);
-	max-width: 34rem;
-}
-
-.hero__ctas {
-	margin-top: var(--s2);
+	max-width: 30rem;
+	font-size: 1.0625rem;
+	color: var(--fg-2);
 }
 
 .hero__invite {
-	max-width: 34rem;
-	padding: var(--s4);
-	border: 1px solid var(--rule);
-	border-radius: var(--r-md);
-	background: var(--paper-2);
+	padding-top: var(--s4);
+	border-top: 1px solid var(--rule);
 }
 
-/*
- * On small screens the loom is a band under the calls to action, fading up into the paper. Behind
- * the text it would either vanish under a scrim or pull the lede (--ink-2, ~7:1) below 7:1.
- */
-@media (max-width: 759px) {
-	.hero {
-		min-height: auto;
-		align-items: stretch;
+@media (min-width: 960px) {
+	.hero h1 {
+		grid-column: 1 / span 8;
+		font-size: min(6.5rem, 7.9vw);
 	}
 
-	.hero__art {
-		inset: auto 0 0 0;
-		width: 100%;
-		height: 300px;
+	.hero__side {
+		grid-column: 9 / -1;
+		padding-bottom: 0.5rem;
+	}
+}
+
+/* --- The display ---------------------------------------------------------------------------- */
+
+.display {
+	--pitch: 5px;
+	margin-top: var(--s6);
+	border-block: 1px solid var(--rule);
+}
+
+.display__bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s4);
+	min-height: 40px;
+}
+
+.display__bar:not(.display__bar--foot) > :nth-child(2) {
+	flex: 1;
+	color: var(--fg);
+}
+
+.display__bar--foot {
+	justify-content: flex-start;
+	gap: var(--s5);
+}
+
+.display__bar--foot > :last-child {
+	margin-left: auto;
+}
+
+.peer::before {
+	content: "";
+	display: inline-block;
+	width: 2px;
+	height: 0.9em;
+	margin-right: var(--s2);
+	background: var(--fg);
+	vertical-align: -0.1em;
+}
+
+.peer--red::before {
+	background: var(--red);
+}
+
+.peer--dim::before {
+	background: var(--fg-3);
+}
+
+.display__screen {
+	position: relative;
+	display: grid;
+	place-items: center;
+	height: calc(var(--pitch) * 51);
+	border-block: 1px solid var(--rule);
+	overflow: hidden;
+	cursor: crosshair;
+}
+
+.display__still,
+.display__canvas {
+	position: absolute;
+	transition: opacity 400ms var(--ease);
+}
+
+.display__still {
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.display__still path {
+	fill: none;
+	stroke-linecap: round;
+}
+
+.still__on {
+	stroke: var(--fg);
+}
+
+.still__red {
+	stroke: var(--red);
+}
+
+.still__lattice {
+	fill: var(--dot-off);
+}
+
+.display__still--wide {
+	display: none;
+}
+
+.display__canvas {
+	position: relative;
+	display: block;
+	opacity: 0;
+}
+
+.display.is-live .display__canvas {
+	opacity: 1;
+}
+
+.display.is-live .display__still {
+	opacity: 0;
+}
+
+/* The pitch steps with the width, as in `pitchFor` (src/matrix/display.ts). */
+@media (max-width: 339px) {
+	.display {
+		--pitch: 4px;
+	}
+}
+
+@media (min-width: 736px) {
+	.display {
+		--pitch: 6px;
 	}
 
-	.hero__art::after {
-		background: linear-gradient(180deg, var(--paper) 0%, transparent 30%);
+	.display__still--wide {
+		display: block;
 	}
 
-	.hero__text {
+	.display__still--narrow {
+		display: none;
+	}
+}
+
+@media (min-width: 848px) {
+	.display {
+		--pitch: 7px;
+	}
+}
+
+@media (min-width: 976px) {
+	.display {
+		--pitch: 8px;
+	}
+}
+
+@media (max-width: 559px) {
+	.display__file,
+	.peer {
+		display: none;
+	}
+}
+
+/* --- Sections: a hairline, an index, a heading ---------------------------------------------- */
+
+.section {
+	margin-top: var(--section);
+}
+
+.section__head {
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	column-gap: var(--col-gap);
+	row-gap: var(--s3);
+	align-items: baseline;
+	padding-top: var(--s4);
+	border-top: 1px solid var(--rule);
+}
+
+.section__head .label {
+	grid-column: 1 / span 3;
+}
+
+.section__head h2 {
+	grid-column: 4 / -1;
+}
+
+@media (max-width: 859px) {
+	.section__head .label,
+	.section__head h2 {
 		grid-column: 1 / -1;
 	}
-
-	.hero__grid {
-		padding-block: var(--s7) 300px;
-	}
 }
 
-/* --- What it does ------------------------------------------------------------------------- */
-
-.features,
-.how {
-	padding-top: var(--s9);
-	display: grid;
-	gap: var(--s6);
-}
+/* --- What it does: four columns on the grid, split by hairlines ----------------------------- */
 
 .feature-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: var(--s4);
-}
-
-@media (max-width: 640px) {
-	.feature-grid {
-		grid-template-columns: minmax(0, 1fr);
-	}
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	column-gap: var(--col-gap);
+	margin-top: var(--s7);
+	border-block: 1px solid var(--rule);
 }
 
 .feature {
+	position: relative;
 	display: grid;
 	gap: var(--s2);
 	align-content: start;
-	min-height: 180px;
+	padding-block: var(--s5) var(--s6);
 }
 
-.feature > * + * {
-	margin-top: 0;
+/* The divider sits in the gutter, so the text stays on the column lines. */
+.feature::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 calc(var(--col-gap) / -2);
+	border-left: 1px solid var(--rule);
 }
 
-.feature__glyph {
-	margin-bottom: var(--s3);
+.feature:first-child::before {
+	content: none;
+}
+
+.picto {
+	width: 56px;
+	height: 56px;
+	margin-bottom: var(--s5);
 }
 
 .feature p {
-	color: var(--ink-2);
+	padding-right: var(--s4);
+	font-size: 0.9375rem;
+	color: var(--fg-2);
 }
 
-/* --- How you get in: three steps on one thread -------------------------------------------- */
+@media (max-width: 959px) {
+	.feature-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.feature:nth-child(odd)::before {
+		content: none;
+	}
+
+	.feature:nth-child(n + 3) {
+		border-top: 1px solid var(--rule);
+	}
+}
+
+@media (max-width: 559px) {
+	.feature-grid {
+		grid-template-columns: minmax(0, 1fr);
+		margin-top: var(--s6);
+	}
+
+	.feature {
+		grid-template-columns: 42px minmax(0, 1fr);
+		column-gap: var(--s4);
+		padding-block: var(--s4) var(--s5);
+	}
+
+	.feature::before {
+		content: none;
+	}
+
+	.feature + .feature {
+		border-top: 1px solid var(--rule);
+	}
+
+	.picto {
+		grid-row: 1 / span 2;
+		width: 42px;
+		height: 42px;
+		margin: 0;
+	}
+
+	.feature p {
+		grid-column: 2;
+		padding-right: 0;
+	}
+}
+
+/* --- How you get in: three ruled rows ------------------------------------------------------- */
 
 .how__steps {
-	position: relative;
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: var(--s6);
+	margin-top: var(--s7);
 	padding: 0;
 	list-style: none;
-}
-
-.how__steps::before {
-	content: "";
-	position: absolute;
-	top: 18px;
-	left: 18px;
-	right: 18px;
-	height: 2px;
-	background: linear-gradient(90deg, var(--t1), var(--t2), var(--t3), var(--t4));
-	opacity: 0.7;
+	border-bottom: 1px solid var(--rule);
 }
 
 .how__step {
-	position: relative;
 	display: grid;
-	gap: var(--s2);
-	align-content: start;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	column-gap: var(--col-gap);
+	row-gap: var(--s2);
+	align-items: baseline;
+	max-width: none;
+	padding-block: var(--s5);
+	border-top: 1px solid var(--rule);
 }
 
 .how__num {
-	display: grid;
-	place-items: center;
-	width: 38px;
-	height: 38px;
-	margin-bottom: var(--s3);
-	border: 1px solid var(--rule);
-	border-radius: 50%;
-	background: var(--paper);
-	font-family: var(--font-mono);
-	font-size: 0.875rem;
+	grid-column: 1 / span 3;
+	font-size: 2.5rem;
+	line-height: 1;
+	letter-spacing: 0;
+	color: var(--fg);
+}
+
+.how__step h3 {
+	grid-column: 4 / span 3;
 }
 
 .how__step p {
-	color: var(--ink-2);
+	grid-column: 7 / span 4;
+	font-size: 0.9375rem;
+	color: var(--fg-2);
 }
 
-@media (max-width: 760px) {
-	.how__steps {
-		grid-template-columns: minmax(0, 1fr);
-		gap: var(--s5);
-	}
+.how__step a {
+	grid-column: 11 / -1;
+	justify-self: end;
+}
 
-	.how__steps::before {
-		top: 18px;
-		bottom: 18px;
-		left: 18px;
-		right: auto;
-		width: 2px;
-		height: auto;
-		background: linear-gradient(180deg, var(--t1), var(--t2), var(--t3), var(--t4));
+.arrow-link {
+	font-family: var(--font-mono);
+	font-size: var(--step-micro);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	text-decoration: none;
+	color: var(--fg-2);
+	white-space: nowrap;
+}
+
+.arrow-link::after {
+	content: " →";
+	display: inline-block;
+	margin-left: 0.5em;
+	transition: transform var(--t-fast) var(--ease);
+}
+
+.arrow-link:hover {
+	color: var(--fg);
+}
+
+.arrow-link:hover::after {
+	transform: translateX(3px);
+}
+
+@media (max-width: 859px) {
+	.how__steps {
+		margin-top: var(--s6);
 	}
 
 	.how__step {
-		padding-left: 58px;
+		grid-template-columns: 4.5rem minmax(0, 1fr);
+		padding-block: var(--s4) var(--s5);
 	}
 
 	.how__num {
-		position: absolute;
-		left: 0;
-		top: 0;
+		grid-column: 1;
+		grid-row: 1 / span 3;
+		font-size: 2rem;
+	}
+
+	.how__step h3,
+	.how__step p,
+	.how__step a {
+		grid-column: 2;
+		justify-self: start;
+	}
+
+	.how__step a {
+		margin-top: var(--s2);
+	}
+}
+
+/* --- Spec sheet ----------------------------------------------------------------------------- */
+
+.spec {
+	margin-top: var(--s7);
+	border-bottom: 1px solid var(--rule);
+}
+
+.spec__row {
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	column-gap: var(--col-gap);
+	align-items: baseline;
+	padding-block: var(--s3);
+	border-top: 1px solid var(--rule);
+}
+
+.spec__row dt {
+	grid-column: 1 / span 3;
+	color: var(--fg-3);
+}
+
+.spec__row dd {
+	grid-column: 4 / -1;
+}
+
+@media (max-width: 859px) {
+	.spec {
+		margin-top: var(--s6);
+	}
+
+	.spec__row dt {
+		grid-column: 1 / span 5;
+	}
+
+	.spec__row dd {
+		grid-column: 6 / -1;
+		font-size: 0.9375rem;
 	}
 }

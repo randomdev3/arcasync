@@ -14,25 +14,22 @@
 	<body>
 		<!--@header-->
 		<main id="main" tabindex="-1">
-			<div class="wrap flow" data-flow>
+			<div class="wrap page">
+				<p class="label page__rail">ArcaSync / Account</p>
+				<div class="flow" data-flow>
 				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
 
 				<section data-state="loading">
 					<div class="flow-head">
 						<h1>Account</h1>
-						<!--@thread-->
 					</div>
-					<div class="skeleton" aria-hidden="true">
-						<div class="skeleton__line"></div>
-						<div class="skeleton__line"></div>
-					</div>
+					<div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
 				</section>
 
 				<section data-state="signed-out" hidden>
 					<div class="flow-head">
 						<p class="kicker">account</p>
-						<h1 tabindex="-1">You're not signed in.</h1>
-						<!--@thread-->
+						<h1 tabindex="-1">You're not signed in</h1>
 					</div>
 					<p class="callout callout--ok" data-signed-out-notice hidden></p>
 					<p class="lede">This browser holds no ArcaSync session.</p>
@@ -49,7 +46,6 @@
 							<span class="dot" data-me-dot></span><span data-me-name></span>
 							<span class="badge" data-admin hidden>admin</span>
 						</h1>
-						<!--@thread-->
 					</div>
 					<p class="lede">This browser: <strong data-device-name></strong></p>
 					<div class="card">
@@ -79,11 +75,11 @@
 				<section data-state="error" hidden>
 					<div class="flow-head">
 						<h1 tabindex="-1">Account</h1>
-						<!--@thread-->
 					</div>
 					<p class="callout callout--error" data-page-error></p>
 					<div class="btn-row"><button class="btn btn--primary" type="button" data-retry>Try again</button></div>
 				</section>
+				</div>
 			</div>
 		</main>
 		<!--@footer-->

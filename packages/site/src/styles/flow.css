@@ -1,146 +1,169 @@
-/* Join, sign-in, approve, account and 404: one narrow column under a short ruled header. */
+/* Join, sign-in, approve, account and 404: a label in the margin, one column of content. */
 
-.flow {
-	max-width: 720px;
-	padding-block: var(--s8) 0;
+.page {
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	column-gap: var(--col-gap);
+	row-gap: var(--s5);
+	padding-top: var(--s7);
 }
 
-.flow--wide {
-	max-width: 980px;
+/* The margin label only exists where there is a margin. */
+.page__rail {
+	display: none;
+	grid-column: 1 / -1;
+	align-self: start;
+	padding-top: var(--s3);
+	border-top: 1px solid var(--rule);
+}
+
+.flow {
+	grid-column: 1 / -1;
+	min-width: 0;
+}
+
+@media (min-width: 960px) {
+	.page {
+		padding-top: var(--s8);
+	}
+
+	.page__rail {
+		display: block;
+		grid-column: 1 / span 3;
+	}
+
+	.flow {
+		grid-column: 4 / span 7;
+		padding-top: var(--s3);
+		border-top: 1px solid var(--rule);
+	}
+
+	.flow--wide {
+		grid-column: 4 / -1;
+	}
 }
 
 .flow > section > * + * {
 	margin-top: var(--s5);
 }
 
-.flow h1 {
-	font-size: clamp(2.5rem, 4vw + 1rem, 3.75rem);
-}
-
 .flow .lede {
-	font-size: 1.1875rem;
-	color: var(--ink-2);
+	font-size: 1.0625rem;
+	color: var(--fg-2);
 }
 
 .flow-head {
-	position: relative;
 	display: grid;
-	gap: var(--s3);
+	gap: var(--s4);
+	padding-bottom: var(--s2);
 }
 
-/* The two threads under each heading, drawn once in SVG. */
-.flow-thread {
-	display: block;
-	width: min(260px, 70%);
-	height: 18px;
-	margin-top: var(--s2);
+.flow h2:not(.card__title) {
+	margin-top: var(--s7);
+	font-size: 1.5rem;
 }
 
 .choose-grid {
 	display: grid;
-	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-	gap: var(--s5);
-	align-items: start;
+	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+	align-items: stretch;
+	border: 1px solid var(--rule);
 }
 
-@media (max-width: 760px) {
+.choose-grid .card {
+	border: 0;
+}
+
+.choose-grid .card + .card {
+	border-left: 1px solid var(--rule);
+}
+
+@media (max-width: 719px) {
 	.choose-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
+
+	.choose-grid .card + .card {
+		border-left: 0;
+		border-top: 1px solid var(--rule);
+	}
 }
 
-.card__title {
-	font-family: var(--font-display);
-	font-size: 1.625rem;
-	font-weight: 400;
-	line-height: 1.15;
-}
-
-.card__eyebrow {
-	font-family: var(--font-mono);
-	font-size: 0.75rem;
-	color: var(--ink-2);
-	letter-spacing: 0.04em;
-}
-
-.card--primary {
-	border-color: color-mix(in srgb, var(--accent) 45%, var(--rule));
-}
-
+/* The sign-in code: the display, showing one line. */
 .code-card {
 	display: grid;
-	gap: var(--s4);
+	gap: var(--s5);
 	justify-items: start;
+	padding: var(--s4);
+	max-width: max-content;
+	min-width: min(100%, 22rem);
 }
 
-.code-card .code-display {
-	padding: var(--s3) var(--s4);
-	border: 1px dashed var(--rule);
-	border-radius: var(--r-sm);
-	background: var(--paper);
+.flow .code-card > * + * {
+	margin-top: 0;
 }
 
 .meta-row {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--s2) var(--s4);
-	color: var(--ink-2);
-	font-size: var(--step-small);
+	gap: var(--s2) var(--s5);
+	font-family: var(--font-mono);
+	font-size: var(--step-micro);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-2);
 }
 
 .meta-row .mono {
-	color: var(--ink);
-	font-variant-numeric: tabular-nums;
+	font-size: 1em;
+	color: var(--fg);
 }
 
 .options {
 	display: grid;
-	gap: var(--s3);
 	padding: 0;
 	list-style: none;
+	border-bottom: 1px solid var(--rule);
 }
 
 .options > li {
-	display: grid;
-	gap: var(--s2);
-	padding: var(--s4) var(--s5);
-	border: 1px solid var(--rule);
-	border-radius: var(--r-md);
-	background: var(--paper-2);
-}
-
-.options > li > :first-child {
-	font-weight: 600;
-}
-
-.options .btn {
-	justify-self: start;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s3) var(--s5);
+	max-width: none;
+	padding-block: var(--s4);
+	border-top: 1px solid var(--rule);
 }
 
 .device-ask {
-	font-size: 1.1875rem;
+	font-size: 1.0625rem;
 	line-height: 1.5;
 }
 
 .big-who {
-	display: inline-flex;
-	align-items: center;
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
 	gap: var(--s3);
 }
 
 .big-who .dot {
-	width: 14px;
-	height: 14px;
+	width: 0.28em;
+	height: 0.28em;
+	align-self: center;
 }
 
-.notfound-art {
-	display: block;
-	width: min(100%, 520px);
-	height: auto;
-	margin-top: var(--s6);
+.big-who .badge {
+	align-self: center;
 }
 
-.notfound-art .rules {
-	stroke: var(--rule);
+/* 404: the number, as large as the display allows. */
+.notfound__code {
+	font-size: min(14rem, calc((100vw - 2 * var(--gutter)) / 1.9));
+	line-height: 0.9;
+	letter-spacing: 0;
+	white-space: nowrap;
 }

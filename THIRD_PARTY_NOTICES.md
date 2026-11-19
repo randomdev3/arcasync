@@ -10,6 +10,5 @@ Portions of this project are derived from MIT-licensed code:
 
 The website (`packages/site`) bundles:
 
-- **three.js** (three.js authors) — https://github.com/mrdoob/three.js — MIT.
-- **Instrument Serif** (Rodrigo Fuenzalida, Jordan Egstad), **Geist** and **Geist Mono** (Vercel),
-  self-hosted through the `@fontsource` packages — SIL Open Font License 1.1.
+- **Doto** (Óliver Lalan), **Geist** and **Geist Mono** (Vercel), self-hosted through the
+  `@fontsource` packages — SIL Open Font License 1.1.
