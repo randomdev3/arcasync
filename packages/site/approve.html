@@ -4,6 +4,8 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>ArcaSync · Approve a sign-in</title>
+		<meta name="description" content="Approve the sign-in code an Obsidian is showing." />
+		<meta name="robots" content="noindex" />
 		<meta name="color-scheme" content="light dark" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 		<script src="/theme.js"></script>
@@ -12,7 +14,133 @@
 	<body>
 		<!--@header-->
 		<main id="main" tabindex="-1">
-			<div class="wrap"><h1>ArcaSync · Approve a sign-in</h1></div>
+			<div class="wrap flow" data-flow>
+				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
+
+				<section data-state="checking">
+					<div class="flow-head">
+						<h1>Approve a sign-in</h1>
+						<!--@thread-->
+					</div>
+					<div class="skeleton" aria-hidden="true">
+						<div class="skeleton__line"></div>
+						<div class="skeleton__line"></div>
+					</div>
+				</section>
+
+				<section data-state="needs-session" hidden>
+					<div class="flow-head">
+						<p class="kicker">approve a sign-in</p>
+						<h1>Approve a sign-in</h1>
+						<!--@thread-->
+					</div>
+					<p class="callout callout--warn" data-session-notice hidden></p>
+					<p class="lede">To approve here, this browser has to be signed in to ArcaSync.</p>
+					<ul class="options">
+						<li data-option-obsidian hidden>
+							<span>Signed in to Obsidian on this computer? Approve it there.</span>
+							<a class="btn btn--primary" href="/approve" data-open-approve>Open in Obsidian</a>
+						</li>
+						<li>
+							<span>Sign this browser in first.</span>
+							<a class="btn" href="/signin" data-signin-link>Sign in</a>
+						</li>
+						<li>
+							<span>Have an invite and no account yet?</span>
+							<a class="btn" href="/join">Use your invite</a>
+						</li>
+					</ul>
+				</section>
+
+				<section data-state="ready" hidden>
+					<div class="flow-head">
+						<p class="kicker who"><span class="dot" data-me-dot></span>signed in as <span data-me-name></span></p>
+						<h1>Approve a sign-in</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">Enter the code Obsidian shows under <strong>Sign in with another device</strong>.</p>
+					<form class="field" data-lookup-form novalidate>
+						<label for="code">Code</label>
+						<div class="inline-form">
+							<input
+								id="code"
+								class="input input--mono"
+								type="text"
+								inputmode="text"
+								autocapitalize="characters"
+								autocomplete="one-time-code"
+								spellcheck="false"
+								maxlength="12"
+								placeholder="XXXX-XXXX"
+								aria-describedby="code-hint code-error"
+							/>
+							<button class="btn btn--primary" type="submit" data-lookup>Look up</button>
+						</div>
+						<p class="hint" id="code-hint">Eight letters, like <span class="mono">BCDF-GHJK</span>.</p>
+						<p class="field-error" id="code-error" hidden></p>
+					</form>
+					<p class="callout callout--error" data-ready-error hidden></p>
+					<p class="muted small" data-cooldown hidden>
+						Look up again in <span class="mono" data-cooldown-time aria-live="off">1:00</span>
+					</p>
+				</section>
+
+				<section data-state="confirm" hidden>
+					<div class="flow-head">
+						<p class="kicker">check before approving</p>
+						<h1 tabindex="-1">Is this you?</h1>
+						<!--@thread-->
+					</div>
+					<div class="card">
+						<p class="device-ask">
+							<strong data-device-name></strong> (<span data-device-platform></span>) wants to sign in
+							as <strong class="who"><span class="dot" data-confirm-dot></span><span data-confirm-me></span></strong>.
+						</p>
+						<div class="meta-row">
+							<span>Code <span class="mono" data-confirm-code></span></span>
+							<span>Expires in <span class="mono" data-expires aria-live="off">10:00</span></span>
+						</div>
+						<p class="callout callout--warn">
+							<strong>Only approve a code you started yourself.</strong> Approving gives that device
+							full access to your account.
+						</p>
+						<p class="callout callout--error" data-confirm-error hidden></p>
+						<div class="btn-row">
+							<button class="btn btn--primary" type="button" data-approve>Approve</button>
+							<button class="btn btn--danger" type="button" data-deny>Deny</button>
+						</div>
+					</div>
+				</section>
+
+				<section data-state="approved" hidden>
+					<div class="flow-head">
+						<p class="kicker">approved</p>
+						<h1 tabindex="-1">Approved</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede"><span data-approved-device></span> will finish signing in within a few seconds.</p>
+					<div class="btn-row"><button class="btn" type="button" data-again>Approve another</button></div>
+				</section>
+
+				<section data-state="denied" hidden>
+					<div class="flow-head">
+						<p class="kicker">denied</p>
+						<h1 tabindex="-1">Denied</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">That device can't use this code.</p>
+					<div class="btn-row"><button class="btn" type="button" data-again>Approve another</button></div>
+				</section>
+
+				<section data-state="error" hidden>
+					<div class="flow-head">
+						<h1 tabindex="-1">Approve a sign-in</h1>
+						<!--@thread-->
+					</div>
+					<p class="callout callout--error" data-page-error></p>
+					<div class="btn-row"><button class="btn btn--primary" type="button" data-retry>Try again</button></div>
+				</section>
+			</div>
 		</main>
 		<!--@footer-->
 	</body>

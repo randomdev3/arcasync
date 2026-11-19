@@ -82,22 +82,24 @@ const REPO_MARKUP: Record<string, string> = {
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /**
- * Shared markup: `<!--@header-->` and `<!--@footer-->` in a page are replaced with
- * `src/partials/*.html`, so the seven pages keep one copy of the chrome; then the repo tokens.
+ * Shared markup: `<!--@name-->` is replaced with `src/partials/name.html` (header, footer, the
+ * thread motif), so the pages keep one copy; then the repo and relay tokens.
  */
 function partials(relay: string): Plugin {
-	const read = (name: string) => readFileSync(here(`./src/partials/${name}.html`), "utf8").trim();
 	return {
 		name: "arcasync-partials",
 		transformIndexHtml: {
 			order: "pre",
 			handler: (html) => {
-				let out = html
-					.replace("<!--@header-->", read("header"))
-					.replace("<!--@footer-->", read("footer"));
+				let out = html;
 				for (const [token, markup] of Object.entries(REPO_MARKUP))
 					out = out.replaceAll(token, markup);
-				return out;
+				out = out.replace(/<!--@([a-z-]+)-->/g, (_, name: string) =>
+					readFileSync(here(`./src/partials/${name}.html`), "utf8").trim(),
+				);
+				for (const [token, markup] of Object.entries(REPO_MARKUP))
+					out = out.replaceAll(token, markup);
+				return out.replaceAll("{{relay}}", escapeHtml(relay));
 			},
 		},
 	};

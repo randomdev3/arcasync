@@ -1,0 +1,259 @@
+/* --- Hero: text on the left, the loom full-bleed on the right ------------------------------- */
+
+.hero {
+	position: relative;
+	isolation: isolate;
+	min-height: clamp(560px, 82vh, 780px);
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	border-bottom: 1px solid var(--rule);
+}
+
+.hero__art {
+	position: absolute;
+	inset: 0 0 0 auto;
+	width: 62%;
+	z-index: -1;
+}
+
+.loom-static,
+.hero__canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+.hero__canvas {
+	opacity: 0;
+	transition: opacity var(--t-loom) var(--ease);
+}
+
+.hero__art.is-live .hero__canvas {
+	opacity: 1;
+}
+
+.loom-static {
+	transition: opacity var(--t-loom) var(--ease);
+}
+
+.hero__art.is-live .loom-static {
+	opacity: 0;
+}
+
+.loom-page {
+	fill: var(--paper-2);
+	stroke: var(--rule);
+}
+
+.loom-rule {
+	stroke: var(--rule);
+	stroke-width: 1;
+}
+
+.loom-margin {
+	stroke: #e8534a;
+	stroke-opacity: 0.35;
+	stroke-width: 1;
+}
+
+.loom-flag {
+	fill: #1b1a17;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+/* Fade the art's left edge into the paper, under the text. */
+.hero__art::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(90deg, var(--paper) 0%, transparent 22%);
+	pointer-events: none;
+}
+
+.hero__grid {
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	padding-block: var(--s8);
+}
+
+.hero__text {
+	grid-column: 1 / span 6;
+	display: grid;
+	gap: var(--s5);
+}
+
+.hero h1 {
+	max-width: 11ch;
+}
+
+.hero h1 em {
+	color: var(--ink);
+}
+
+.hero__lede {
+	font-size: 1.1875rem;
+	line-height: 1.55;
+	color: var(--ink-2);
+	max-width: 34rem;
+}
+
+.hero__ctas {
+	margin-top: var(--s2);
+}
+
+.hero__invite {
+	max-width: 34rem;
+	padding: var(--s4);
+	border: 1px solid var(--rule);
+	border-radius: var(--r-md);
+	background: var(--paper-2);
+}
+
+/* On small screens the loom sits behind the text, faint, under a paper scrim. */
+@media (max-width: 759px) {
+	.hero {
+		min-height: auto;
+		align-items: stretch;
+	}
+
+	.hero__art {
+		inset: 0;
+		width: 100%;
+		opacity: 0.45;
+	}
+
+	.hero__art::after {
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--paper) 55%, transparent) 0%,
+			color-mix(in srgb, var(--paper) 88%, transparent) 55%,
+			var(--paper) 100%
+		);
+	}
+
+	.hero__text {
+		grid-column: 1 / -1;
+	}
+
+	.hero__grid {
+		padding-block: var(--s7) var(--s8);
+	}
+}
+
+/* --- What it does ------------------------------------------------------------------------- */
+
+.features,
+.how {
+	padding-top: var(--s9);
+	display: grid;
+	gap: var(--s6);
+}
+
+.feature-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--s4);
+}
+
+@media (max-width: 640px) {
+	.feature-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+.feature {
+	display: grid;
+	gap: var(--s2);
+	align-content: start;
+	min-height: 180px;
+}
+
+.feature > * + * {
+	margin-top: 0;
+}
+
+.feature__glyph {
+	margin-bottom: var(--s3);
+}
+
+.feature p {
+	color: var(--ink-2);
+}
+
+/* --- How you get in: three steps on one thread -------------------------------------------- */
+
+.how__steps {
+	position: relative;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--s6);
+	padding: 0;
+	list-style: none;
+}
+
+.how__steps::before {
+	content: "";
+	position: absolute;
+	top: 18px;
+	left: 18px;
+	right: 18px;
+	height: 2px;
+	background: linear-gradient(90deg, var(--t1), var(--t2), var(--t3), var(--t4));
+	opacity: 0.7;
+}
+
+.how__step {
+	position: relative;
+	display: grid;
+	gap: var(--s2);
+	align-content: start;
+}
+
+.how__num {
+	display: grid;
+	place-items: center;
+	width: 38px;
+	height: 38px;
+	margin-bottom: var(--s3);
+	border: 1px solid var(--rule);
+	border-radius: 50%;
+	background: var(--paper);
+	font-family: var(--font-mono);
+	font-size: 0.875rem;
+}
+
+.how__step p {
+	color: var(--ink-2);
+}
+
+@media (max-width: 760px) {
+	.how__steps {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--s5);
+	}
+
+	.how__steps::before {
+		top: 18px;
+		bottom: 18px;
+		left: 18px;
+		right: auto;
+		width: 2px;
+		height: auto;
+		background: linear-gradient(180deg, var(--t1), var(--t2), var(--t3), var(--t4));
+	}
+
+	.how__step {
+		padding-left: 58px;
+	}
+
+	.how__num {
+		position: absolute;
+		left: 0;
+		top: 0;
+	}
+}
