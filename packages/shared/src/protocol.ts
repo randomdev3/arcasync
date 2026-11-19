@@ -58,7 +58,15 @@ export const DevLoginRequest = z.object({
 });
 export type DevLoginRequest = z.infer<typeof DevLoginRequest>;
 
-export const BootstrapRequest = z.object({ workspaceName: z.string().min(1).max(60) });
+/**
+ * `reset: true` (still behind the bootstrap secret) deletes every account, device, session,
+ * membership, invite, PIN and password, then issues a fresh owner + admin invite. Workspaces and
+ * their notes are kept; one named `workspaceName` is reused.
+ */
+export const BootstrapRequest = z.object({
+	workspaceName: z.string().min(1).max(60),
+	reset: z.literal(true).optional(),
+});
 export type BootstrapRequest = z.infer<typeof BootstrapRequest>;
 
 export const InviteCreated = z.object({

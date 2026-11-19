@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	AuditResponse,
+	BootstrapResponse,
 	InviteCreated,
 	InvitesResponse,
 	MeResponse,
@@ -378,5 +379,56 @@ describe("bootstrap without ARCASYNC_BOOTSTRAP_TOKEN", () => {
 			token: DEV_BOOTSTRAP_TOKEN,
 		});
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("bootstrap reset", () => {
+	let relay: Relay;
+	let dir: string;
+
+	beforeAll(async () => {
+		dir = mkdtempSync(join(tmpdir(), "relay-accounts-"));
+		relay = await startRelayDev({ port: PORT + 600, persistTo: dir });
+	});
+
+	afterAll(async () => {
+		await relay?.stop();
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("deletes every account and issues a new owner + admin invite for the same workspace", async () => {
+		const first = await bootstrap(relay.url, "Friends");
+		const owner = await acceptInvite(relay.url, first.invite.token, "erin");
+		expect(owner.user.isAdmin).toBe(true);
+		const unused = await bootstrap(relay.url, "Friends").catch((err: unknown) => err);
+		expect(unused).toBeInstanceOf(Error);
+
+		const denied = await request(relay.url, "POST", "/api/auth/bootstrap", {
+			body: { workspaceName: "Friends", reset: true },
+			token: "wrong-token-wrong-token-wrong-token-0",
+		});
+		expect(denied.status).toBe(401);
+
+		const reset = BootstrapResponse.parse(
+			await post(
+				relay.url,
+				"/api/auth/bootstrap",
+				{ workspaceName: "Friends", reset: true },
+				DEV_BOOTSTRAP_TOKEN,
+			),
+		);
+		expect(reset.workspace.id).toBe(first.workspace.id);
+		expect(reset.invite).toMatchObject({ role: "owner", admin: true, maxUses: 1 });
+
+		// The name is free again and the new link makes its holder owner + admin.
+		const again = await acceptInvite(relay.url, reset.invite.token, "erin");
+		expect(again.user.id).not.toBe(owner.user.id);
+		expect(again.user.isAdmin).toBe(true);
+		expect(again.workspaces).toEqual([
+			expect.objectContaining({ id: first.workspace.id, role: "owner" }),
+		]);
+
+		const old = await request(relay.url, "GET", "/api/auth/me", { token: owner.sessionToken });
+		expect(old.status).toBe(401);
 	});
 });

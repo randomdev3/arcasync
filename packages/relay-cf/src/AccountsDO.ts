@@ -646,11 +646,15 @@ export class AccountsDO extends DurableObject<Env> {
 
 	// --- P2 accounts: bootstrap, invites, workspaces ---
 
-	/** One-shot: the first workspace plus a single-use owner + admin invite (D1). */
+	/**
+	 * One-shot: the first workspace plus a single-use owner + admin invite (D1). With `reset`, it
+	 * runs again after deleting every account (see `BootstrapRequest`).
+	 */
 	async bootstrap(
 		token: string | null,
 		workspaceName: string,
 		links: LinkBase,
+		reset = false,
 	): Promise<Result<BootstrapResponse>> {
 		this.calls += 1;
 		const expected = this.env.ARCASYNC_BOOTSTRAP_TOKEN ?? "";
@@ -668,18 +672,20 @@ export class AccountsDO extends DurableObject<Env> {
 		const inviteToken = newOpaqueToken();
 		const inviteHash = await this.hashToken(inviteToken);
 
+		if (reset) this.resetAccounts();
 		if (this.sql.exec("SELECT 1 FROM server_settings WHERE key = 'bootstrapped_at'").toArray()[0]) {
 			return fail(409, "already_bootstrapped", "This server is already bootstrapped");
 		}
 		const now = Date.now();
-		const workspace = this.createWorkspaceRow(workspaceName);
+		const existing = reset ? this.workspaceNamed(workspaceName) : null;
+		const workspace = existing ?? this.createWorkspaceRow(workspaceName);
 		const expiresAt = now + BOOTSTRAP_INVITE_TTL_MS;
 		const inviteId = this.insertInvite(inviteHash, workspace.id, "owner", true, 1, expiresAt, null);
 		this.sql.exec(
 			"INSERT INTO server_settings (key, value) VALUES ('bootstrapped_at', ?)",
 			String(now),
 		);
-		this.audit(null, "bootstrap", workspace.id, { inviteId });
+		this.audit(null, reset ? "bootstrap_reset" : "bootstrap", workspace.id, { inviteId });
 		return ok({
 			workspace,
 			invite: {
@@ -692,6 +698,41 @@ export class AccountsDO extends DurableObject<Env> {
 				expiresAt,
 			},
 		});
+	}
+
+	/** Deletes every account and everything tied to one; workspaces and the audit log stay. */
+	private resetAccounts(): void {
+		this.ctx.storage.transactionSync(() => {
+			for (const table of [
+				"users",
+				"devices",
+				"sessions",
+				"memberships",
+				"invites",
+				"device_codes",
+				"user_passwords",
+				"invite_pins",
+				"pin_failures",
+				"login_failures",
+			]) {
+				this.sql.exec(`DELETE FROM ${table}`);
+			}
+			this.sql.exec(
+				"DELETE FROM server_settings WHERE key IN ('bootstrapped_at', ?)",
+				PINS_LOCKED_UNTIL,
+			);
+		});
+		this.lookups.clear();
+	}
+
+	private workspaceNamed(name: string): (WorkspaceSummary & { role: "owner" }) | null {
+		const row = this.sql
+			.exec<{ id: string; slug: string; name: string }>(
+				"SELECT id, slug, name FROM workspaces WHERE name = ? AND deleted_at IS NULL LIMIT 1",
+				name,
+			)
+			.toArray()[0];
+		return row ? { ...row, role: "owner" } : null;
 	}
 
 	async createInvite(

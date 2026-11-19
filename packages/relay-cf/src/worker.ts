@@ -252,7 +252,10 @@ api.get("/workspaces", async (c) =>
 api.post("/auth/bootstrap", async (c) => {
 	const body = await parseBody(c, BootstrapRequest);
 	if (!body) return badRequest(c);
-	return reply(c, await accounts(c.env).bootstrap(bearer(c), body.workspaceName, links(c)));
+	return reply(
+		c,
+		await accounts(c.env).bootstrap(bearer(c), body.workspaceName, links(c), body.reset === true),
+	);
 });
 
 api.post("/auth/invite/accept", async (c) => {
