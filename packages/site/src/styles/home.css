@@ -104,7 +104,7 @@
 }
 
 .peer--dim::before {
-	background: var(--fg-3);
+	background: var(--fg-2);
 }
 
 .display__screen {
@@ -141,6 +141,10 @@
 
 .still__red {
 	stroke: var(--red);
+}
+
+.still__dim {
+	stroke: var(--fg-2);
 }
 
 .still__lattice {

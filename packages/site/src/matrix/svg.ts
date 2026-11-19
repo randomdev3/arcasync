@@ -4,7 +4,10 @@
  * `.dots` classes (page) or from presentation attributes (standalone files): the CSP allows no
  * inline styles.
  */
-import { paint, RED, stillScene } from "./scene";
+import { paint, stillScene } from "./scene";
+
+/** Class suffix per tone: FG, RED, DIM. */
+const TONES = ["on", "red", "dim"];
 
 /** Radius of a dot as a share of the pitch: unlit, and fully lit. */
 export const R_OFF = 0.17;
@@ -59,7 +62,7 @@ export function sceneSvg(cols: number, rows: number, narrow: boolean, className:
 	for (let i = 0; i < level.length; i++) {
 		const value = level[i] ?? 0;
 		if (value <= 0) continue;
-		const key = `${tone[i] === RED ? "red" : "on"}:${Math.round(value * 100) / 100}`;
+		const key = `${TONES[tone[i] ?? 0] ?? "on"}:${Math.round(value * 100) / 100}`;
 		groups.set(key, (groups.get(key) ?? "") + dot(i % cols, Math.floor(i / cols)));
 	}
 	const id = `lattice-${className}`;

@@ -6,9 +6,11 @@ import {
 	caretX,
 	createScene,
 	LINES,
+	lineTop,
 	MARGIN_X,
 	MIN_COLS,
 	MIN_ROWS,
+	marks,
 	NARROW_CHARS,
 	paint,
 	RED,
@@ -128,11 +130,111 @@ describe("the display's scene", () => {
 		expect(red).toBeLessThan(lit / 4);
 	});
 
-	it("draws the visitor's pointer as a fourth caret", () => {
+	it("draws the visitor's pointer as a fourth caret on the nearest line", () => {
 		const scene = stillScene(150, 51);
 		const before = frame(scene).level.filter((v) => v > 0).length;
 		scene.you = { x: 120, y: 30 };
 		expect(frame(scene).level.filter((v) => v > 0).length).toBeGreaterThan(before + 9);
+		const you = marks(scene).find((m) => m.name === "YOU");
+		expect(you).toMatchObject({ line: 1, lit: true });
+		expect(you?.tagLeft).toBe(you?.x);
+	});
+});
+
+describe("carets and name tags", () => {
+	const TAG_DOTS = 11;
+
+	/** Every rule a frame must keep; returns what it saw, for the coverage checks below. */
+	function check(scene: Scene, claims: Uint8Array, level: Float32Array, tone: Uint8Array) {
+		paint(scene, level, tone, claims);
+		const at = `note ${scene.note} t=${scene.t.toFixed(2)} you=${JSON.stringify(scene.you)}`;
+		// No dot is used by two of: text, a tag, a caret.
+		expect(Math.max(...claims), at).toBeLessThanOrEqual(1);
+		const all = marks(scene);
+		const seen = { tags: 0, hiddenTags: 0, moved: 0 };
+		for (const mark of all) {
+			if (mark.tagLeft === null) continue;
+			seen.tags += 1;
+			// A tag hangs off its own lit caret, starting or ending on the caret's column.
+			expect(mark.x, at).not.toBeNull();
+			expect(mark.lit, at).toBe(true);
+			expect([mark.tagLeft, mark.tagLeft + TAG_DOTS - 1], at).toContain(mark.x);
+			expect(mark.tagLeft, at).toBeGreaterThanOrEqual(0);
+			expect(mark.tagLeft + TAG_DOTS, at).toBeLessThanOrEqual(scene.cols);
+			// It keeps clear of every other tag on its line, and of the text under it.
+			for (const other of all) {
+				if (other === mark || other.tagLeft === null || other.line !== mark.line) continue;
+				const gap = Math.max(mark.tagLeft, other.tagLeft) - Math.min(mark.tagLeft, other.tagLeft);
+				expect(gap, at).toBeGreaterThanOrEqual(TAG_DOTS + 3);
+			}
+			// Under a tag: only its own caret touches it, and nothing but carets is in the row below.
+			const top = lineTop(scene, mark.line);
+			const carets = all.filter((m) => m.line === mark.line).map((m) => m.x);
+			for (let x = mark.tagLeft; x < mark.tagLeft + TAG_DOTS; x++) {
+				if (x !== mark.x) expect(level[(top + 5) * scene.cols + x], at).toBe(0);
+				if (!carets.includes(x)) expect(level[(top + 6) * scene.cols + x], at).toBe(0);
+			}
+		}
+		// Carets never share a column; a follower shows no tag.
+		const spots = all.filter((m) => m.x !== null).map((m) => `${m.line}:${m.x}`);
+		expect(new Set(spots).size, at).toBe(spots.length);
+		scene.peers.forEach((peer) => {
+			const mark = all.find((m) => m.name === peer.name);
+			if (peer.follow >= 0) expect(mark?.tagLeft, at).toBeNull();
+			if (mark && mark.x !== null && mark.x !== caretX(scene, peer.col)) seen.moved += 1;
+			if (mark && peer.follow < 0 && peer.idle < 3 && mark.tagLeft === null) seen.hiddenTags += 1;
+		});
+		return seen;
+	}
+
+	it.each([
+		["a desktop", 150, 51],
+		["a tablet", 114, 51],
+		["a phone", 71, 51],
+		["the smallest phone", 60, 48],
+	])("never collide over two full loops on %s display", (_, cols, rows) => {
+		const scene = createScene(cols, rows);
+		const buffers = [
+			new Uint8Array(cols * rows),
+			new Float32Array(cols * rows),
+			new Uint8Array(cols * rows),
+		] as const;
+		const total = { tags: 0, hiddenTags: 0, moved: 0 };
+		let frames = 0;
+		while (scene.cycles < 4 && frames < 4000) {
+			advance(scene, 1 / 30);
+			const seen = check(scene, ...buffers);
+			total.tags += seen.tags;
+			total.hiddenTags += seen.hiddenTags;
+			total.moved += seen.moved;
+			frames += 1;
+		}
+		expect(scene.cycles).toBe(4);
+		// The rules were exercised: tags were shown, some gave way, and carets stepped aside.
+		expect(total.tags).toBeGreaterThan(frames);
+		expect(total.moved).toBeGreaterThan(30);
+	});
+
+	it("never collide with the visitor's caret, wherever the pointer is", () => {
+		const scene = createScene(150, 51);
+		const buffers = [
+			new Uint8Array(150 * 51),
+			new Float32Array(150 * 51),
+			new Uint8Array(150 * 51),
+		] as const;
+		let step = 0;
+		while (scene.cycles < 2) {
+			advance(scene, 1 / 10);
+			// Sweep the pointer over the whole display, and park it on each caret in turn.
+			const peer = scene.peers[step % 3];
+			scene.you =
+				step % 2 === 0 || !peer
+					? { x: (step * 37) % 150, y: (step * 11) % 51 }
+					: { x: caretX(scene, peer.col), y: lineTop(scene, peer.line) + 10 };
+			check(scene, ...buffers);
+			step += 1;
+		}
+		expect(step).toBeGreaterThan(200);
 	});
 });
 

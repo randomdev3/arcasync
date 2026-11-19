@@ -4,13 +4,15 @@
  * the dots whose brightness changed. The pitch is a whole number of device pixels, which keeps
  * every dot identical.
  */
-import { advance, FG, MIN_COLS, MIN_ROWS, paint, RED, type Scene, stillScene } from "./scene";
+import { advance, DIM, FG, MIN_COLS, MIN_ROWS, paint, RED, type Scene, stillScene } from "./scene";
 import { R_OFF, R_ON } from "./svg";
 
 const LEVELS = 16;
-/** Dots come on at once and go out a touch slower, like a phosphor. */
+/**
+ * Seconds a dot takes to come on. Dots go out at once: anything slower leaves a ghost of a moving
+ * caret or name tag behind it.
+ */
 const RISE = 0.03;
-const FALL = 0.07;
 
 export interface DisplayOptions {
 	reducedMotion: boolean;
@@ -64,6 +66,7 @@ export function createDisplay(
 		const tones: Rgb[] = [];
 		tones[FG] = parseColor(style.getPropertyValue("--fg"), [240, 240, 236]);
 		tones[RED] = parseColor(style.getPropertyValue("--red"), [255, 59, 47]);
+		tones[DIM] = parseColor(style.getPropertyValue("--fg-2"), [163, 163, 159]);
 		atlas = document.createElement("canvas");
 		atlas.width = pitch * LEVELS;
 		atlas.height = pitch * tones.length;
@@ -91,13 +94,12 @@ export function createDisplay(
 		if (!scene || !atlas) return;
 		paint(scene, target, tone);
 		const up = snap ? 1 : 1 - Math.exp(-dt / RISE);
-		const down = snap ? 1 : 1 - Math.exp(-dt / FALL);
 		const { cols } = scene;
 		for (let i = 0; i < target.length; i++) {
 			const want = target[i] ?? 0;
 			const have = shown[i] ?? 0;
 			if (want > 0) shownTone[i] = tone[i] ?? FG;
-			const next = have + (want - have) * (want > have ? up : down);
+			const next = want > have ? have + (want - have) * up : want;
 			shown[i] = next;
 			const level = Math.round(next * (LEVELS - 1));
 			const key = level + (shownTone[i] ?? 0) * LEVELS;
@@ -181,7 +183,7 @@ export function createDisplay(
 		const scale = scene.cols / box.width;
 		scene.you = {
 			x: Math.floor((event.clientX - box.left) * scale),
-			y: Math.max(11, Math.floor((event.clientY - box.top) * scale)),
+			y: Math.floor((event.clientY - box.top) * scale),
 		};
 		status = "";
 	}

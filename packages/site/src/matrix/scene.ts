@@ -7,8 +7,16 @@ import { GLYPH_H, GLYPH_W, GLYPHS, TAG_H, TAG_W, TAGS } from "./glyphs";
 
 /** One character cell: the glyph plus a blank column. */
 export const CELL = GLYPH_W + 1;
-/** Rows a line takes: name tag (5), caret top (1), glyph (7), caret bottom (1), gap (1). */
-export const LINE_ROWS = TAG_H + GLYPH_H + 3;
+/**
+ * Rows a line takes: name tag (5), two clear rows, glyph (7), one row under it, one clear row.
+ * The caret is a pole from under its tag to under the text, so a tag hangs off its own caret and
+ * never comes within two dots of the text below it.
+ */
+export const LINE_ROWS = TAG_H + GLYPH_H + 4;
+/** Rows from a line's top to its glyphs. */
+const GLYPH_TOP = TAG_H + 2;
+/** Dots in a caret. */
+export const CARET_H = GLYPH_H + 3;
 export const LINES = 3;
 export const MARGIN_X = 3;
 /** Fewest rows and columns the scene fits in. */
@@ -26,6 +34,8 @@ export const STILL_T = 7;
 
 export const FG = 0;
 export const RED = 1;
+/** The third peer's grey. */
+export const DIM = 2;
 
 type Op =
 	| { k: "until"; t: number }
@@ -40,8 +50,6 @@ type Op =
 export interface Peer {
 	name: string;
 	tone: number;
-	/** Brightness of this peer's caret and tag (the third peer is grey). */
-	gain: number;
 	line: number;
 	col: number;
 	/** Seconds since this peer last acted. */
@@ -74,7 +82,7 @@ export interface Scene {
 	cycles: number;
 	/** What is happening, for the label over the display. */
 	status: string;
-	/** The visitor's pointer as a fourth caret, in cells. */
+	/** The visitor's pointer, in dots; it becomes a fourth caret on the nearest line. */
 	you: { x: number; y: number } | null;
 	seed: number;
 }
@@ -173,12 +181,11 @@ export function createScene(cols: number, rows: number, options: SceneOptions = 
 		narrow: options.narrow ?? chars < WIDE_CHARS,
 		x0: MARGIN_X,
 		// Centre the three lines of text, not their tag rows.
-		y0: Math.max(0, Math.min(rows - MIN_ROWS, Math.floor((rows - TEXT_ROWS) / 2) - TAG_H - 1)),
+		y0: Math.max(0, Math.min(rows - MIN_ROWS, Math.floor((rows - TEXT_ROWS) / 2) - GLYPH_TOP)),
 		text: Array.from({ length: LINES }, () => ""),
 		peers: NAMES.map((name, i) => ({
 			name,
-			tone: i === ANA ? RED : FG,
-			gain: i === SOL ? 0.62 : 1,
+			tone: i === ANA ? RED : i === SOL ? DIM : FG,
 			line: i,
 			col: 0,
 			idle: 99,
@@ -282,22 +289,17 @@ function step(scene: Scene, peer: Peer, dt: number): void {
 				if (peer.done < op.n) return;
 				peer.done = 0;
 				break;
-			case "select": {
+			case "select":
+				// The whole line at once, as a triple click would: the caret and its tag move once.
 				peer.doing = "selecting";
-				peer.sel ??= { from: peer.col, to: peer.col };
-				if (peer.acc < 0.04) return;
-				peer.acc -= 0.04;
+				peer.sel = { from: 0, to: peer.col };
+				peer.col = 0;
 				peer.idle = 0;
-				if (peer.sel.from > 0) {
-					peer.sel.from -= 1;
-					peer.col = peer.sel.from;
-					return;
-				}
+				peer.acc = 0;
 				break;
-			}
 			case "cut":
 				peer.doing = "selecting";
-				if (peer.acc < 0.45) return;
+				if (peer.acc < 0.7) return;
 				peer.acc = 0;
 				if (peer.sel) remove(scene, peer.line, peer.sel.from, peer.sel.to);
 				peer.sel = null;
@@ -352,14 +354,110 @@ export const lineTop = (scene: Scene, line: number) => scene.y0 + line * LINE_RO
 /** The dot column of the caret before character `col`. */
 export const caretX = (scene: Scene, col: number) => scene.x0 + col * CELL - 1;
 
+/** Where one caret and its name tag are drawn. */
+export interface Mark {
+	name: string;
+	tone: number;
+	line: number;
+	/** The caret's dot column, or null when another caret already has its place. */
+	x: number | null;
+	/** The tag's first dot column, or null when it has no tag. */
+	tagLeft: number | null;
+	/** With a tag up the caret stays lit; otherwise it blinks. */
+	lit: boolean;
+}
+
+const tagWidth = (name: string) => name.length * (TAG_W + 1) - 1;
+/** Dots kept clear between two tags on a line. */
+const TAG_GAP = 3;
+
+/**
+ * Places every caret and tag so that none shares a dot with another or with the text:
+ * - a tag sits in the gap above its line, starting at its own caret (or ending at it when it
+ *   would run off the display or into another tag), and is dropped if neither side is free;
+ * - a caret with a tag stays lit, so no tag is ever left without its caret;
+ * - carets on the same spot: the first keeps it, the next moves one dot into free space (or is
+ *   not drawn inside text); a follower never shows a tag while it sits on its leader.
+ */
+export function marks(scene: Scene): Mark[] {
+	const holders = scene.peers.map((peer, index) => ({
+		name: peer.name as string,
+		tone: peer.tone,
+		line: peer.line,
+		col: peer.col,
+		following: peer.follow >= 0,
+		wantsTag: peer.follow < 0 && peer.idle < TAG_HOLD,
+		blinkOn: peer.idle < 0.5 || (scene.t + index * 0.37) % 1.1 < 0.62,
+		// The visitor first, then leaders before followers, then whoever acted last.
+		rank: (peer.follow >= 0 ? 1000 : 0) + Math.min(peer.idle, 900) + index / 10,
+	}));
+	if (scene.you) {
+		const maxCol = Math.floor((scene.cols - 1 - scene.x0) / CELL);
+		const line = Math.round((scene.you.y - scene.y0 - GLYPH_TOP - (GLYPH_H - 1) / 2) / LINE_ROWS);
+		holders.push({
+			name: "YOU",
+			tone: FG,
+			line: Math.max(0, Math.min(LINES - 1, line)),
+			col: Math.max(0, Math.min(maxCol, Math.round((scene.you.x - scene.x0 + 1) / CELL))),
+			following: false,
+			wantsTag: true,
+			blinkOn: true,
+			rank: -1,
+		});
+	}
+	holders.sort((a, b) => a.rank - b.rank);
+
+	const out: Mark[] = [];
+	const carets = new Set<string>();
+	const tags: { line: number; left: number; right: number }[] = [];
+	for (const holder of holders) {
+		const base = caretX(scene, holder.col);
+		const length = (scene.text[holder.line] ?? "").length;
+		// Free dots beside this spot: to the right past the end of the line, to the left before it.
+		const step = holder.col >= length ? 1 : holder.col === 0 ? -1 : 0;
+		let x: number | null = base;
+		while (x !== null && carets.has(`${holder.line}:${x}`)) {
+			x = step === 0 || x + step < 0 || x + step >= scene.cols ? null : x + step;
+		}
+		if (x !== null) carets.add(`${holder.line}:${x}`);
+
+		let tagLeft: number | null = null;
+		if (x !== null && holder.wantsTag) {
+			const width = tagWidth(holder.name);
+			const free = (left: number) =>
+				left >= 0 &&
+				left + width <= scene.cols &&
+				!tags.some(
+					(t) =>
+						t.line === holder.line &&
+						left <= t.right + TAG_GAP &&
+						left + width - 1 >= t.left - TAG_GAP,
+				);
+			tagLeft = [x, x - width + 1].find(free) ?? null;
+			if (tagLeft !== null)
+				tags.push({ line: holder.line, left: tagLeft, right: tagLeft + width - 1 });
+		}
+		out.push({
+			name: holder.name,
+			tone: holder.tone,
+			line: holder.line,
+			x,
+			tagLeft,
+			lit: tagLeft !== null || holder.blinkOn,
+		});
+	}
+	return out;
+}
+
+/** Lights the dots of `glyph`; `claims` counts how many solid things use each dot. */
 function stamp(
 	scene: Scene,
 	level: Float32Array,
 	tone: Uint8Array,
+	claims: Uint8Array | undefined,
 	glyph: string[] | undefined,
 	x: number,
 	y: number,
-	value: number,
 	color: number,
 ): void {
 	if (!glyph) return;
@@ -371,92 +469,61 @@ function stamp(
 			const cx = x + gx;
 			if (row[gx] === "." || cx < 0 || cx >= scene.cols) continue;
 			const i = cy * scene.cols + cx;
-			if (value >= (level[i] ?? 0)) {
-				level[i] = value;
-				tone[i] = color;
-			}
+			level[i] = 1;
+			tone[i] = color;
+			if (claims) claims[i] = (claims[i] ?? 0) + 1;
 		}
 	}
 }
 
-function bar(
-	scene: Scene,
-	level: Float32Array,
-	tone: Uint8Array,
-	x: number,
-	y: number,
-	height: number,
-	value: number,
-	color: number,
-): void {
-	if (x < 0 || x >= scene.cols) return;
-	for (let cy = Math.max(0, y); cy < Math.min(scene.rows, y + height); cy++) {
-		level[cy * scene.cols + x] = value;
-		tone[cy * scene.cols + x] = color;
-	}
-}
-
-function tag(
-	scene: Scene,
-	level: Float32Array,
-	tone: Uint8Array,
-	name: string,
-	x: number,
-	y: number,
-	value: number,
-	color: number,
-	endAt: boolean,
-): void {
-	const width = name.length * (TAG_W + 1) - 1;
-	let left = endAt ? x - width + 1 : x;
-	left = Math.max(0, Math.min(scene.cols - width, left));
-	[...name].forEach((ch, i) => {
-		stamp(scene, level, tone, TAGS[ch], left + i * (TAG_W + 1), y, value, color);
-	});
-}
-
 /**
- * Writes what the display should show into `level` (0 unlit to 1 lit, per dot) and `tone` (FG or
- * RED). Both are `cols × rows`.
+ * Writes what the display should show into `level` (0 unlit to 1 lit, per dot) and `tone` (FG,
+ * RED or DIM). Both are `cols × rows`. `claims`, for tests, counts the text, tags and carets on
+ * each dot: more than one means two of them collide.
  */
-export function paint(scene: Scene, level: Float32Array, tone: Uint8Array): void {
+export function paint(
+	scene: Scene,
+	level: Float32Array,
+	tone: Uint8Array,
+	claims?: Uint8Array,
+): void {
 	level.fill(0);
 	tone.fill(FG);
+	claims?.fill(0);
 	for (let line = 0; line < LINES; line++) {
-		const y = lineTop(scene, line) + TAG_H + 1;
+		const y = lineTop(scene, line) + GLYPH_TOP;
 		[...(scene.text[line] ?? "")].forEach((ch, i) => {
-			stamp(scene, level, tone, GLYPHS[ch], scene.x0 + i * CELL, y, 1, FG);
+			stamp(scene, level, tone, claims, GLYPHS[ch], scene.x0 + i * CELL, y, FG);
 		});
 	}
+	// A selection raises the unlit dots under it; the text on it stays as it is.
 	for (const peer of scene.peers) {
 		if (!peer.sel) continue;
-		const y = lineTop(scene, peer.line) + TAG_H;
-		for (let x = caretX(scene, peer.sel.from); x < caretX(scene, peer.sel.to); x++) {
-			for (let cy = y; cy < y + GLYPH_H + 2; cy++) {
+		const y = lineTop(scene, peer.line) + GLYPH_TOP;
+		for (let x = caretX(scene, peer.sel.from) + 1; x < caretX(scene, peer.sel.to); x++) {
+			for (let cy = y; cy < y + GLYPH_H + 1; cy++) {
 				const i = cy * scene.cols + x;
 				if (x >= 0 && x < scene.cols && cy < scene.rows && (level[i] ?? 0) === 0) {
-					level[i] = 0.3 * peer.gain;
+					level[i] = 0.3;
 					tone[i] = peer.tone;
 				}
 			}
 		}
 	}
-	scene.peers.forEach((peer, index) => {
-		// A follower's caret sits right beside the one it follows, its tag on the other side.
-		const following = peer.follow >= 0;
-		const x = caretX(scene, peer.col) + (following ? 1 : 0);
-		const top = lineTop(scene, peer.line);
-		const blink = peer.idle < 0.5 || (scene.t + index * 0.37) % 1.1 < 0.62;
-		if (blink) bar(scene, level, tone, x, top + TAG_H, GLYPH_H + 2, peer.gain, peer.tone);
-		const shown = Math.max(0, Math.min(1, (TAG_HOLD - peer.idle) / 0.4));
-		if (shown > 0) {
-			const at = following ? x - 5 : x;
-			tag(scene, level, tone, peer.name, at, top, peer.gain * shown, peer.tone, following);
+	const bar = Array<string>(CARET_H).fill("#");
+	for (const mark of marks(scene)) {
+		const top = lineTop(scene, mark.line);
+		if (mark.x !== null && mark.lit) {
+			// A caret grows one dot to reach its tag; without one it stops a row short of the tag
+			// gap, so it never looks attached to somebody else's tag.
+			const reach = mark.tagLeft === null ? 1 : 0;
+			stamp(scene, level, tone, claims, bar.slice(reach), mark.x, top + TAG_H + reach, mark.tone);
 		}
-	});
-	if (scene.you) {
-		const { x, y } = scene.you;
-		bar(scene, level, tone, x, y - 4, GLYPH_H + 2, 1, FG);
-		tag(scene, level, tone, "YOU", x, y - 4 - TAG_H - 1, 1, FG, false);
+		if (mark.tagLeft !== null) {
+			[...mark.name].forEach((ch, i) => {
+				const x = (mark.tagLeft ?? 0) + i * (TAG_W + 1);
+				stamp(scene, level, tone, claims, TAGS[ch], x, top, mark.tone);
+			});
+		}
 	}
 }
