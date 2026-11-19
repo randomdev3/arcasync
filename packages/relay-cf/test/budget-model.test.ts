@@ -1,3 +1,4 @@
+import { BULK_CLONE_MIN_DOCS, CLONE_MAX_BYTES, CLONE_MAX_DOCS } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import {
 	awakeGbSeconds,
@@ -8,6 +9,7 @@ import {
 	type Component,
 	components,
 	doRequests,
+	ESTIMATED_UNITS,
 	FREE_CAPS,
 	gate,
 	overBudget,
@@ -61,6 +63,12 @@ const P2_FIELDS: Record<string, Array<keyof Component>> = {
 	"Binary downloads (every peer)": ["workerRequests", "r2ClassB"],
 	"New-device clone, notes": ["requests", "rowsRead", "workerRequests", "wakeEvents"],
 	"New-device clone, binaries": ["workerRequests", "r2ClassB"],
+	"Returning-device clone (notes behind at session start)": [
+		"requests",
+		"rowsRead",
+		"workerRequests",
+		"wakeEvents",
+	],
 	"Files projection (files listings)": [
 		"requests",
 		"rowsWritten",
@@ -211,5 +219,82 @@ describe("budget model, P2", () => {
 		expect(c.usage.rowsWritten).toBe(b.usage.rowsWritten);
 		// The second workspace is a separate object, so it adds its own awake time.
 		expect(c.awakeGbSeconds - b.awakeGbSeconds).toBeGreaterThan(1000);
+	});
+
+	it("P2-13 lane evidence: device login, account ops and revocation REST calls", () => {
+		expect(ESTIMATED_UNITS).toEqual({
+			rowsPerDeviceLogin: 7,
+			rowsPerAccountOp: 3,
+			restCallsPerRevocation: 4,
+		});
+		const units = { ...PLAN_UNITS, ...ESTIMATED_UNITS };
+		const byName = (name: string) => {
+			const c = components(units).find((x) => x.name === name);
+			if (!c) throw new Error(`missing ${name}`);
+			return c;
+		};
+		const device = byName("Device-code sign-in (start, polls, lookup, approve)");
+		// start + 120 polls (the last one succeeds) + lookup + approve.
+		expect(device.requests).toBe(123);
+		expect(device.rowsWritten).toBe(7);
+		const revocations = byName("Revocations (RPC, row, affected reconnect)");
+		// RPC + upgrade + 2 workspace lists + 2 ws-token mints, per revocation.
+		expect(revocations.requests).toBe(TEAM.revocationsPerDay * 6);
+		expect(revocations.workerRequests).toBe(TEAM.revocationsPerDay * 5);
+		expect(revocations.accountsEvents).toBe(TEAM.revocationsPerDay * 4);
+	});
+
+	it("binaries cost one PUT and one GET per chunk; conflict copies are uploads", () => {
+		const list = components(PLAN_UNITS);
+		const uploads = TEAM.users * TEAM.binariesPerUserDay + TEAM.binaryConflictCopiesPerDay;
+		const chunks = uploads * TEAM.binaryChunksPerFile;
+		expect(list.find((c) => c.name.startsWith("Binary uploads"))?.r2ClassA).toBe(chunks);
+		expect(list.find((c) => c.name.startsWith("Binary downloads"))?.r2ClassB).toBe(
+			chunks * (TEAM.users - 1),
+		);
+		const single = { ...TEAM, binaryChunksPerFile: 1, binaryConflictCopiesPerDay: 0 };
+		const one = components(PLAN_UNITS, single).find((c) => c.name.startsWith("Binary uploads"));
+		expect(one?.r2ClassA).toBe(TEAM.users * TEAM.binariesPerUserDay);
+	});
+
+	it("returning devices bulk-clone the notes they are behind on, besides the catch-up", () => {
+		const returning = (t = TEAM, u = PLAN_UNITS) =>
+			components(u, t).find((c) => c.name.startsWith("Returning-device clone"));
+		const sessions = TEAM.users * TEAM.sessionsPerUserDay;
+		expect(returning()?.requests).toBe(
+			sessions * Math.ceil(TEAM.distinctNotesPerDay / CLONE_MAX_DOCS),
+		);
+		expect(returning()?.rowsRead).toBe(
+			sessions * TEAM.distinctNotesPerDay * (TEAM.tailRowsMax + 1),
+		);
+		const few = { ...TEAM, distinctNotesPerDay: BULK_CLONE_MIN_DOCS - 1 };
+		expect(returning(few)?.requests).toBe(0);
+		expect(
+			components(PLAN_UNITS).find((c) => c.name === "Background catch-up of closed notes")?.msgs,
+		).toBeGreaterThan(0);
+	});
+
+	it("a clone page holds the measured docs unless the grown states hit CLONE_MAX_BYTES", () => {
+		const newDevice = (t = TEAM, u = PLAN_UNITS) =>
+			components(u, t).find((c) => c.name === "New-device clone, notes")?.requests;
+		expect(newDevice()).toBe(TEAM.notesPerWorkspace / CLONE_MAX_DOCS);
+		expect(newDevice(TEAM, { ...PLAN_UNITS, cloneDocsPerRequest: 50 })).toBe(
+			TEAM.notesPerWorkspace / 50,
+		);
+		const big = { ...TEAM, avgNoteBytes: CLONE_MAX_BYTES / (10 * TEAM.stateGrowthFactor) };
+		expect(newDevice(big)).toBe(TEAM.notesPerWorkspace / 10);
+	});
+
+	it("projection rows scale with the changed entries plus the unchanged listings", () => {
+		const rows = (u = PLAN_UNITS) =>
+			components(u).find((c) => c.name === "Files projection (files listings)")?.rowsWritten;
+		expect(rows()).toBe(TEAM.projectionChangedRows);
+		expect(
+			rows({ ...PLAN_UNITS, projectionRowsPerChangedEntry: 2, projectionRowsUnchanged: 1 }),
+		).toBe(2 * TEAM.projectionChangedRows + TEAM.projectionsPerDay);
+	});
+
+	it("the estimated units keep every scenario within the budget", () => {
+		for (const r of gate({ ...PLAN_UNITS, ...ESTIMATED_UNITS })) expect(r.over, r.name).toEqual([]);
 	});
 });

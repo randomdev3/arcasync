@@ -7,8 +7,10 @@
  * Measures the unit costs with real providers and the plugin's v2 options (flushDelay, text
  * keepalive, presence policy, cursor awareness) from `/api/debug/stats` deltas, against a fresh
  * `wrangler dev --env dev` or `--url`. Multiplies them by the activity in `budget-model.ts`, prints
- * scenarios A, B and C, and exits 1 when any free cap exceeds 50% in any of them. Units without a
- * measurement yet (the P2 ones until P2-13) use the analytic `PLAN_UNITS`. `--baseline` also fails when a
+ * scenarios A, B and C, and exits 1 when any free cap exceeds 50% in any of them. The P2 units it
+ * measures are the bulk-clone page, the `files` projection rows and the AccountsDO calls per
+ * device-code login; the ones it cannot measure come from `ESTIMATED_UNITS` (lane evidence and a
+ * code audit), and the rest from the analytic `PLAN_UNITS`. `--baseline` also fails when a
  * unit differs by more than 25% from a saved run (R-9: deployment vs local). `--live` then runs
  * simulated clients against the relay and compares the measured deltas with the model.
  */
@@ -17,8 +19,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
+	CLONE_MAX_DOCS,
+	DeviceCodeResponse,
+	decodeClone,
 	docName,
+	type FileMeta,
 	FLUSH_DELAY_MS,
+	INDEX_FILES,
 	KEEPALIVE_INTERVAL_MS,
 	KEEPALIVE_RECONNECT_TIMEOUT_MS,
 	PRESENCE_IDLE_RENEWAL_MS,
@@ -27,7 +34,10 @@ import {
 import {
 	type ClientOptions,
 	client,
+	device,
+	get,
 	login,
+	post,
 	type RelayStats,
 	resetStats,
 	sleep,
@@ -39,6 +49,7 @@ import {
 	BUDGET_FRACTION,
 	type Cap,
 	doRequests,
+	ESTIMATED_UNITS,
 	FREE_CAPS,
 	gate,
 	PLAN_UNITS,
@@ -229,7 +240,114 @@ async function compaction(updates: number): Promise<RelayStats> {
 	});
 }
 
-/** Units `measureUnits` measures; the rest come from `PLAN_UNITS`. */
+/** POST `body` with the workspace JWT as bearer; returns the raw response. */
+async function bearerPost(path: string, body: unknown): Promise<Response> {
+	return fetch(`${base}${path}`, {
+		method: "POST",
+		headers: { authorization: `Bearer ${await alice.token()}`, "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
+
+/**
+ * Bulk clone of `CLONE_MAX_DOCS` notes of `avgNoteBytes` each: docs per response, and no WS
+ * messages or rows (P2-13). Stays far below the clone limiter's 10-request bucket.
+ */
+async function cloneDocs(): Promise<{ docsPerRequest: number; requests: number }> {
+	const docs: string[] = [];
+	const s = await phase(`bulk clone of ${CLONE_MAX_DOCS} notes`, async (spawn) => {
+		const c = spawn({});
+		for (let i = 0; i < CLONE_MAX_DOCS; i++) {
+			const doc = note(`clone-${i}`);
+			const { document, provider } = await c.open(doc, alice.token);
+			document.getText("body").insert(0, `${i} `.padEnd(TEAM.avgNoteBytes, "c"));
+			await waitFor(() => !provider.hasUnsyncedChanges, { label: `clone note ${i} acked` });
+			docs.push(doc);
+		}
+		await sleep(SETTLE_MS);
+		await reset();
+		let pending = docs.map((doc) => ({ doc }));
+		for (let page = 0; pending.length > 0; page++) {
+			if (page >= 5) throw new Error("bulk clone did not finish in 5 requests");
+			const res = await bearerPost(`/api/workspaces/${ws}/docs`, { docs: pending });
+			if (!res.ok) throw new Error(`bulk clone answered ${res.status}`);
+			const { remaining } = decodeClone(new Uint8Array(await res.arrayBuffer()));
+			pending = remaining.map((doc) => ({ doc }));
+		}
+	});
+	if (s.msgs_in !== 0 || s.app_rows_written !== 0) {
+		throw new Error(`bulk clone cost ${s.msgs_in} messages and ${s.app_rows_written} rows`);
+	}
+	return { docsPerRequest: s.clone_docs / s.clone_requests, requests: s.clone_requests };
+}
+
+/** Rows one `files` listing writes: unchanged, then after `changed` index entries changed. */
+async function projection(entries: number, changed: number) {
+	let unchanged = -1;
+	const listFiles = async () => {
+		const res = await fetch(`${base}/api/workspaces/${ws}/files`, {
+			headers: { authorization: `Bearer ${await alice.token()}` },
+		});
+		if (!res.ok) throw new Error(`files listing answered ${res.status}`);
+	};
+	const s = await phase(
+		`files projection, ${changed} of ${entries} entries changed`,
+		async (spawn) => {
+			const idx = await spawn({}).open(index(), alice.token);
+			const files = idx.document.getMap<FileMeta>(INDEX_FILES);
+			const meta = (i: number, at: number): FileMeta => ({
+				id: `b${RUN}-proj-${i}`,
+				kind: "md",
+				updatedBy: alice.session.user.id,
+				updatedAt: at,
+			});
+			idx.document.transact(() => {
+				for (let i = 0; i < entries; i++) files.set(`Projection/${i}.md`, meta(i, 1));
+			});
+			await waitFor(() => !idx.provider.hasUnsyncedChanges, { label: "index entries acked" });
+			await sleep(SETTLE_MS);
+			await listFiles();
+			await reset();
+			await listFiles();
+			unchanged = (await stats(base, ws)).app_rows_written;
+			idx.document.transact(() => {
+				for (let i = 0; i < changed; i++) files.set(`Projection/${i}.md`, meta(i, 2));
+			});
+			await waitFor(() => !idx.provider.hasUnsyncedChanges, { label: "changed entries acked" });
+			await sleep(SETTLE_MS);
+			await reset();
+			await listFiles();
+		},
+	);
+	return { unchanged, perChanged: s.app_rows_written / changed };
+}
+
+/** AccountsDO calls for one device-code login that is approved before its first poll. */
+async function deviceLogin(): Promise<number> {
+	const calls = async () => ((await get(base, "/api/debug/accounts")) as { calls: number }).calls;
+	const before = await calls();
+	const code = DeviceCodeResponse.parse(
+		await post(base, "/api/auth/device/start", { device: device(`budget-${RUN}`) }),
+	);
+	const sessionToken = alice.session.sessionToken;
+	await get(
+		base,
+		`/api/auth/device/lookup?userCode=${encodeURIComponent(code.userCode)}`,
+		sessionToken,
+	);
+	await post(
+		base,
+		"/api/auth/device/approve",
+		{ userCode: code.userCode, approve: true },
+		sessionToken,
+	);
+	await post(base, "/api/auth/device/poll", { deviceCode: code.deviceCode });
+	const n = (await calls()) - before;
+	process.stderr.write(`  device-code login: ${n} AccountsDO calls\n`);
+	return n;
+}
+
+/** Units `measureUnits` measures; the rest come from `ESTIMATED_UNITS` or `PLAN_UNITS`. */
 const MEASURED = new Set<keyof Units>();
 
 async function measureUnits(): Promise<Units> {
@@ -244,6 +362,8 @@ async function measureUnits(): Promise<Units> {
 	if (connect.connects !== 1) throw new Error(`reconnect phase saw ${connect.connects} connects`);
 	const updates = 1200;
 	const compact = await compaction(updates);
+	const clone = await cloneDocs();
+	const files = await projection(50, 10);
 	const measured = {
 		updateMsgsPerKey: plain.msgs_in / KEYS,
 		awarenessMsgsPerKey: Math.max(0, withCursor.msgs_in - plain.msgs_in) / KEYS,
@@ -257,9 +377,13 @@ async function measureUnits(): Promise<Units> {
 		framesPerConnect: connect.msgs_in,
 		compactionRowsPerLogRow: (compact.app_rows_written - updates) / updates,
 		compactionInsertsPerLogRow: compact.compactions / updates,
+		cloneDocsPerRequest: clone.docsPerRequest,
+		projectionRowsPerChangedEntry: files.perChanged,
+		projectionRowsUnchanged: files.unchanged,
+		accountsCallsPerDeviceLogin: await deviceLogin(),
 	} satisfies Partial<Units>;
 	for (const key of Object.keys(measured) as Array<keyof Units>) MEASURED.add(key);
-	return { ...PLAN_UNITS, ...measured };
+	return { ...PLAN_UNITS, ...ESTIMATED_UNITS, ...measured };
 }
 
 /** Simulated team against the relay: compares measured deltas with the model's prediction. */
@@ -324,10 +448,15 @@ function report(units: Units): boolean {
 			`GB_S_MODEL=${BILLING.GB_S_MODEL} (${BILLING.ACTIVE_SEC_PER_REQUEST * 1000} ms per request). ` +
 			`Team: ${TEAM.users} users, ${fmt(TEAM.keysPerUserDay)} keys/user/day.\n`,
 	);
-	console.log("| Unit | This run | Plan |\n|---|---|---|");
+	console.log("| Unit | Value | Source | Plan |\n|---|---|---|---|");
 	for (const key of Object.keys(units) as Array<keyof Units>) {
-		const value = MEASURED.has(key) ? units[key].toFixed(3) : "(analytic)";
-		console.log(`| ${key} | ${value} | ${PLAN_UNITS[key]} |`);
+		const source = MEASURED.has(key)
+			? "measured"
+			: key in ESTIMATED_UNITS
+				? "estimated (lanes, code audit)"
+				: "plan (analytic)";
+		const value = MEASURED.has(key) ? units[key].toFixed(3) : String(units[key]);
+		console.log(`| ${key} | ${value} | ${source} | ${PLAN_UNITS[key]} |`);
 	}
 
 	const results = gate(units);

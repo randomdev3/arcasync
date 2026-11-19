@@ -5,7 +5,7 @@
  * Hard rule: any new background traffic (a periodic message, a timer, a per-event row) gets a
  * component here in the same branch.
  */
-import { CLONE_MAX_DOCS } from "@arcasync/shared";
+import { BULK_CLONE_MIN_DOCS, CLONE_MAX_BYTES, CLONE_MAX_DOCS } from "@arcasync/shared";
 
 /**
  * Billing semantics, from the R-9 probe on a free-plan account (2026-11-19). These are the counts
@@ -106,7 +106,17 @@ export const TEAM = {
 	workspacesPerUser: 1,
 	/** Attachments added per user per day (P2 assumption 2), each read once by every peer. */
 	binariesPerUserDay: 5,
-	binaryChunksPerFile: 1,
+	/**
+	 * Average 4 MiB chunks per attachment. P2-11 lane: a file over `CHUNK_BYTES` costs one PUT and
+	 * one GET per chunk (the 9 MiB attachments e2e file = 3), so 2 covers a mix with some large
+	 * files rather than the plan's 1 (assumption).
+	 */
+	binaryChunksPerFile: 2,
+	/**
+	 * Offline binary edits that lose last-writer-wins and are kept as a conflict copy, which is
+	 * one more full upload (P2-11 lane). Assumption: one in ten uploads.
+	 */
+	binaryConflictCopiesPerDay: 5,
 	/** New devices per day that clone the whole workspace. */
 	newDevicesPerDay: 1,
 	notesPerWorkspace: 1000,
@@ -159,6 +169,19 @@ export interface Units {
 	rowsPerInviteAccept: number;
 	/** WorkspaceRelay rows written per revocation (`revocations`). */
 	rowsPerRevocation: number;
+	/**
+	 * Client REST calls (each a Worker and an AccountsDO request) per revocation the affected
+	 * client sees: `GET /api/workspaces` and ws-token mints after the 4401 close.
+	 */
+	restCallsPerRevocation: number;
+	/** AccountsDO calls per device-code login besides the pending polls (start, lookup, approve, the successful poll). */
+	accountsCallsPerDeviceLogin: number;
+	/** Docs per bulk-clone response (`CLONE_MAX_DOCS` unless `CLONE_MAX_BYTES` cuts the page). */
+	cloneDocsPerRequest: number;
+	/** `files` rows a projection writes per changed index entry. */
+	projectionRowsPerChangedEntry: number;
+	/** `files` rows a projection writes when nothing changed. */
+	projectionRowsUnchanged: number;
 	/** Index-doc messages (and log rows) per binary upload (the `files` meta update). */
 	indexMsgsPerBinaryUpload: number;
 	/** `missing` calls per binary upload (before the PUT, and the re-check after the meta ack). */
@@ -183,15 +206,42 @@ export const PLAN_UNITS: Units = {
 	framesPerConnect: 10,
 	compactionRowsPerLogRow: 0.84,
 	compactionInsertsPerLogRow: 0.002,
-	// P2, analytic until P2-13 measures them.
+	// P2 plan "Budget additions" (analytic).
 	rowsPerDeviceLogin: 4,
 	rowsPerAccountOp: 2,
 	rowsPerInviteAccept: 6,
 	rowsPerRevocation: 1,
+	restCallsPerRevocation: 1,
+	accountsCallsPerDeviceLogin: 4,
+	cloneDocsPerRequest: CLONE_MAX_DOCS,
+	projectionRowsPerChangedEntry: 1,
+	projectionRowsUnchanged: 0,
 	indexMsgsPerBinaryUpload: 1,
 	missingCallsPerUpload: 2,
 	gcRunsPerDay: 1,
 	gcListsPerRun: 2,
+};
+
+/**
+ * P2 units `budget.ts` cannot measure (AccountsDO has no rows counter, and the client-side costs
+ * are the plugin's, not the test clients'). Set from the P2 lanes' evidence and a code audit
+ * (P2-13); they replace the plan's figures. `budget.ts` measures the rest.
+ */
+export const ESTIMATED_UNITS: Partial<Units> = {
+	/**
+	 * AccountsDO `deviceStart` inserts the code, `deviceApprove` updates it and writes an audit row,
+	 * the successful `devicePoll` inserts the device and the session and marks the code used, and
+	 * the next `deviceStart` deletes the spent code: 7 (P2-9 lane: 6–7; the plan said 4).
+	 */
+	rowsPerDeviceLogin: 7,
+	/** The change plus its audit row; workspace create and enable (re-entry invite) write 3. */
+	rowsPerAccountOp: 3,
+	/**
+	 * P2-10 lane: after a 4401 the client re-reads `GET /api/workspaces` once (twice on removal)
+	 * and mints one ws-token; a refused stale JWT (or a chunk/clone 401) costs one more mint.
+	 * Worst case 2 + 1 + 1.
+	 */
+	restCallsPerRevocation: 4,
 };
 
 export interface Component {
@@ -229,11 +279,28 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 	const opens = t.users * t.opensPerUserDay;
 	const bgOpens = t.distinctNotesPerDay * (t.users - 1);
 	const rest = t.users * t.restCallsPerUserDay;
-	const uploads = t.users * t.binariesPerUserDay;
+	const uploads = t.users * t.binariesPerUserDay + t.binaryConflictCopiesPerDay;
 	const uploadChunks = uploads * t.binaryChunksPerFile;
 	const cloneChunks = t.newDevicesPerDay * t.binariesPerWorkspace * t.binaryChunksPerFile;
-	const cloneRequests = t.newDevicesPerDay * Math.ceil(t.notesPerWorkspace / CLONE_MAX_DOCS);
-	const deviceRequests = t.deviceLoginsPerDay * (1 + t.devicePollsPerLogin + 2);
+	/** A page holds `cloneDocsPerRequest` docs unless their grown states hit `CLONE_MAX_BYTES`. */
+	const docsPerPage = Math.max(
+		1,
+		Math.min(
+			u.cloneDocsPerRequest,
+			Math.floor(CLONE_MAX_BYTES / (t.avgNoteBytes * t.stateGrowthFactor)),
+		),
+	);
+	const cloneRequests = t.newDevicesPerDay * Math.ceil(t.notesPerWorkspace / docsPerPage);
+	/**
+	 * P2-12 lane: a returning device also bulk-clones when ≥ `BULK_CLONE_MIN_DOCS` notes are behind.
+	 * Worst case: every session start is behind on all the notes edited that day.
+	 */
+	const sessionStarts = t.users * t.sessionsPerUserDay;
+	const behind = t.distinctNotesPerDay >= BULK_CLONE_MIN_DOCS ? t.distinctNotesPerDay : 0;
+	const returningCloneRequests = behind > 0 ? sessionStarts * Math.ceil(behind / docsPerPage) : 0;
+	/** The polls include the successful one, which `accountsCallsPerDeviceLogin` also counts. */
+	const deviceRequests =
+		t.deviceLoginsPerDay * (u.accountsCallsPerDeviceLogin - 1 + t.devicePollsPerLogin);
 	const docLoad = t.tailRowsMax + 1;
 	/** Index doc load plus a scan of the `files` table. */
 	const projectionRowsRead = docLoad + t.notesPerWorkspace + t.binariesPerWorkspace;
@@ -290,6 +357,8 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			wakeEvents: opens * u.framesPerOpen,
 		},
 		{
+			// Every peer but the writer: since the P2-12 fix a note's own docRevs bump no longer
+			// re-queues it on the writer's device.
 			name: "Background catch-up of closed notes",
 			scenario: "A",
 			msgs: bgOpens * u.framesPerBgOpen,
@@ -347,17 +416,18 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			accountsEvents: t.accountOpsPerDay,
 		},
 		{
-			// RPC to the relay, the ws-token re-mint and the reconnect (upgrade, frames, close).
+			// RPC to the relay, the client's REST calls (workspaces, ws-token mints) and the
+			// reconnect (upgrade, frames, close).
 			name: "Revocations (RPC, row, affected reconnect)",
 			scenario: "A",
 			msgs: t.revocationsPerDay * u.framesPerConnect,
-			requests: t.revocationsPerDay * 3,
+			requests: t.revocationsPerDay * (2 + u.restCallsPerRevocation),
 			closes: t.revocationsPerDay,
 			rowsWritten: t.revocationsPerDay * u.rowsPerRevocation,
 			rowsRead: t.revocationsPerDay * t.docsPerConnect * docLoad,
-			workerRequests: t.revocationsPerDay * 2,
+			workerRequests: t.revocationsPerDay * (1 + u.restCallsPerRevocation),
 			wakeEvents: t.revocationsPerDay * (u.framesPerConnect + 3),
-			accountsEvents: t.revocationsPerDay,
+			accountsEvents: t.revocationsPerDay * u.restCallsPerRevocation,
 		},
 		{
 			name: "Invite accepts",
@@ -369,7 +439,8 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			accountsEvents: t.inviteAcceptsPerDay,
 		},
 		{
-			// `missing` (one R2 head per sha) before the PUT and again after the meta ack.
+			// `missing` (one R2 head per sha) before the PUT and again after the meta ack; one PUT
+			// per chunk. Conflict copies are uploads too.
 			name: "Binary uploads (missing, PUT, files meta, re-check)",
 			scenario: "A",
 			msgs: uploads * u.indexMsgsPerBinaryUpload,
@@ -400,10 +471,21 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			r2ClassB: cloneChunks,
 		},
 		{
+			// No credit taken: "Background catch-up of closed notes" still counts every note as well.
+			name: "Returning-device clone (notes behind at session start)",
+			scenario: "A",
+			requests: returningCloneRequests,
+			rowsRead: sessionStarts * behind * docLoad,
+			workerRequests: returningCloneRequests,
+			wakeEvents: returningCloneRequests,
+		},
+		{
 			name: "Files projection (files listings)",
 			scenario: "A",
 			requests: t.projectionsPerDay,
-			rowsWritten: t.projectionChangedRows,
+			rowsWritten:
+				t.projectionChangedRows * u.projectionRowsPerChangedEntry +
+				t.projectionsPerDay * u.projectionRowsUnchanged,
 			rowsRead: t.projectionsPerDay * projectionRowsRead,
 			workerRequests: t.projectionsPerDay,
 			wakeEvents: t.projectionsPerDay,
@@ -424,7 +506,7 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			name: "B extra: chunk GC alarm",
 			scenario: "B-extra",
 			requests: u.gcRunsPerDay,
-			rowsWritten: u.gcRunsPerDay * 2,
+			rowsWritten: u.gcRunsPerDay * (2 + 2 * u.projectionRowsUnchanged),
 			rowsRead: indexWrites + u.gcRunsPerDay * 2 * projectionRowsRead,
 			r2ClassA: u.gcRunsPerDay * u.gcListsPerRun,
 			wakeEvents: u.gcRunsPerDay,
