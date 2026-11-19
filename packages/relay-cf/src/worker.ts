@@ -242,10 +242,8 @@ api.delete("/workspaces/:id/members/:userId", async (c) => {
 api.post("/admin/users/:id/:op{disable|enable}", async (c) => {
 	const { id, op } = c.req.param();
 	const a = accounts(c.env);
-	return reply(
-		c,
-		op === "disable" ? await a.disableUser(bearer(c), id) : await a.enableUser(bearer(c), id),
-	);
+	if (op === "disable") return reply(c, await a.disableUser(bearer(c), id));
+	return reply(c, await a.enableUser(bearer(c), id, publicUrl(c)));
 });
 
 const AUDIT_DEFAULT_LIMIT = 50;

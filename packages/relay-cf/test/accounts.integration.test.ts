@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	AuditResponse,
 	InviteCreated,
 	InvitesResponse,
 	MeResponse,
@@ -230,6 +231,106 @@ describe("accounts", () => {
 				body: { token: inv.token },
 			});
 			expect(unauth.status).toBe(401);
+		});
+	});
+
+	describe("admin disable and re-entry", () => {
+		it("refuses to let an admin disable themselves", async () => {
+			const res = await request(relay.url, "POST", `/api/admin/users/${dave.user.id}/disable`, {
+				token: dave.sessionToken,
+			});
+			expect(res.status).toBe(409);
+			expect(errorCode(res.body)).toBe("cannot_disable_self");
+			expect(
+				(await request(relay.url, "GET", "/api/workspaces", { token: dave.sessionToken })).status,
+			).toBe(200);
+		});
+
+		it("enable returns a single-use re-entry invite that signs the same user back in", async () => {
+			const inv = await invite({ role: "editor" });
+			const nora = SessionResponse.parse((await accept(inv.token, "nora")).body);
+			const users = (id: string, op: string) => `/api/admin/users/${id}/${op}`;
+
+			const active = await request(relay.url, "POST", users(nora.user.id, "enable"), {
+				token: dave.sessionToken,
+			});
+			expect(active.status).toBe(409);
+			expect(errorCode(active.body)).toBe("not_disabled");
+
+			await post(relay.url, users(nora.user.id, "disable"), {}, dave.sessionToken);
+			// Accepting a normal invite under the same name still collides.
+			const other = await invite({ role: "editor" });
+			expect(errorCode((await accept(other.token, "nora")).body)).toBe("name_taken");
+
+			const byNonAdmin = await request(relay.url, "POST", users(nora.user.id, "enable"), {
+				token: nora.sessionToken,
+			});
+			expect([401, 403]).toContain(byNonAdmin.status);
+			const reentry = InviteCreated.parse(
+				await post(relay.url, users(nora.user.id, "enable"), {}, dave.sessionToken),
+			);
+			expect(reentry).toMatchObject({ maxUses: 1, admin: false });
+			expect(reentry.url).toBe(
+				`obsidian://teamsync?server=${encodeURIComponent(relay.url)}&invite=${reentry.token}`,
+			);
+			expect(reentry.expiresAt - Date.now()).toBeGreaterThan(6.9 * 24 * 3600_000);
+			// It is not a workspace invite: an existing user cannot redeem it.
+			const redeem = await request(relay.url, "POST", "/api/invites/redeem", {
+				body: { token: reentry.token },
+				token: dave.sessionToken,
+			});
+			expect(redeem.status).toBe(404);
+
+			// The `name` is ignored: the session belongs to nora, with her memberships unchanged.
+			const back = SessionResponse.parse((await accept(reentry.token, "ignored-name")).body);
+			expect(back.user.id).toBe(nora.user.id);
+			expect(back.user.name).toBe("nora");
+			expect(back.workspaces).toEqual([{ ...team, role: "editor" }]);
+			const me = MeResponse.parse(await get(relay.url, "/api/auth/me", back.sessionToken));
+			expect(me.user.id).toBe(nora.user.id);
+			const ws = await request(relay.url, "POST", "/api/auth/ws-token", {
+				body: { workspaceId: team.id },
+				token: back.sessionToken,
+			});
+			expect(ws.status).toBe(200);
+			// The old session stays revoked; the invite is single-use.
+			expect(
+				(await request(relay.url, "GET", "/api/workspaces", { token: nora.sessionToken })).status,
+			).toBe(401);
+			const again = await accept(reentry.token, "nora");
+			expect(again.status).toBe(410);
+			expect(errorCode(again.body)).toBe("invite_used");
+			const { invites } = InvitesResponse.parse(
+				await get(relay.url, `/api/workspaces/${team.id}/invites`, dave.sessionToken),
+			);
+			expect(invites.find((i) => i.id === reentry.id)).toBeUndefined();
+
+			const { entries } = AuditResponse.parse(
+				await get(relay.url, "/api/admin/audit", dave.sessionToken),
+			);
+			expect(
+				entries.find((e) => e.action === "user.enable" && e.target === nora.user.id),
+			).toMatchObject({
+				actorId: dave.user.id,
+				details: { inviteId: reentry.id },
+			});
+			expect(entries.find((e) => e.action === "user.reenter")).toMatchObject({
+				actorId: nora.user.id,
+				target: nora.user.id,
+				details: { inviteId: reentry.id },
+			});
+		});
+
+		it("a re-entry invite is refused while the user is disabled again", async () => {
+			const inv = await invite({ role: "viewer" });
+			const olga = SessionResponse.parse((await accept(inv.token, "olga")).body);
+			const path = (op: string) => `/api/admin/users/${olga.user.id}/${op}`;
+			await post(relay.url, path("disable"), {}, dave.sessionToken);
+			const reentry = InviteCreated.parse(
+				await post(relay.url, path("enable"), {}, dave.sessionToken),
+			);
+			await post(relay.url, path("disable"), {}, dave.sessionToken);
+			expect((await accept(reentry.token, "olga")).status).toBe(403);
 		});
 	});
 

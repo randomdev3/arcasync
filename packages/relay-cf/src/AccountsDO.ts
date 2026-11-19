@@ -42,6 +42,7 @@ const BOOTSTRAP_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 const MIN_BOOTSTRAP_TOKEN_LENGTH = 32;
 const ROLE_RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const DEVICE_LOOKUPS_PER_MINUTE = 5;
+const REENTRY_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface ApiError {
 	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 429 | 503;
@@ -112,6 +113,8 @@ interface InviteRow extends Record<string, SqlStorageValue> {
 	expires_at: number;
 	revoked_at: number | null;
 	created_by: string | null;
+	/** Set on a re-entry invite (`enableUser`): accepting it signs in as this existing user. */
+	user_id: string | null;
 }
 
 interface DeviceCodeRow extends Record<string, SqlStorageValue> {
@@ -185,6 +188,12 @@ export class AccountsDO extends DurableObject<Env> {
 				device TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', user_id TEXT,
 				expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 		`);
+		// Added after the table shipped to dev state: re-entry invites carry the user they sign in.
+		try {
+			this.sql.exec("ALTER TABLE invites ADD COLUMN user_id TEXT");
+		} catch (err) {
+			if (!String(err).includes("duplicate column")) throw err;
+		}
 	}
 
 	private hashToken(token: string): Promise<string> {
@@ -243,11 +252,12 @@ export class AccountsDO extends DurableObject<Env> {
 		maxUses: number,
 		expiresAt: number,
 		createdBy: string | null,
+		userId: string | null = null,
 	): string {
 		const id = crypto.randomUUID();
 		this.sql.exec(
 			`INSERT INTO invites (id, token_hash, workspace_id, role, admin, max_uses, expires_at,
-			 created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 created_by, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			tokenHash,
 			workspaceId,
@@ -257,16 +267,21 @@ export class AccountsDO extends DurableObject<Env> {
 			expiresAt,
 			createdBy,
 			Date.now(),
+			userId,
 		);
 		return id;
 	}
 
-	/** A usable invite for `tokenHash`, or why not (404 unknown/revoked, 410 expired/used). */
+	/**
+	 * A usable invite for `tokenHash`, or why not (404 unknown/revoked, 410 expired/used).
+	 * Re-entry invites have no workspace (`workspace_id = ''`), hence the LEFT JOIN.
+	 */
 	private usableInvite(tokenHash: string): Result<InviteRow> {
 		const invite = this.sql
 			.exec<InviteRow>(
-				`SELECT i.* FROM invites i JOIN workspaces w ON w.id = i.workspace_id
-				 WHERE i.token_hash = ? AND w.deleted_at IS NULL`,
+				`SELECT i.* FROM invites i LEFT JOIN workspaces w ON w.id = i.workspace_id
+				 WHERE i.token_hash = ? AND (i.user_id IS NOT NULL OR w.id IS NOT NULL)
+				 AND w.deleted_at IS NULL`,
 				tokenHash,
 			)
 			.toArray()[0];
@@ -644,6 +659,7 @@ export class AccountsDO extends DurableObject<Env> {
 		const found = this.usableInvite(inviteHash);
 		if (!found.ok) return found;
 		const invite = found.value;
+		if (invite.user_id !== null) return this.reenter(invite, req.device, sessionHash, sessionToken);
 		if (this.sql.exec("SELECT 1 FROM users WHERE name = ?", req.name).toArray()[0]) {
 			return fail(409, "name_taken", "That name is taken");
 		}
@@ -673,6 +689,22 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(userId) });
 	}
 
+	/** A re-entry invite signs in as its user (the request's `name` is ignored); synchronous. */
+	private reenter(
+		invite: InviteRow,
+		device: DeviceInfo,
+		sessionHash: string,
+		sessionToken: string,
+	): Result<SessionResponse> {
+		const user = invite.user_id === null ? undefined : this.userById(invite.user_id);
+		if (!user) return fail(404, "not_found", "Unknown invite");
+		if (user.disabled_at) return fail(403, "forbidden", "Account disabled");
+		this.insertSession(user.id, this.deviceFor(user.id, device), sessionHash);
+		this.sql.exec("UPDATE invites SET uses = uses + 1 WHERE id = ?", invite.id);
+		this.audit(user.id, "user.reenter", user.id, { inviteId: invite.id });
+		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(user.id) });
+	}
+
 	/** Authenticated: an existing user joins another workspace; an existing role never drops. */
 	async redeemInvite(
 		token: string | null,
@@ -686,6 +718,8 @@ export class AccountsDO extends DurableObject<Env> {
 		const found = this.usableInvite(inviteHash);
 		if (!found.ok) return found;
 		const invite = found.value;
+		// Re-entry invites only sign their user in; they grant no workspace.
+		if (invite.user_id !== null) return fail(404, "not_found", "Unknown invite");
 		const offered = invite.role as Role;
 		const current = this.roleIn(user.id, invite.workspace_id);
 		const role = current && ROLE_RANK[current] >= ROLE_RANK[offered] ? current : offered;
@@ -810,6 +844,8 @@ export class AccountsDO extends DurableObject<Env> {
 		if (!s.ok) return s;
 		const { user } = s.value;
 		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		if (userId === user.id)
+			return fail(409, "cannot_disable_self", "Admins cannot disable themselves");
 		const target = this.userById(userId);
 		if (!target) return fail(404, "not_found", "Unknown user");
 		const now = Date.now();
@@ -831,17 +867,39 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ ok: true });
 	}
 
-	/** Admin only. Sessions revoked by the disable stay revoked; the user signs in again. */
-	async enableUser(token: string | null, userId: string): Promise<Result<{ ok: true }>> {
+	/**
+	 * Admin only. Sessions revoked by the disable stay revoked, so this returns a single-use
+	 * re-entry invite bound to the user (no workspace, no membership change): accepting it signs
+	 * that user in on a new session. A user who is not disabled gets 409 `not_disabled`.
+	 */
+	async enableUser(
+		token: string | null,
+		userId: string,
+		publicUrl: string,
+	): Promise<Result<InviteCreated>> {
 		this.calls += 1;
+		const inviteToken = newOpaqueToken();
+		const inviteHash = await this.hashToken(inviteToken);
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
 		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
-		if (!this.userById(userId)) return fail(404, "not_found", "Unknown user");
+		const target = this.userById(userId);
+		if (!target) return fail(404, "not_found", "Unknown user");
+		if (!target.disabled_at) return fail(409, "not_disabled", "That user is not disabled");
 		this.sql.exec("UPDATE users SET disabled_at = NULL WHERE id = ?", userId);
-		this.audit(user.id, "user.enable", userId);
-		return ok({ ok: true });
+		const expiresAt = Date.now() + REENTRY_INVITE_TTL_MS;
+		const id = this.insertInvite(inviteHash, "", "viewer", false, 1, expiresAt, user.id, userId);
+		this.audit(user.id, "user.enable", userId, { inviteId: id });
+		return ok({
+			id,
+			token: inviteToken,
+			url: inviteUrl(publicUrl, inviteToken),
+			role: "viewer",
+			admin: false,
+			maxUses: 1,
+			expiresAt,
+		});
 	}
 
 	/** Admin only; newest first. `next` is the `before` cursor of the following page. */
