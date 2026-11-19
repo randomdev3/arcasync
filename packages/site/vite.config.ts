@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { PNG } from "pngjs";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { GITHUB_REPO, REPO_IS_PLACEHOLDER, REPO_URL } from "./src/lib/config";
 import { MARK, MARK_SMALL, PICTOS, wordRows } from "./src/matrix/glyphs";
@@ -84,9 +85,43 @@ function faviconSvg(): string {
 	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><title>ArcaSync</title><rect width="16" height="16" fill="#000"/><path fill="${INK}" d="${squares["#"]}"/><path fill="${SIGNAL}" d="${squares.R}"/></svg>`;
 }
 
+/**
+ * The favicon as a PNG, for browsers and iOS home screens that don't take the SVG: the same 5×5
+ * mark on the same 16-unit grid, scaled into `size` pixels less `pad` on each side, with square
+ * edges snapped to whole pixels.
+ */
+function faviconPng(size: number, pad = 0): Buffer {
+	const png = new PNG({ width: size, height: size });
+	const hex = (c: string) => [1, 3, 5].map((i) => Number.parseInt(c.slice(i, i + 2), 16));
+	const fill = (x0: number, y0: number, x1: number, y1: number, [r, g, b]: number[]) => {
+		for (let y = y0; y < y1; y++) {
+			for (let x = x0; x < x1; x++) {
+				const i = (y * size + x) * 4;
+				png.data[i] = r ?? 0;
+				png.data[i + 1] = g ?? 0;
+				png.data[i + 2] = b ?? 0;
+				png.data[i + 3] = 255;
+			}
+		}
+	};
+	fill(0, 0, size, size, [0, 0, 0]);
+	const px = (unit: number) => pad + Math.round((unit * (size - 2 * pad)) / 16);
+	MARK_SMALL.forEach((row, y) => {
+		[...row].forEach((ch, x) => {
+			if (ch !== "#" && ch !== "R") return;
+			const color = hex(ch === "R" ? SIGNAL : INK);
+			fill(px(1 + x * 3), px(1 + y * 3), px(3 + x * 3), px(3 + y * 3), color);
+		});
+	});
+	return PNG.sync.write(png);
+}
+
 /** Brand files served from the root, drawn from the same glyphs as the page. */
-const BRAND_FILES: Record<string, () => string> = {
+const BRAND_FILES: Record<string, () => string | Buffer> = {
 	"favicon.svg": faviconSvg,
+	"favicon-32.png": () => faviconPng(32),
+	// iOS rounds the corners of home-screen icons, so the mark keeps a margin there.
+	"apple-touch-icon.png": () => faviconPng(180, 30),
 	"logo.svg": () => dotsSvg(WORDMARK, { colors: { on: INK, red: SIGNAL }, title: "ArcaSync" }),
 	"mark.svg": () => dotsSvg(MARK, { colors: { on: INK, red: SIGNAL }, title: "ArcaSync" }),
 };
@@ -96,9 +131,10 @@ function brandFiles(): Plugin {
 		name: "arcasync-brand-files",
 		configureServer(server) {
 			server.middlewares.use((req, res, next) => {
-				const make = BRAND_FILES[(req.url ?? "").split("?")[0]?.slice(1) ?? ""];
+				const name = (req.url ?? "").split("?")[0]?.slice(1) ?? "";
+				const make = BRAND_FILES[name];
 				if (!make) return next();
-				res.setHeader("Content-Type", "image/svg+xml");
+				res.setHeader("Content-Type", name.endsWith(".png") ? "image/png" : "image/svg+xml");
 				res.end(make());
 			});
 		},
