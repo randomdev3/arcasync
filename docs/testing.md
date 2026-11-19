@@ -32,9 +32,19 @@ directory, and drives it with real `@hocuspocus/provider` clients or raw frames:
 | `traffic.integration.test.ts` | Keepalive, presence renewal and `flushDelay` message and row counts |
 | `probe.integration.test.ts` | The load probe's counts equal the relay's counters |
 | `attribution.integration.test.ts` | Per-user rows and `doc_clients`, the awareness identity check, viewer rows |
+| `accounts.integration.test.ts` | Bootstrap (once, token checks), invites (create, list, revoke, accept, redeem, expiry), workspace create |
+| `revoke.integration.test.ts` | Role changes and removal close live sockets with 4401, stale JWTs are refused, members, last-owner guard, admin disable/enable, audit log |
+| `device.integration.test.ts` | Device-code start, poll cadence (`slow_down`), lookup and its rate limit, approve/deny, expiry, the `me` cache, `features.accounts` |
+| `chunks.integration.test.ts` | R2 chunk PUT (Content-Length, `sha256`, `onlyIf`), GET, `missing`, roles, per-workspace keys, local R2 fidelity |
+| `clone.integration.test.ts` | Bulk clone (merged states and diffs, no messages or rows, `CLONE_MAX_BYTES` paging, rate limit) and the lazy `files` projection |
+| `gc.integration.test.ts` | Chunk GC alarm: armed only by index writes, fires once, grace keeps young chunks, deletes exactly the unreferenced one |
 
-The suite takes about 3.5 minutes (the hibernation and traffic cases idle on purpose). It is not
-part of `pnpm test`. CI runs it in the `relay-integration` job.
+Local R2 is miniflare's emulation inside `wrangler dev`: it verifies `sha256` and honours `onlyIf`,
+which `chunks.integration.test.ts` asserts. Real R2 is not exercised (see "Requires the owner of
+the Cloudflare account" in [deploy-cloudflare.md](deploy-cloudflare.md)).
+
+The suite takes about 4 minutes (the hibernation, traffic and GC cases idle on purpose). It is
+not part of `pnpm test`. CI runs it in the `relay-integration` job.
 
 ## Free-tier budget gate
 
@@ -42,13 +52,24 @@ part of `pnpm test`. CI runs it in the `relay-integration` job.
 pnpm -F @arcasync/relay-cf budget
 ```
 
-It measures the unit costs (messages and rows per typed key, frames per note open, renewals,
-pings, compaction rows) against a local relay, multiplies them by the team model in
-`packages/relay-cf/scripts/budget-model.ts`, and exits non-zero if any free-plan cap goes above
-50% in any scenario: A (work hours), B (A plus idle hours) or C (B with two workspaces per user).
-`gbSeconds` uses the R-9 calibrated duration (billed DO requests × 18 ms × 128 MB); the older
-awake-window model is printed as an informational bound. `--port` picks the relay port (default
-22500).
+It measures the unit costs against a local relay, multiplies them by the team model in
+`packages/relay-cf/scripts/budget-model.ts`, and exits non-zero if any free-plan cap (Durable
+Object requests, rows written and read, GB-s, Worker requests, storage, R2 Class A/B and R2
+storage) goes above 50% in any scenario: A (work hours), B (A plus idle hours) or C (B with two
+workspaces per user). `gbSeconds` uses the R-9 calibrated duration (billed DO requests × 18 ms ×
+128 MB); the older awake-window model is printed as an informational bound. `--port` picks the
+relay port (default 22500), and `--json <file>` saves the units.
+
+The report labels every unit by its source:
+- **measured**: messages and rows per typed key, frames per note open and per reconnect,
+  renewals, pings, compaction rows, docs per bulk-clone response (100 notes of the model's average
+  size, which must cost 0 messages and 0 rows), `files` projection rows (per changed entry and on
+  an unchanged listing), and AccountsDO calls per device-code login;
+- **estimated** (`ESTIMATED_UNITS`, from the P2 lanes and a code audit): AccountsDO rows per
+  device login and per owner operation, which have no counter, and the plugin's REST calls after
+  a 4401 (workspace list and ws-token mints), which the test clients do not make;
+- **plan**: the rest of the P2 plan's analytic units (rows per invite accept and per revocation,
+  index messages and `missing` calls per upload, GC runs and list pages).
 
 ## End-to-end tests in real Obsidian (macOS only)
 
@@ -58,7 +79,8 @@ pnpm e2e:smoke        # the harness itself
 pnpm e2e:p0           # P0 counter in two vaults, including a relay restart
 pnpm e2e:p1           # every scenario in scripts/e2e/p1/
 pnpm e2e:p1 --only mapping,index-sync
-pnpm e2e:p2           # every scenario in scripts/e2e/p2/ (prints "no scenarios" while empty)
+pnpm e2e:p2           # every scenario in scripts/e2e/p2/
+pnpm e2e:p2 --only members,auth
 ```
 
 The harness launches one Obsidian process per vault (`alice`, `bob`, and `carol` as a viewer
@@ -104,6 +126,26 @@ On a failure every window is screenshotted. Screenshots and other artifacts go t
 `workspace` slug, bootstrap, workspace lookup, ws tokens, debug stats and chunks), and
 `ctx.backend` names the backend.
 
+| Scenario | Backends | Checks |
+|---|---|---|
+| `attachments.mjs` | cf | A 300 KiB image and a 9 MiB file arrive byte-identical; a rename uploads no chunk; a modify propagates; offline edits on both sides keep the server's bytes plus one conflict copy; a viewer cannot upload; a delete keeps the chunks (GC grace) |
+| `auth.mjs` | cf | The bootstrap invite, pasted in the settings tab, makes dave the admin owner; alice redeems an editor invite; dave-phone signs in with a device code dave approves (polls ≥ 5 s apart); sign-out revokes the session past the `me` cache |
+| `bulk-clone.mjs` | cf | A fresh vault catches up 60 notes through bulk clone with almost no provider attaches; normal sync works after the hydrate |
+| `members.mjs` | cf | Demote to viewer closes the socket with 4401 and the editor turns read-only; promote makes it writable (a refused stale token re-authenticates); remove stops the workspace with a Notice and keeps the files; the invite modal shows an `obsidian://arcasync` link |
+| `merge.mjs` | all | Disjoint offline edits of a closed note are 3-way merged with no local copy; a same-line conflict keeps P1's local copy |
+| `multi-workspace.mjs` | cf | Two workspaces in one vault: a socket each, notes stay in their workspace, coediting in the second one, status bar `+1`, unmapping keeps the files and stops their sync |
+
+`E2E_BACKEND=node pnpm e2e:p2` runs `merge` and prints SKIP for the other five (the Node server
+has no P2 routes).
+
+Helpers for scenarios:
+- `inModal(v, selector, body, args)` (`scripts/e2e/editor.mjs`) runs `body` in vault `v` with
+  `root` set to the ArcaSync modal that contains `selector` (null while there is none). Modals are
+  found through the plugin's `modals` set, since Obsidian may open one in another window's
+  document. `modalText(v, selector)` returns that element's trimmed text.
+- `session.fileSyncer.idle()` on a plugin workspace session resolves once no binary upload,
+  download or ack re-check is running.
+
 ### Mobile: what emulation covers, and what needs a real device
 
 `scripts/e2e/p1/mobile-emulation.mjs` switches bob's window to Obsidian's mobile layout with
@@ -115,6 +157,8 @@ On a failure every window is screenshotted. Screenshots and other artifacts go t
 | `warmDocs` (released note docs kept attached) | 20 | 5 |
 | `bgConcurrency` (closed notes caught up at once) | 3 | 1 |
 | `maxMdBytes` (larger notes are not synced) | unlimited | 2 MiB |
+| `maxBaseBytes` (larger synced texts are not kept as the 3-way merge base) | 1 MiB | 256 KiB |
+| `maxBinaryBytes` (larger attachments are not synced) | the server's `maxFileBytes` (200 MiB) | 50 MiB |
 
 A note over `maxMdBytes` is skipped and a Notice is shown once per note. The plugin checks the
 file's size before it attaches the note, so the note costs no traffic. A doc that was synced in
@@ -122,6 +166,11 @@ and turned out too large is checked again after each attach. In both cases nothi
 or written to disk, and the editor on that note is a plain, unsynced editor. The path still
 syncs, so other devices get the file, but it is empty there until the note is edited somewhere
 that can sync it.
+
+An attachment over `maxBinaryBytes` (or the server's `limits.maxFileBytes`) is skipped with a
+Notice once per path; it is neither uploaded nor downloaded on that device. A note whose synced
+text is over `maxBaseBytes` has no merge base, so an offline edit on both sides falls back to
+P1's local copy.
 
 The scenario proves the following under emulation:
 - The reload keeps the session token, so the plugin reconnects on its own.
@@ -170,6 +219,11 @@ phone, run by hand before a mobile release:
   timers resume without a burst of messages, and peers expire the phone's presence (≤ 41 min
   idle bound) rather than showing it forever.
 - [ ] **A note over 2 MiB** shows the Notice once, stays editable locally, and is not synced.
+- [ ] **Attachments.** Downloading a 50 MiB binary stays within memory on iOS and Android; a
+  larger one shows the Notice and is skipped. A binary PUT through `requestUrl` (with
+  Content-Length) works from `capacitor://localhost`.
+- [ ] **Sign-in links.** `obsidian://arcasync` invite and approve links open the plugin on
+  mobile, and a device code started on the phone can be approved on desktop (and the reverse).
 
 ### Parallel worktrees
 
