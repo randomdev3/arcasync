@@ -6,12 +6,14 @@
 
 import { DurableObject } from "cloudflare:workers";
 import type {
+	AuditResponse,
 	BootstrapResponse,
 	DeviceInfo,
 	InviteAcceptRequest,
 	InviteCreated,
 	InviteCreateRequest,
 	InvitesResponse,
+	MembersResponse,
 	MeResponse,
 	Role,
 	SessionResponse,
@@ -269,6 +271,34 @@ export class AccountsDO extends DurableObject<Env> {
 			device.vaultId,
 		);
 		return id;
+	}
+
+	/**
+	 * Tells the workspace relay that `userId`'s membership changed (D5). Called after the DB change
+	 * commits; one retry, then the change stands and only the ≤ 15 min JWT expiry bounds it.
+	 */
+	private async revokeSockets(workspaceId: string, userId: string): Promise<void> {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				await this.env.RELAY.getByName(workspaceId).revoke(userId);
+				return;
+			} catch (err) {
+				if (attempt >= 2) {
+					console.error(`accounts: revoke RPC to workspace ${workspaceId} failed`, err);
+					return;
+				}
+			}
+		}
+	}
+
+	private isLastOwner(workspaceId: string, userId: string): boolean {
+		const owners = this.sql
+			.exec<{ user_id: string }>(
+				"SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner'",
+				workspaceId,
+			)
+			.toArray();
+		return owners.length === 1 && owners[0]?.user_id === userId;
 	}
 
 	private insertSession(userId: string, deviceId: string, tokenHash: string): void {
@@ -638,7 +668,9 @@ export class AccountsDO extends DurableObject<Env> {
 			previousRole: current ?? null,
 			admin: invite.admin === 1,
 		});
-		return ok({ workspaces: this.workspacesFor(user.id) });
+		const workspaces = this.workspacesFor(user.id);
+		if (current && current !== role) await this.revokeSockets(invite.workspace_id, user.id);
+		return ok({ workspaces });
 	}
 
 	/** Admin only; the creator owns the new workspace. */
@@ -655,6 +687,153 @@ export class AccountsDO extends DurableObject<Env> {
 		);
 		this.audit(user.id, "workspace.create", workspace.id, { name, slug: workspace.slug });
 		return ok(workspace);
+	}
+
+	// --- P2 members, admin, audit ---
+
+	async members(token: string | null, workspaceId: string): Promise<Result<MembersResponse>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1 && !this.roleIn(user.id, workspaceId)) {
+			return fail(403, "forbidden", "Not a member of that workspace");
+		}
+		const members = this.sql
+			.exec<{ id: string; name: string; color: string; role: string }>(
+				`SELECT u.id, u.name, u.color, m.role FROM memberships m JOIN users u ON u.id = m.user_id
+				 WHERE m.workspace_id = ? ORDER BY u.name`,
+				workspaceId,
+			)
+			.toArray()
+			.map((r) => ({ user: { id: r.id, name: r.name, color: r.color }, role: r.role as Role }));
+		return ok({ members });
+	}
+
+	async setRole(
+		token: string | null,
+		workspaceId: string,
+		userId: string,
+		role: Role,
+	): Promise<Result<{ ok: true }>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		const current = this.roleIn(userId, workspaceId);
+		if (!current) return fail(404, "not_found", "Not a member of that workspace");
+		if (current === role) return ok({ ok: true });
+		if (current === "owner" && this.isLastOwner(workspaceId, userId)) {
+			return fail(409, "last_owner", "A workspace needs at least one owner");
+		}
+		this.sql.exec(
+			"UPDATE memberships SET role = ? WHERE workspace_id = ? AND user_id = ?",
+			role,
+			workspaceId,
+			userId,
+		);
+		this.audit(user.id, "member.role", userId, { workspaceId, role, previousRole: current });
+		await this.revokeSockets(workspaceId, userId);
+		return ok({ ok: true });
+	}
+
+	/** Owners and admins remove anyone; any member may remove themselves. */
+	async removeMember(
+		token: string | null,
+		workspaceId: string,
+		userId: string,
+	): Promise<Result<{ ok: true }>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.id !== userId && !this.canManage(user, workspaceId)) {
+			return fail(403, "forbidden", "Owner or admin only");
+		}
+		const current = this.roleIn(userId, workspaceId);
+		if (!current) return fail(404, "not_found", "Not a member of that workspace");
+		if (current === "owner" && this.isLastOwner(workspaceId, userId)) {
+			return fail(409, "last_owner", "A workspace needs at least one owner");
+		}
+		this.sql.exec(
+			"DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?",
+			workspaceId,
+			userId,
+		);
+		this.audit(user.id, "member.remove", userId, { workspaceId, previousRole: current });
+		await this.revokeSockets(workspaceId, userId);
+		return ok({ ok: true });
+	}
+
+	/** Admin only: blocks sign-in, revokes every session and closes the user's sockets. */
+	async disableUser(token: string | null, userId: string): Promise<Result<{ ok: true }>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const target = this.userById(userId);
+		if (!target) return fail(404, "not_found", "Unknown user");
+		const now = Date.now();
+		this.sql.exec("UPDATE users SET disabled_at = ? WHERE id = ?", now, userId);
+		this.sql.exec(
+			"UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+			now,
+			userId,
+		);
+		this.audit(user.id, "user.disable", userId);
+		const workspaceIds = this.sql
+			.exec<{ workspace_id: string }>(
+				"SELECT workspace_id FROM memberships WHERE user_id = ?",
+				userId,
+			)
+			.toArray()
+			.map((r) => r.workspace_id);
+		for (const workspaceId of workspaceIds) await this.revokeSockets(workspaceId, userId);
+		return ok({ ok: true });
+	}
+
+	/** Admin only. Sessions revoked by the disable stay revoked; the user signs in again. */
+	async enableUser(token: string | null, userId: string): Promise<Result<{ ok: true }>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		if (!this.userById(userId)) return fail(404, "not_found", "Unknown user");
+		this.sql.exec("UPDATE users SET disabled_at = NULL WHERE id = ?", userId);
+		this.audit(user.id, "user.enable", userId);
+		return ok({ ok: true });
+	}
+
+	/** Admin only; newest first. `next` is the `before` cursor of the following page. */
+	async auditLog(
+		token: string | null,
+		{ before, limit }: { before?: number; limit: number },
+	): Promise<Result<AuditResponse>> {
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		if (s.value.user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const rows = this.sql
+			.exec<{
+				id: number;
+				at: number;
+				actor_id: string | null;
+				action: string;
+				target: string;
+				details: string;
+			}>(
+				"SELECT * FROM audit_log WHERE id < ? ORDER BY id DESC LIMIT ?",
+				before ?? Number.MAX_SAFE_INTEGER,
+				limit,
+			)
+			.toArray();
+		const entries = rows.map((r) => ({
+			id: r.id,
+			at: r.at,
+			actorId: r.actor_id,
+			action: r.action,
+			target: r.target,
+			details: JSON.parse(r.details) as unknown,
+		}));
+		const last = entries[entries.length - 1];
+		return ok({ entries, next: entries.length === limit && last ? last.id : null });
 	}
 
 	// --- dev-only (worker gates these on TEAMSYNC_DEBUG_STATS) ---

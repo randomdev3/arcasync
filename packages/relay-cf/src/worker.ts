@@ -10,6 +10,7 @@ import {
 	InviteAcceptRequest,
 	InviteCreateRequest,
 	InviteRedeemRequest,
+	MemberUpdateRequest,
 	PRESENCE_RENEWAL_MS,
 	parseDocName,
 	type ServerInfo,
@@ -200,6 +201,48 @@ api.delete("/workspaces/:id/invites/:inviteId", async (c) =>
 		await accounts(c.env).revokeInvite(bearer(c), c.req.param("id"), c.req.param("inviteId")),
 	),
 );
+
+api.get("/workspaces/:id/members", async (c) =>
+	reply(c, await accounts(c.env).members(bearer(c), c.req.param("id"))),
+);
+
+api.patch("/workspaces/:id/members/:userId", async (c) => {
+	const body = await parseBody(c, MemberUpdateRequest);
+	if (!body) return badRequest(c);
+	const { id, userId } = c.req.param();
+	return reply(c, await accounts(c.env).setRole(bearer(c), id, userId, body.role));
+});
+
+api.delete("/workspaces/:id/members/:userId", async (c) => {
+	const { id, userId } = c.req.param();
+	return reply(c, await accounts(c.env).removeMember(bearer(c), id, userId));
+});
+
+api.post("/admin/users/:id/:op{disable|enable}", async (c) => {
+	const { id, op } = c.req.param();
+	const a = accounts(c.env);
+	return reply(
+		c,
+		op === "disable" ? await a.disableUser(bearer(c), id) : await a.enableUser(bearer(c), id),
+	);
+});
+
+const AUDIT_DEFAULT_LIMIT = 50;
+const AUDIT_MAX_LIMIT = 100;
+
+api.get("/admin/audit", async (c) => {
+	const before = c.req.query("before");
+	const limit = c.req.query("limit");
+	const beforeN = before === undefined ? undefined : Number(before);
+	const limitN = limit === undefined ? AUDIT_DEFAULT_LIMIT : Number(limit);
+	if (
+		(beforeN !== undefined && !(Number.isSafeInteger(beforeN) && beforeN > 0)) ||
+		!(Number.isInteger(limitN) && limitN >= 1 && limitN <= AUDIT_MAX_LIMIT)
+	) {
+		return badRequest(c);
+	}
+	return reply(c, await accounts(c.env).auditLog(bearer(c), { before: beforeN, limit: limitN }));
+});
 
 /** Dev-only: expire an invite now, so tests reach 410 `invite_expired` without waiting. */
 api.post("/debug/accounts/expire-invite", async (c) => {
