@@ -4,15 +4,20 @@
  */
 import {
 	API_PREFIX,
+	BootstrapRequest,
 	CHUNK_BYTES,
 	DevLoginRequest,
+	InviteAcceptRequest,
+	InviteCreateRequest,
+	InviteRedeemRequest,
 	PRESENCE_RENEWAL_MS,
 	parseDocName,
 	type ServerInfo,
+	WorkspaceCreateRequest,
 	WS_PATH,
 	WsTokenRequest,
 } from "@teamsync/shared";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import type { ApiError, Result } from "./AccountsDO";
 import { configError } from "./config";
@@ -89,6 +94,21 @@ async function jsonBody(req: Request): Promise<unknown> {
 	}
 }
 
+type Ctx = Context<{ Bindings: Env }>;
+
+/** The body parsed with `schema`, or null (the caller answers 400 `bad_request`). */
+async function parseBody<T>(
+	c: Ctx,
+	schema: { safeParse: (v: unknown) => { success: true; data: T } | { success: false } },
+): Promise<T | null> {
+	const body = schema.safeParse(await jsonBody(c.req.raw));
+	return body.success ? body.data : null;
+}
+
+const badRequest = (c: Ctx) => c.json(errorBody("bad_request", "Invalid request"), 400);
+const bearer = (c: Ctx) => bearerToken(c.req.header("authorization"));
+const publicUrl = (c: Ctx) => c.env.TEAMSYNC_PUBLIC_URL || new URL(c.req.url).origin;
+
 const accounts = (env: Env) => env.ACCOUNTS.getByName(ACCOUNTS_NAME);
 const api = new Hono<{ Bindings: Env }>();
 
@@ -98,7 +118,7 @@ api.get("/server-info", (c) =>
 	c.json({
 		name: "TeamSync",
 		version: RELAY_VERSION,
-		publicUrl: c.env.TEAMSYNC_PUBLIC_URL || new URL(c.req.url).origin,
+		publicUrl: publicUrl(c),
 		features: {
 			devOpenLogin: c.env.TEAMSYNC_DEV_OPEN_LOGIN === "1",
 			presign: false,
@@ -136,6 +156,56 @@ api.post("/auth/logout", async (c) =>
 api.get("/workspaces", async (c) =>
 	reply(c, await accounts(c.env).workspaces(bearerToken(c.req.header("authorization")))),
 );
+
+api.post("/auth/bootstrap", async (c) => {
+	const body = await parseBody(c, BootstrapRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).bootstrap(bearer(c), body.workspaceName, publicUrl(c)));
+});
+
+api.post("/auth/invite/accept", async (c) => {
+	const body = await parseBody(c, InviteAcceptRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).acceptInvite(body));
+});
+
+api.post("/invites/redeem", async (c) => {
+	const body = await parseBody(c, InviteRedeemRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).redeemInvite(bearer(c), body.token));
+});
+
+api.post("/workspaces", async (c) => {
+	const body = await parseBody(c, WorkspaceCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).createWorkspace(bearer(c), body.name));
+});
+
+api.get("/workspaces/:id/invites", async (c) =>
+	reply(c, await accounts(c.env).listInvites(bearer(c), c.req.param("id"))),
+);
+
+api.post("/workspaces/:id/invites", async (c) => {
+	const body = await parseBody(c, InviteCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(
+		c,
+		await accounts(c.env).createInvite(bearer(c), c.req.param("id"), body, publicUrl(c)),
+	);
+});
+
+api.delete("/workspaces/:id/invites/:inviteId", async (c) =>
+	reply(
+		c,
+		await accounts(c.env).revokeInvite(bearer(c), c.req.param("id"), c.req.param("inviteId")),
+	),
+);
+
+/** Dev-only: expire an invite now, so tests reach 410 `invite_expired` without waiting. */
+api.post("/debug/accounts/expire-invite", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	return c.json(await accounts(c.env).debugExpireInvite(c.req.query("id") ?? ""));
+});
 
 /** Dev-only relay instrumentation (G4). Each call is itself one DO request. */
 api.on(["GET", "POST"], "/debug/:op{stats|reset}", async (c) => {
