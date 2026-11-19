@@ -83,13 +83,15 @@ as rows written). It runs only on the `probe` environment, and the worker is del
 
 ### Results (2026-11-19, free plan)
 
+These are the counts the analytics report; the free-tier limits are assumed to use the same counters.
+
 | Question | Answer | Evidence |
 |---|---|---|
 | Inbound WebSocket messages per DO request | 1:1 | 501 frames → 505 requests; 301 updates → 305 |
-| Auto-responded keepalive pings billed? | No | ~140 pings in one minute → 2 requests (stats reads) |
-| Close events billed? | Yes | 50 × (connect + Auth + close) → 152 requests |
+| Auto-responded keepalive pings counted? | No | ~140 pings in one minute → 2 requests (stats reads) |
+| Close events counted? | Yes | 50 × (connect + Auth + close) → 152 requests |
 | Rows written per update | 1 | 301 updates → 605 rows, of which 301 are debug-stats rows |
-| Duration | ≈1.8 ms active per request | 10 clients × 10 min → 0.25 GB-s |
+| Duration | ≈1.8 ms active per request | 10 clients × 10 min → 0.25 GB-s (the model would say ≈75) |
 
 `budget-model.ts` uses these (`PINGS_BILLED: false`). Its duration model stays far looser than the
 measurement. The whole probe (functional smoke, `budget --live`, load probe) used under 4% of the

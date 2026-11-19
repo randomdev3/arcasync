@@ -7,15 +7,17 @@
  */
 
 /**
- * Billing semantics, settled by the R-9 probe on a free-plan account (2026-11-19, GraphQL
- * analytics per phase of `load-probe.ts`) unless noted:
- * - 501 awareness frames → 505 DO requests, 301 updates → 305: inbound messages bill 1:1.
+ * Billing semantics, from the R-9 probe on a free-plan account (2026-11-19). These are the counts
+ * Cloudflare's GraphQL analytics reported per phase of `load-probe.ts`; the free-tier limits are
+ * assumed to use the same counters:
+ * - 501 awareness frames → 505 DO requests, 301 updates → 305: inbound messages count 1:1.
  * - ~140 keepalive pings in one minute → 2 DO requests (both stats reads): auto-responded pings
- *   are not billed.
- * - 50 × (connect + Auth + close) → 152 DO requests: closes are billed.
+ *   are not counted.
+ * - 50 × (connect + Auth + close) → 152 DO requests: closes are counted.
  * - Compaction did not run in the probe, so tail deletes stay counted (worst case).
- * - Duration: the 10-client live run billed 0.25 GB-s in 10 min (≈1.8 ms active per request),
- *   far below the awake model in `awakeSeconds`, which is kept as a deliberately loose bound.
+ * - Duration: the 10-client live run counted 0.25 GB-s in 10 min (≈1.8 ms active per request),
+ *   far below the awake model in `awakeSeconds`, which is kept as a deliberately loose bound. A
+ *   gbSeconds trip near 50% is therefore a model artefact before it is a real risk.
  */
 export const BILLING = {
 	/** Inbound WebSocket messages per billed DO request (20 is documented for Workers Paid). */
