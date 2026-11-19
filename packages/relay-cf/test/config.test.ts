@@ -79,12 +79,15 @@ describe("wrangler.jsonc", () => {
 		}
 	});
 
-	it("points links at the website and allows it cross-origin in dev only", () => {
-		for (const env of [undefined, "production", "probe"]) {
+	it("points links at the website and allows it cross-origin in dev and production", () => {
+		for (const env of [undefined, "probe"]) {
 			const vars = resolved(env).vars as Record<string, string>;
 			expect("ARCASYNC_PUBLIC_URL" in vars, `env ${env}`).toBe(false);
 			expect("ARCASYNC_SITE_ORIGINS" in vars, `env ${env}`).toBe(false);
 		}
+		const production = resolved("production").vars as Record<string, string>;
+		expect(production.ARCASYNC_PUBLIC_URL).toBe("https://arca-sync.pages.dev");
+		expect(production.ARCASYNC_SITE_ORIGINS).toBe("https://arca-sync.pages.dev");
 		const dev = resolved("dev").vars as Record<string, string>;
 		expect(dev.ARCASYNC_PUBLIC_URL).toBe("http://localhost:5173");
 		expect(dev.ARCASYNC_SITE_ORIGINS?.split(",")).toEqual([
