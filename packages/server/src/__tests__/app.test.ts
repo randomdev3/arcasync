@@ -4,7 +4,7 @@ import {
 	ServerInfo,
 	SessionResponse,
 	WsTokenResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../app.js";

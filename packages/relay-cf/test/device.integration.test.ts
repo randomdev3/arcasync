@@ -13,7 +13,7 @@ import {
 	MeResponse,
 	ServerInfo,
 	type SessionResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import { acceptInvite, bootstrap, device, errorCode, get, post, request, sleep } from "./helpers";

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import {
 	BootstrapResponse,
 	createKeepaliveWebSocket,
@@ -9,7 +8,8 @@ import {
 	type WebSocketClass,
 	WS_PATH,
 	WsTokenResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { WebSocket } from "ws";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";

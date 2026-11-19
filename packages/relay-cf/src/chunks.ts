@@ -5,7 +5,7 @@
  * Bodies are streamed straight into R2: the Worker never reads or hashes them. R2 verifies the
  * `sha256` and refuses an existing key through `onlyIf` (`created: false`).
  */
-import { CHUNK_BYTES, ChunkSha, ChunksMissingRequest } from "@teamsync/shared";
+import { CHUNK_BYTES, ChunkSha, ChunksMissingRequest } from "@arcasync/shared";
 import { type Context, Hono } from "hono";
 import type { Env } from "./env";
 import { errorBody } from "./errors";

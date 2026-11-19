@@ -1,4 +1,4 @@
-import type { DeviceLookupResponse } from "@teamsync/shared";
+import type { DeviceLookupResponse } from "@arcasync/shared";
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { type ApiClient, ApiRequestError } from "../net/ApiClient";
 

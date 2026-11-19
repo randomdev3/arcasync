@@ -1,4 +1,4 @@
-import type { DeviceCodeResponse, SessionResponse } from "@teamsync/shared";
+import type { DeviceCodeResponse, SessionResponse } from "@arcasync/shared";
 import { type App, Modal, Setting } from "obsidian";
 import { type DeviceLogin, DeviceLoginError } from "../auth/DeviceLogin";
 

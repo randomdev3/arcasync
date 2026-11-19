@@ -5,8 +5,8 @@
  *   node scripts/trace-frames.ts http://localhost:8787 test/fixtures/node-frames.json
  */
 import { writeFileSync } from "node:fs";
+import { docName, SessionResponse, WS_PATH, WsTokenResponse } from "@arcasync/shared";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { docName, SessionResponse, WS_PATH, WsTokenResponse } from "@teamsync/shared";
 import { WebSocket } from "ws";
 import * as Y from "yjs";
 

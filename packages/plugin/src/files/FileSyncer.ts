@@ -1,4 +1,4 @@
-import { type Chunk, chunkFile, type FileMeta, fileHash, mimeForPath } from "@teamsync/shared";
+import { type Chunk, chunkFile, type FileMeta, fileHash, mimeForPath } from "@arcasync/shared";
 import { ChunkNotFoundError } from "./ChunkClient";
 
 /** The chunk routes FileSyncer uses; `ChunkClient` in the app, an in-memory store in tests. */

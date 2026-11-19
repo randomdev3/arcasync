@@ -1,5 +1,5 @@
+import { DevLoginRequest, WS_TOKEN_TTL_SECONDS, WsTokenRequest } from "@arcasync/shared";
 import { zValidator } from "@hono/zod-validator";
-import { DevLoginRequest, WS_TOKEN_TTL_SECONDS, WsTokenRequest } from "@teamsync/shared";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { getMembershipRole, requireSession } from "../auth/middleware.js";

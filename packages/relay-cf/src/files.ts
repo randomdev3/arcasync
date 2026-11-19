@@ -2,7 +2,7 @@
  * Lazy `files` projection of the index doc (D11): built on demand (files listing, chunk GC) from
  * the merged index state, writing only the rows that differ. Never run per update.
  */
-import { FileMeta, type FilesResponse, INDEX_FILES } from "@teamsync/shared";
+import { FileMeta, type FilesResponse, INDEX_FILES } from "@arcasync/shared";
 import * as Y from "yjs";
 import type { SqlLike } from "./store";
 

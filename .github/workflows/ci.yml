@@ -31,8 +31,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -F @teamsync/shared build
-      - run: pnpm -F @teamsync/relay-cf test:integration
+      - run: pnpm -F @arcasync/shared build
+      - run: pnpm -F @arcasync/relay-cf test:integration
   docker:
     runs-on: ubuntu-latest
     steps:

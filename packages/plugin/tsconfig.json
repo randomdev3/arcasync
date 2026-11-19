@@ -7,7 +7,7 @@
 		"allowJs": true,
 		"baseUrl": ".",
 		"paths": {
-			"@teamsync/shared": ["../shared/src/index.ts"]
+			"@arcasync/shared": ["../shared/src/index.ts"]
 		}
 	},
 	"include": ["src", "vitest.config.ts"]

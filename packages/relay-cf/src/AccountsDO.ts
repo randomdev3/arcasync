@@ -22,8 +22,8 @@ import type {
 	User,
 	WorkspaceSummary,
 	WorkspacesResponse,
-} from "@teamsync/shared";
-import { DEVICE_CODE_INTERVAL_S, DEVICE_CODE_TTL_S, WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
+} from "@arcasync/shared";
+import { DEVICE_CODE_INTERVAL_S, DEVICE_CODE_TTL_S, WS_TOKEN_TTL_SECONDS } from "@arcasync/shared";
 import type { z } from "zod";
 import {
 	constantTimeEqual,

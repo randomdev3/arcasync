@@ -1,4 +1,4 @@
-import { type DecodedClone, decodeClone } from "@teamsync/shared";
+import { type DecodedClone, decodeClone } from "@arcasync/shared";
 import { toApiError } from "./ApiClient";
 import { bearerRequest, header, sleep, type WorkspaceAuth } from "./bearer";
 

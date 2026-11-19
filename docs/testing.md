@@ -18,8 +18,8 @@ production` (a local bundle, no network).
 ## Relay integration tests
 
 ```sh
-pnpm -F @teamsync/shared build
-pnpm -F @teamsync/relay-cf test:integration
+pnpm -F @arcasync/shared build
+pnpm -F @arcasync/relay-cf test:integration
 ```
 
 Each file starts its own `wrangler dev --env dev` (local workerd) with a temporary state
@@ -39,7 +39,7 @@ part of `pnpm test`. CI runs it in the `relay-integration` job.
 ## Free-tier budget gate
 
 ```sh
-pnpm -F @teamsync/relay-cf budget
+pnpm -F @arcasync/relay-cf budget
 ```
 
 It measures the unit costs (messages and rows per typed key, frames per note open, renewals,
@@ -53,7 +53,7 @@ awake-window model is printed as an informational bound. `--port` picks the rela
 ## End-to-end tests in real Obsidian (macOS only)
 
 ```sh
-pnpm --filter @teamsync/plugin build
+pnpm --filter @arcasync/plugin build
 pnpm e2e:smoke        # the harness itself
 pnpm e2e:p0           # P0 counter in two vaults, including a relay restart
 pnpm e2e:p1           # every scenario in scripts/e2e/p1/

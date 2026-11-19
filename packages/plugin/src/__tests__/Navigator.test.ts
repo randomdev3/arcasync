@@ -1,4 +1,4 @@
-import { userColor, type WorkspacePresence } from "@teamsync/shared";
+import { userColor, type WorkspacePresence } from "@arcasync/shared";
 import { describe, expect, it, vi } from "vitest";
 import { Navigator, type NavigatorPort } from "../presence/Navigator";
 import type { IPresence } from "../workspace/types";

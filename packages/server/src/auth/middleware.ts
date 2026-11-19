@@ -1,4 +1,4 @@
-import type { Role } from "@teamsync/shared";
+import type { Role } from "@arcasync/shared";
 import { and, eq, isNull } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import type { Db } from "../db/index.js";

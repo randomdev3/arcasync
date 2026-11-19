@@ -1,4 +1,4 @@
-import { isIgnoredPath, kindForPath } from "@teamsync/shared";
+import { isIgnoredPath, kindForPath } from "@arcasync/shared";
 
 /**
  * Two path spaces meet here. Vault paths are what Obsidian uses (`Shared/notes/a.md`). Workspace

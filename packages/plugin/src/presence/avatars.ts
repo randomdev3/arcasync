@@ -1,4 +1,4 @@
-import type { WorkspacePresence } from "@teamsync/shared";
+import type { WorkspacePresence } from "@arcasync/shared";
 import { toVault } from "../workspace/paths";
 
 /** `here`: on this note and active; `elsewhere`: active on another note (or none); `idle`. */

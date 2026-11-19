@@ -1,4 +1,4 @@
-import type { PresenceUser, WorkspacePresence } from "@teamsync/shared";
+import type { PresenceUser, WorkspacePresence } from "@arcasync/shared";
 import type { INavigator, IPresence } from "../workspace/types";
 
 /** What the Navigator needs from Obsidian; files are workspace paths. */

@@ -1,4 +1,4 @@
-import { Role, type WorkspaceSummary } from "@teamsync/shared";
+import { Role, type WorkspaceSummary } from "@arcasync/shared";
 import { foldersOverlap } from "./workspace/paths";
 
 export interface TeamSyncSettings {

@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
+import { WS_PATH } from "@arcasync/shared";
 import type { Hocuspocus, WebSocketLike } from "@hocuspocus/server";
 import { createAdaptorServer } from "@hono/node-server";
-import { WS_PATH } from "@teamsync/shared";
 import { type RawData, WebSocketServer } from "ws";
 import { createApp } from "./app.js";
 import { wsConnections } from "./metrics.js";

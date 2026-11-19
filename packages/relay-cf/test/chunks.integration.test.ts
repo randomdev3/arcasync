@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHUNK_BYTES, CHUNKS_MISSING_MAX, ServerInfo } from "@teamsync/shared";
+import { CHUNK_BYTES, CHUNKS_MISSING_MAX, ServerInfo } from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import {

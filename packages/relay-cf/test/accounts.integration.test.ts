@@ -13,7 +13,7 @@ import {
 	SessionResponse,
 	WorkspaceSummary,
 	WorkspacesResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import {

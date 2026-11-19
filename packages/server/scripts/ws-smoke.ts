@@ -1,13 +1,14 @@
 /**
  * End-to-end WebSocket smoke test against a *running* server:
- *   pnpm --filter @teamsync/server dev        # terminal 1
- *   pnpm --filter @teamsync/server smoke      # terminal 2
+ *   pnpm --filter @arcasync/server dev        # terminal 1
+ *   pnpm --filter @arcasync/server smoke      # terminal 2
  *
  * Logs in, opens the workspace index doc, writes a Y.Map key, disconnects,
  * reconnects with a fresh Y.Doc and asserts the value came back from the server.
  */
+
+import { docName, SessionResponse, WS_PATH, WsTokenResponse } from "@arcasync/shared";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { docName, SessionResponse, WS_PATH, WsTokenResponse } from "@teamsync/shared";
 import { WebSocket } from "ws";
 import * as Y from "yjs";
 

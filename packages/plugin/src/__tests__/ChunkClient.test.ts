@@ -1,4 +1,4 @@
-import { sha256Hex } from "@teamsync/shared";
+import { sha256Hex } from "@arcasync/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type RequestUrlParam,

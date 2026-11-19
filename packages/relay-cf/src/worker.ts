@@ -19,7 +19,7 @@ import {
 	WorkspaceCreateRequest,
 	WS_PATH,
 	WsTokenRequest,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import type { z } from "zod";

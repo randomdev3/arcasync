@@ -1,4 +1,4 @@
-import { API_PREFIX } from "@teamsync/shared";
+import { API_PREFIX } from "@arcasync/shared";
 import { type RequestUrlParam, type RequestUrlResponse, requestUrl } from "obsidian";
 import { NetworkError } from "./ApiClient";
 

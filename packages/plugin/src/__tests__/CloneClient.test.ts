@@ -1,4 +1,4 @@
-import { encodeClone } from "@teamsync/shared";
+import { encodeClone } from "@arcasync/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type RequestUrlParam,

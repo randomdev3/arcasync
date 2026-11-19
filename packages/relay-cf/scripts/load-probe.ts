@@ -24,7 +24,7 @@ import {
 	SessionResponse,
 	WS_PATH,
 	WsTokenResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import { WebSocket } from "ws";

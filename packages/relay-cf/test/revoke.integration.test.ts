@@ -14,7 +14,7 @@ import {
 	MembersResponse,
 	type SessionResponse,
 	type WorkspaceSummary,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { decodeJwt } from "jose";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";

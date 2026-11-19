@@ -28,7 +28,7 @@
 	"dev": { "port": 8789 },
 	"observability": { "enabled": false },
 	"env": {
-		// `pnpm -F @teamsync/relay-cf deploy:production` (user only).
+		// `pnpm -F @arcasync/relay-cf deploy:production` (user only).
 		"production": {
 			"name": "teamsync-relay",
 			"durable_objects": {

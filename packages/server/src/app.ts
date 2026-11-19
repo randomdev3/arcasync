@@ -1,4 +1,4 @@
-import { API_PREFIX } from "@teamsync/shared";
+import { API_PREFIX } from "@arcasync/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";

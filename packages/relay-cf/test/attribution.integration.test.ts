@@ -5,7 +5,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { docName, SessionResponse, WsTokenResponse } from "@teamsync/shared";
+import { docName, SessionResponse, WsTokenResponse } from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import { client, login, post, sleep, stats, waitFor } from "./helpers";

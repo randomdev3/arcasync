@@ -1,5 +1,5 @@
+import { FLUSH_DELAY_MS } from "@arcasync/shared";
 import { EditorView } from "@codemirror/view";
-import { FLUSH_DELAY_MS } from "@teamsync/shared";
 import { type App, MarkdownView, Notice, type TFile } from "obsidian";
 import * as Y from "yjs";
 import { LIVE_CLASS } from "../editor/EditorBinding";

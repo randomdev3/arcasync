@@ -5,7 +5,7 @@
  * Hard rule: any new background traffic (a periodic message, a timer, a per-event row) gets a
  * component here in the same branch.
  */
-import { CLONE_MAX_DOCS } from "@teamsync/shared";
+import { CLONE_MAX_DOCS } from "@arcasync/shared";
 
 /**
  * Billing semantics, from the R-9 probe on a free-plan account (2026-11-19). These are the counts

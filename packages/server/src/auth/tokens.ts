@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { Role } from "@teamsync/shared";
-import { WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
+import type { Role } from "@arcasync/shared";
+import { WS_TOKEN_TTL_SECONDS } from "@arcasync/shared";
 import { jwtVerify, SignJWT } from "jose";
 import { z } from "zod";
 

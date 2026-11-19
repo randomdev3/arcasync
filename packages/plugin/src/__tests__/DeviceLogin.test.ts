@@ -1,4 +1,4 @@
-import type { DeviceCodeResponse, SessionResponse } from "@teamsync/shared";
+import type { DeviceCodeResponse, SessionResponse } from "@arcasync/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type RequestUrlParam,

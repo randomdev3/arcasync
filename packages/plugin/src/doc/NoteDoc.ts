@@ -1,5 +1,5 @@
+import { docName } from "@arcasync/shared";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { docName } from "@teamsync/shared";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";

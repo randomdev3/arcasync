@@ -1,5 +1,5 @@
-import type { DeviceInfo, ServerInfo, SessionResponse, WorkspaceSummary } from "@teamsync/shared";
-import { WS_PATH } from "@teamsync/shared";
+import type { DeviceInfo, ServerInfo, SessionResponse, WorkspaceSummary } from "@arcasync/shared";
+import { WS_PATH } from "@arcasync/shared";
 import {
 	type Modal,
 	Notice,

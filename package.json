@@ -1,19 +1,19 @@
 {
-	"name": "teamsync-monorepo",
+	"name": "arcasync-monorepo",
 	"private": true,
 	"packageManager": "pnpm@11.10.0",
 	"engines": {
 		"node": ">=22"
 	},
 	"scripts": {
-		"dev": "turbo run dev --filter=@teamsync/relay-cf --filter=@teamsync/plugin",
-		"dev:node": "turbo run dev --filter=@teamsync/server --filter=@teamsync/plugin",
+		"dev": "turbo run dev --filter=@arcasync/relay-cf --filter=@arcasync/plugin",
+		"dev:node": "turbo run dev --filter=@arcasync/server --filter=@arcasync/plugin",
 		"build": "turbo run build",
 		"test": "turbo run test",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "turbo run typecheck",
-		"db:generate": "pnpm --filter @teamsync/server db:generate",
+		"db:generate": "pnpm --filter @arcasync/server db:generate",
 		"e2e:p0": "node scripts/e2e/p0-counter.mjs",
 		"e2e:p1": "node scripts/e2e/run.mjs --suite p1",
 		"e2e:p2": "node scripts/e2e/run.mjs --suite p2",

@@ -17,7 +17,7 @@ import {
 	type WorkspaceSummary,
 	WorkspacesResponse,
 	WsTokenResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { type RequestUrlResponse, requestUrl } from "obsidian";
 import { z } from "zod";
 
@@ -62,7 +62,7 @@ export function toApiError(response: RequestUrlResponse): ApiRequestError {
 	return new ApiRequestError(response.status, "http_error", `HTTP ${response.status}`);
 }
 
-/** `@teamsync/shared` exports these as schemas only; derive the types here. */
+/** `@arcasync/shared` exports these as schemas only; derive the types here. */
 export type MeResult = z.infer<typeof MeResponse>;
 export type WsTokenResult = z.infer<typeof WsTokenResponse>;
 

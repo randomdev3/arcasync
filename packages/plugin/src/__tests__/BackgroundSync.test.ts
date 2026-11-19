@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import type { DocRev } from "@teamsync/shared";
+import type { DocRev } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { BackgroundSync, type CloneSource } from "../doc/BackgroundSync";

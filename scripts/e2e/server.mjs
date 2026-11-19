@@ -23,7 +23,7 @@ export async function startServer({ port = Number(process.env.E2E_PORT ?? 8788),
 	const dir = dataDir ?? mkdtempSync(join(tmpdir(), "teamsync-e2e-"));
 	if (BACKEND === "cf") return startCfRelay({ port, dir });
 	if (BACKEND !== "node") throw new Error(`unknown E2E_BACKEND=${BACKEND} (cf|node|remote)`);
-	const child = spawn("pnpm", ["--filter", "@teamsync/server", "exec", "tsx", "src/index.ts"], {
+	const child = spawn("pnpm", ["--filter", "@arcasync/server", "exec", "tsx", "src/index.ts"], {
 		cwd: ROOT,
 		env: {
 			...process.env,

@@ -1,4 +1,4 @@
-import type { InviteSummary, Role, WorkspaceSummary } from "@teamsync/shared";
+import type { InviteSummary, Role, WorkspaceSummary } from "@arcasync/shared";
 import { type App, Modal, Notice, Setting } from "obsidian";
 import type { ApiClient } from "../net/ApiClient";
 import { describeMemberError } from "./MembersModal";

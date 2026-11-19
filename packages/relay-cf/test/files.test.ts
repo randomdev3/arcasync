@@ -1,4 +1,4 @@
-import { type FileMeta, INDEX_FILES } from "@teamsync/shared";
+import { type FileMeta, INDEX_FILES } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { FILES_TABLE, listFiles, projectFiles, referencedChunks } from "../src/files";

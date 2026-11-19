@@ -1,4 +1,4 @@
-import { CHUNK_BYTES, PRESENCE_RENEWAL_MS, type ServerInfo } from "@teamsync/shared";
+import { CHUNK_BYTES, PRESENCE_RENEWAL_MS, type ServerInfo } from "@arcasync/shared";
 
 export const RELAY_VERSION = "0.0.1-cf";
 

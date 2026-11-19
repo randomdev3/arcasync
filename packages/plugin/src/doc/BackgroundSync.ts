@@ -1,4 +1,4 @@
-import { BULK_CLONE_MIN_DOCS, CLONE_MAX_DOCS, type DocRev } from "@teamsync/shared";
+import { BULK_CLONE_MIN_DOCS, CLONE_MAX_DOCS, type DocRev } from "@arcasync/shared";
 import type * as Y from "yjs";
 import type { DocManager } from "./DocManager";
 import { diskText } from "./diskText";

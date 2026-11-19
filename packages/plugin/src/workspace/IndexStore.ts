@@ -1,4 +1,4 @@
-import { FileMeta, INDEX_FILES } from "@teamsync/shared";
+import { FileMeta, INDEX_FILES } from "@arcasync/shared";
 import type * as Y from "yjs";
 
 export interface IndexEntry {

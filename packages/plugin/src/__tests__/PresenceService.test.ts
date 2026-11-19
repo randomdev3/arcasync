@@ -3,7 +3,7 @@ import {
 	type PresencePolicy,
 	userColor,
 	type WorkspacePresence,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from "y-protocols/awareness";
 import * as Y from "yjs";

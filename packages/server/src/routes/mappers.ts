@@ -1,4 +1,4 @@
-import type { Role, User, WorkspaceSummary } from "@teamsync/shared";
+import type { Role, User, WorkspaceSummary } from "@arcasync/shared";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import type { UserRow } from "../db/schema.js";

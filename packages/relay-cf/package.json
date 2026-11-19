@@ -1,5 +1,5 @@
 {
-	"name": "@teamsync/relay-cf",
+	"name": "@arcasync/relay-cf",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
@@ -14,7 +14,7 @@
 		"budget": "node scripts/budget.ts"
 	},
 	"dependencies": {
-		"@teamsync/shared": "workspace:*",
+		"@arcasync/shared": "workspace:*",
 		"hono": "^4.6.0",
 		"jose": "^6.0.0",
 		"lib0": "^0.2.117",

@@ -21,7 +21,7 @@ import {
 	KEEPALIVE_PING,
 	KEEPALIVE_PONG,
 	parseDocName,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { CloneRateLimiter, cloneDocs } from "./clone";
 import type { Env } from "./env";
 import { errorBody } from "./errors";

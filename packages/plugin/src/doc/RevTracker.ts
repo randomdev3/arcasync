@@ -1,4 +1,4 @@
-import { DocRev } from "@teamsync/shared";
+import { DocRev } from "@arcasync/shared";
 import type * as Y from "yjs";
 
 /** The localStorage subset RevTracker uses. */

@@ -1,10 +1,10 @@
+import { parseDocName } from "@arcasync/shared";
 import type {
 	Extension,
 	onChangePayload,
 	onLoadDocumentPayload,
 	onStoreDocumentPayload,
 } from "@hocuspocus/server";
-import { parseDocName } from "@teamsync/shared";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import * as Y from "yjs";
 import type { Db } from "../db/index.js";

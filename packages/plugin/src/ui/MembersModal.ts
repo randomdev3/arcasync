@@ -1,4 +1,4 @@
-import type { Member, Role, WorkspaceSummary } from "@teamsync/shared";
+import type { Member, Role, WorkspaceSummary } from "@arcasync/shared";
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { type ApiClient, ApiRequestError } from "../net/ApiClient";
 import type { ConfirmOptions } from "./ConfirmModal";

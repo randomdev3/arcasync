@@ -1,4 +1,4 @@
-import { CHUNK_BYTES, chunkFile, fileHash } from "@teamsync/shared";
+import { CHUNK_BYTES, chunkFile, fileHash } from "@arcasync/shared";
 import { Platform } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limits } from "../platform";

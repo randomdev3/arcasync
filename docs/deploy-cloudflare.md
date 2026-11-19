@@ -23,16 +23,16 @@ characters, or equal to the public dev secret (outside `env.dev`), every route a
 
 1. Log in (opens a browser):
    ```sh
-   pnpm -F @teamsync/relay-cf exec wrangler login
+   pnpm -F @arcasync/relay-cf exec wrangler login
    ```
 2. Set the secret. It signs WebSocket JWTs and peppers session tokens, so rotating it signs
    everyone out. It is read from stdin and never stored in the repository:
    ```sh
-   openssl rand -base64 48 | pnpm -F @teamsync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env production
+   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env production
    ```
 3. Deploy:
    ```sh
-   pnpm -F @teamsync/relay-cf deploy:production
+   pnpm -F @arcasync/relay-cf deploy:production
    ```
 4. Check: `curl https://teamsync-relay.<subdomain>.workers.dev/api/health` returns `"ok":true`.
    `"ok":false` names the configuration problem.
@@ -48,9 +48,9 @@ as rows written). It runs only on the `probe` environment, and the worker is del
 
 1. Deploy, then confirm the guard: health reports `ok:false` before the secret exists.
    ```sh
-   pnpm -F @teamsync/relay-cf deploy:probe
+   pnpm -F @arcasync/relay-cf deploy:probe
    curl https://teamsync-relay-probe.<subdomain>.workers.dev/api/health
-   openssl rand -base64 48 | pnpm -F @teamsync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env probe
+   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env probe
    curl https://teamsync-relay-probe.<subdomain>.workers.dev/api/health   # now "ok":true
    ```
 2. Run the load probe. Its phases are 2 minutes apart, and it prints each phase's UTC window and
@@ -75,7 +75,7 @@ as rows written). It runs only on the `probe` environment, and the worker is del
    per update, and `connects` whether close events count as requests.
 5. **Teardown (always, also after a failure):**
    ```sh
-   pnpm -F @teamsync/relay-cf exec wrangler delete --env probe
+   pnpm -F @arcasync/relay-cf exec wrangler delete --env probe
    curl -s -o /dev/null -w '%{http_code}\n' https://teamsync-relay-probe.<subdomain>.workers.dev/api/health   # not 200
    ```
    Follow any CLI prompt about removing the Durable Object namespaces. Run `wrangler logout` when
@@ -101,9 +101,9 @@ daily DO request cap and 7% of rows written. No CPU or memory limit was hit.
 
 Every deploy creates a version. To go back to the previous one:
 ```sh
-pnpm -F @teamsync/relay-cf exec wrangler deployments list --env production
-pnpm -F @teamsync/relay-cf exec wrangler rollback --env production            # previous version
-pnpm -F @teamsync/relay-cf exec wrangler rollback <version-id> --env production
+pnpm -F @arcasync/relay-cf exec wrangler deployments list --env production
+pnpm -F @arcasync/relay-cf exec wrangler rollback --env production            # previous version
+pnpm -F @arcasync/relay-cf exec wrangler rollback <version-id> --env production
 ```
 A rollback changes code only. Durable Object storage and secrets stay as they are, so a rollback
 across a storage schema change needs care.

@@ -1,5 +1,5 @@
+import type { WorkspacePresence } from "@arcasync/shared";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import type { WorkspacePresence } from "@teamsync/shared";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 

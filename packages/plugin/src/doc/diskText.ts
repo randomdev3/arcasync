@@ -1,4 +1,4 @@
-import { sha256Hex } from "@teamsync/shared";
+import { sha256Hex } from "@arcasync/shared";
 
 /**
  * The text a note's CRDT holds for a file's raw content: no byte-order mark, LF line endings.

@@ -1,4 +1,4 @@
-import { docName, INDEX_REVS, parseDocName } from "@teamsync/shared";
+import { docName, INDEX_REVS, parseDocName } from "@arcasync/shared";
 import { Notice } from "obsidian";
 import { limits } from "../platform";
 import type { WorkspaceSession } from "../workspace/WorkspaceSession";

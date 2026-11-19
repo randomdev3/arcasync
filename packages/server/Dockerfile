@@ -13,12 +13,12 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @teamsync/shared... --filter @teamsync/server...
+    pnpm install --frozen-lockfile --filter @arcasync/shared... --filter @arcasync/server...
 COPY packages/shared packages/shared
 COPY packages/server packages/server
-RUN pnpm --filter @teamsync/shared build && pnpm --filter @teamsync/server build
+RUN pnpm --filter @arcasync/shared build && pnpm --filter @arcasync/server build
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --prod --filter @teamsync/shared... --filter @teamsync/server...
+    pnpm install --frozen-lockfile --prod --filter @arcasync/shared... --filter @arcasync/server...
 
 FROM base AS runtime
 ENV NODE_ENV=production

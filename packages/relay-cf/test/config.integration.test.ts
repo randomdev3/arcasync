@@ -4,7 +4,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionResponse, WorkspacesResponse } from "@teamsync/shared";
+import { SessionResponse, WorkspacesResponse } from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { startRelayDev } from "../scripts/dev-server.mjs";

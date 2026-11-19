@@ -1,4 +1,4 @@
-import { CHUNKS_MISSING_MAX, ChunksMissingResponse, sha256Hex } from "@teamsync/shared";
+import { CHUNKS_MISSING_MAX, ChunksMissingResponse, sha256Hex } from "@arcasync/shared";
 import type { RequestUrlResponse } from "obsidian";
 import { toApiError } from "../net/ApiClient";
 import { bearerRequest, header, sleep, type WorkspaceAuth } from "../net/bearer";

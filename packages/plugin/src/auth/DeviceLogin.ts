@@ -3,7 +3,7 @@ import {
 	type DeviceCodeResponse,
 	type DeviceInfo,
 	type SessionResponse,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { type ApiClient, ApiRequestError, NetworkError } from "../net/ApiClient";
 
 /** Added to the poll interval on every `slow_down` (RFC 8628 §3.5). */

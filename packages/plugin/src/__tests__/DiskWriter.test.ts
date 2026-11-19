@@ -1,4 +1,4 @@
-import { sha256Hex } from "@teamsync/shared";
+import { sha256Hex } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import { DiskWriter } from "../doc/DiskWriter";
 import { SelfWriteRegistry } from "../workspace/SelfWriteRegistry";

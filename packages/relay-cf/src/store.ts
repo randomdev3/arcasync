@@ -23,7 +23,7 @@
  * The merged states are cached in a bounded LRU (`maxCachedDocs`, `maxCachedBytes`). Eviction
  * is always safe: every accepted update is already in SQL, so an evicted doc just reloads.
  */
-import { CODEC_YJS_V1 } from "@teamsync/shared";
+import { CODEC_YJS_V1 } from "@arcasync/shared";
 import * as Y from "yjs";
 
 /** The subset of Cloudflare's `SqlStorage` the store needs (also satisfied by a node:sqlite shim). */

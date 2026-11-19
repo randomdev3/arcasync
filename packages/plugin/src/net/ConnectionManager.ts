@@ -1,9 +1,4 @@
 import {
-	HocuspocusProvider,
-	HocuspocusProviderWebsocket,
-	WebSocketStatus,
-} from "@hocuspocus/provider";
-import {
 	CLOSE_MEMBERSHIP_CHANGED,
 	createKeepaliveWebSocket,
 	FLUSH_DELAY_MS,
@@ -14,7 +9,12 @@ import {
 	type PresencePolicy,
 	parseDocName,
 	type ServerInfo,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
+import {
+	HocuspocusProvider,
+	HocuspocusProviderWebsocket,
+	WebSocketStatus,
+} from "@hocuspocus/provider";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { ApiRequestError } from "./ApiClient";

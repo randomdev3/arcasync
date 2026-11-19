@@ -3,7 +3,7 @@ import {
 	type PresenceUser,
 	userColor,
 	WorkspacePresence,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import type { Awareness } from "y-protocols/awareness";
 import type { IPresence } from "../workspace/types";
 

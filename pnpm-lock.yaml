@@ -29,6 +29,9 @@ importers:
 
   packages/plugin:
     dependencies:
+      '@arcasync/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@codemirror/state':
         specifier: 6.5.0
         version: 6.5.0
@@ -38,9 +41,6 @@ importers:
       '@hocuspocus/provider':
         specifier: 4.7.0
         version: 4.7.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
-      '@teamsync/shared':
-        specifier: workspace:*
-        version: link:../shared
       diff-match-patch:
         specifier: ^1.0.5
         version: 1.0.5
@@ -93,7 +93,7 @@ importers:
 
   packages/relay-cf:
     dependencies:
-      '@teamsync/shared':
+      '@arcasync/shared':
         specifier: workspace:*
         version: link:../shared
       hono:
@@ -142,6 +142,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@arcasync/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1129.0
@@ -157,9 +160,6 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.7.0
         version: 0.7.6(hono@4.13.7)(zod@4.6.1)
-      '@teamsync/shared':
-        specifier: workspace:*
-        version: link:../shared
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@cloudflare/workers-types@5.20261117.1)(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)

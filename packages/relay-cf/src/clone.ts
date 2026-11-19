@@ -9,7 +9,7 @@ import {
 	type CloneRequest,
 	encodeClone,
 	parseDocName,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import * as Y from "yjs";
 import type { DocStore } from "./store";
 

@@ -1,4 +1,4 @@
-import { CLONE_MAX_BYTES, decodeClone, docName } from "@teamsync/shared";
+import { CLONE_MAX_BYTES, decodeClone, docName } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import { CloneRateLimiter, cloneDocs } from "../src/clone";
 

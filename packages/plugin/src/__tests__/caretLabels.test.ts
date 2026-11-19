@@ -1,6 +1,6 @@
+import { userColor } from "@arcasync/shared";
 import { Compartment, EditorState, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { userColor } from "@teamsync/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from "y-protocols/awareness";
 import * as Y from "yjs";

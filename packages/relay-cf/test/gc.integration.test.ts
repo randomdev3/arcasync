@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { docName, type FileMeta, INDEX_FILES } from "@teamsync/shared";
+import { docName, type FileMeta, INDEX_FILES } from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
 import {

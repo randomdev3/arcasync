@@ -14,7 +14,7 @@ import {
 	FilesResponse,
 	INDEX_FILES,
 	ServerInfo,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { startRelayDev } from "../scripts/dev-server.mjs";

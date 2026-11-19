@@ -2,7 +2,7 @@
  * Chunk routes without an R2 binding (`env.probe`, which has no local env to start): 503
  * `chunks_unavailable`, and `/server-info` reports `features.chunks === false`.
  */
-import { CHUNK_BYTES } from "@teamsync/shared";
+import { CHUNK_BYTES } from "@arcasync/shared";
 import { describe, expect, it } from "vitest";
 import { signWsToken } from "../src/jwt";
 import { serverInfo } from "../src/serverInfo";

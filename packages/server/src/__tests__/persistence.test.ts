@@ -1,10 +1,10 @@
+import { docName } from "@arcasync/shared";
 import type {
 	Extension,
 	onChangePayload,
 	onLoadDocumentPayload,
 	onStoreDocumentPayload,
 } from "@hocuspocus/server";
-import { docName } from "@teamsync/shared";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";

@@ -1,4 +1,4 @@
-import type { FileMeta } from "@teamsync/shared";
+import type { FileMeta } from "@arcasync/shared";
 import type { BinaryOutcome } from "../files/FileSyncer";
 import type { IndexDelta, IndexStore } from "./IndexStore";
 import { newFileId } from "./ids";

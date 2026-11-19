@@ -1,4 +1,4 @@
-import { CLOSE_MEMBERSHIP_CHANGED, docName } from "@teamsync/shared";
+import { CLOSE_MEMBERSHIP_CHANGED, docName } from "@arcasync/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { ApiRequestError } from "../net/ApiClient";

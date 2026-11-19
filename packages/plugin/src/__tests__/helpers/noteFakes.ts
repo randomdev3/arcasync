@@ -1,5 +1,5 @@
+import { FileMeta } from "@arcasync/shared";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { FileMeta } from "@teamsync/shared";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { type DiskIO, DiskWriter } from "../../doc/DiskWriter";

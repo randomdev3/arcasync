@@ -20,7 +20,7 @@ import {
 	KEEPALIVE_INTERVAL_MS,
 	KEEPALIVE_RECONNECT_TIMEOUT_MS,
 	PRESENCE_RENEWAL_MS,
-} from "@teamsync/shared";
+} from "@arcasync/shared";
 import {
 	type ClientOptions,
 	client,

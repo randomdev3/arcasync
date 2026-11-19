@@ -1,4 +1,4 @@
-import { CHUNK_BYTES } from "@teamsync/shared";
+import { CHUNK_BYTES } from "@arcasync/shared";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../types.js";
 
