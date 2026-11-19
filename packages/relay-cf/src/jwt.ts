@@ -9,6 +9,8 @@ export const WsClaims = z.object({
 	ws: z.string(),
 	role: z.enum(["owner", "editor", "viewer"]),
 	dev: z.string(),
+	/** Seconds; the relay refuses a token issued at or before the user's last revocation (D5). */
+	iat: z.number(),
 	exp: z.number().optional(),
 });
 export type WsClaims = z.infer<typeof WsClaims>;

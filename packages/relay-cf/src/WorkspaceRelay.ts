@@ -5,12 +5,18 @@
  * Nothing needed for correctness lives only in memory: per-socket auth state is the socket
  * attachment, document state is SQLite (`DocStore`), and peers are found by scanning
  * `ctx.getWebSockets()`. In-memory maps are caches (awareness, merged doc state) or
- * short-lived ordering state (the per-socket promise chain, frames that precede their Auth).
- * No timers or alarms, so the object can hibernate between messages.
+ * short-lived ordering state (the per-socket promise chain, frames that precede their Auth),
+ * plus the `revocations` table loaded once per wake. No timers or alarms, so the object can
+ * hibernate between messages.
  */
 
 import { DurableObject } from "cloudflare:workers";
-import { KEEPALIVE_PING, KEEPALIVE_PONG, parseDocName } from "@teamsync/shared";
+import {
+	CLOSE_MEMBERSHIP_CHANGED,
+	KEEPALIVE_PING,
+	KEEPALIVE_PONG,
+	parseDocName,
+} from "@teamsync/shared";
 import type { Env } from "./env";
 import { verifyWsToken } from "./jwt";
 import {
@@ -51,6 +57,8 @@ interface Peer {
 }
 
 const RESET = { code: 4205, reason: "Reset Connection" };
+/** The user's membership or role changed: re-mint a token (new role) or learn of the removal. */
+const MEMBERSHIP_CHANGED = { code: CLOSE_MEMBERSHIP_CHANGED, reason: "membership-changed" };
 /** A socket published awareness claiming another user's identity. */
 const AWARENESS_IDENTITY = { code: 4403, reason: "awareness-identity" };
 const MAX_QUEUED_FRAMES = 1000;
@@ -134,12 +142,53 @@ export class WorkspaceRelay extends DurableObject<Env> {
 	private readonly queued = new Map<string, Map<string, Uint8Array[]>>();
 	/** docName → socket id → awareness entries that socket owns (cache; rebuilt via QueryAwareness). */
 	private readonly awareness = new Map<string, Map<string, Map<number, AwarenessEntry>>>();
+	/** userId → last revocation (ms); loaded from `revocations` on the first Auth of a wake. */
+	private revoked: Map<string, number> | null = null;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(KEEPALIVE_PING, KEEPALIVE_PONG));
 		this.store = new DocStore(ctx.storage.sql, (fn) => ctx.storage.transactionSync(fn));
 		this.stats = env.TEAMSYNC_DEBUG_STATS === "1" ? new Stats(ctx.storage.sql, this.store) : null;
+		ctx.storage.sql.exec(
+			"CREATE TABLE IF NOT EXISTS revocations (user_id TEXT PRIMARY KEY, at INTEGER NOT NULL)",
+		);
+	}
+
+	private revocations(): Map<string, number> {
+		if (!this.revoked) {
+			this.revoked = new Map(
+				this.ctx.storage.sql
+					.exec<{ user_id: string; at: number }>("SELECT user_id, at FROM revocations")
+					.toArray()
+					.map((r) => [r.user_id, r.at]),
+			);
+		}
+		return this.revoked;
+	}
+
+	/**
+	 * RPC from AccountsDO after a membership or role change (D5): records the revocation, so
+	 * tokens issued up to this second are refused, and closes the user's sockets with 4401.
+	 */
+	async revoke(userId: string): Promise<{ closed: number }> {
+		const at = Date.now();
+		this.ctx.storage.sql.exec(
+			`INSERT INTO revocations (user_id, at) VALUES (?, ?)
+			 ON CONFLICT (user_id) DO UPDATE SET at = excluded.at`,
+			userId,
+			at,
+		);
+		this.revocations().set(userId, at);
+		let closed = 0;
+		for (const ws of this.ctx.getWebSockets()) {
+			const att = this.attachment(ws);
+			if (att?.uid !== userId) continue;
+			for (const address of Object.keys(att.docs)) this.dropDoc(ws, att, address, true);
+			this.safeClose(ws, MEMBERSHIP_CHANGED.code, MEMBERSHIP_CHANGED.reason);
+			closed += 1;
+		}
+		return { closed };
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -299,7 +348,9 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		try {
 			const claims = await verifyWsToken(token, this.env.TEAMSYNC_SECRET);
 			const att = this.attachment(ws);
-			if (ref && att && claims.ws === ref.workspaceId && claims.ws === att.ws) {
+			const revokedAt = this.revocations().get(claims.sub);
+			const stale = revokedAt !== undefined && claims.iat <= Math.floor(revokedAt / 1000);
+			if (ref && att && !stale && claims.ws === ref.workspaceId && claims.ws === att.ws) {
 				readOnly = claims.role === "viewer";
 				uid = claims.sub;
 			}
