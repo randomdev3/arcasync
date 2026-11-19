@@ -12,6 +12,7 @@ import {
 	modalText,
 	notices,
 	openFile,
+	replaceRange,
 	setCursor,
 	typeKeys,
 } from "../editor.mjs";
@@ -93,7 +94,18 @@ export default {
 			assert.equal(closeCode, 4401, "bob's socket was closed with 4401");
 			step("bob demoted to viewer: socket closed 4401, editor read-only, typing stays local");
 
-			// 2. alice promotes bob back to editor.
+			// 2. alice promotes bob back to editor. bob's first token invalidation (the 4401's) is
+			// skipped, so the reconnect re-sends a token from before the revocation: the relay
+			// refuses it and each doc takes ConnectionManager's one re-Auth retry.
+			await bob.eval(`const t = app.plugins.plugins.teamsync.tokens;
+				const real = t.invalidate;
+				window.__tsInvalidations = 0;
+				t.invalidate = function (ws) {
+					if (window.__tsInvalidations++ === 0) return;
+					return real.call(this, ws);
+				};
+				window.__tsRestoreInvalidate = () => { t.invalidate = real; };
+				return true;`);
 			await waitFor(
 				() =>
 					inModal(
@@ -108,13 +120,35 @@ export default {
 				timeout: 5000,
 				label: "bob's editor writable within 5 s of the promotion",
 			});
+			const invalidations = await bob.eval(
+				"window.__tsRestoreInvalidate(); return window.__tsInvalidations;",
+			);
+			assert.ok(invalidations >= 2, `the stale token was refused (${invalidations} invalidations)`);
+			await waitFor(
+				() =>
+					bob.eval(
+						`const s = app.plugins.plugins.teamsync.session;
+						const note = await s.docs.peek(s.fileIdOf(args.path));
+						return s.indexProvider.synced && !!note?.provider.synced;`,
+						{ path: NOTE },
+					),
+				{ timeout: 5000, label: "bob's index and note providers synced after the retry" },
+			);
 			await setCursor(bob, { line: 0, ch: 5 });
 			await typeKeys(bob, " ok");
 			await waitFor(async () => (await editorText(alice)) === "roles ok\n", {
 				timeout: 5000,
 				label: `alice sees bob's " ok" (has ${JSON.stringify(await editorText(alice))})`,
 			});
-			step('bob promoted back to editor: writable again, his " ok" reaches alice');
+			// alice's members modal has the keyboard: her edit goes through the editor API.
+			await replaceRange(alice, "!", { line: 0, ch: 8 });
+			await waitFor(async () => (await editorText(bob)) === "roles ok!\n", {
+				timeout: 5000,
+				label: `bob sees alice's "!" (has ${JSON.stringify(await editorText(bob))})`,
+			});
+			step(
+				`bob promoted back to editor through a refused stale token and one re-Auth: writable, edits flow both ways`,
+			);
 
 			// 3. alice removes bob from dev (with confirmation).
 			await waitFor(
