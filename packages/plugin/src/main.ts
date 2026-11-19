@@ -712,11 +712,16 @@ export default class TeamSyncPlugin extends Plugin {
 	/**
 	 * Workspace id → mapped folder (or null) of every workspace that should be connected. A
 	 * mapping to a workspace this account is not (or no longer) a member of is kept but skipped.
+	 * The primary workspace opens unmapped only when no folder is mapped at all: a vault whose
+	 * only mapping lost its workspace must not start syncing into another one.
 	 */
 	private wantedWorkspaces(): Map<string, string | null> {
 		const known = new Set(this.settings.workspaces.map((w) => w.id));
-		const mapped = this.settings.sharedFolders.filter((f) => known.has(f.workspaceId));
-		if (mapped.length > 0) return new Map(mapped.map((f) => [f.workspaceId, f.path]));
+		const folders = this.settings.sharedFolders;
+		if (folders.length > 0) {
+			const mapped = folders.filter((f) => known.has(f.workspaceId));
+			return new Map(mapped.map((f) => [f.workspaceId, f.path]));
+		}
 		const primary = this.settings.workspaceId;
 		return known.has(primary) ? new Map([[primary, null]]) : new Map();
 	}
