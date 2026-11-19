@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -42,6 +43,30 @@ describe("wrangler.jsonc", () => {
 			]);
 		});
 	}
+
+	it("binds R2 CHUNKS to teamsync-chunks everywhere except probe", () => {
+		for (const env of [undefined, "production", "dev"]) {
+			expect(resolved(env).r2_buckets).toEqual([
+				{ binding: "CHUNKS", bucket_name: "teamsync-chunks" },
+			]);
+		}
+		expect(resolved("probe").r2_buckets).toEqual([]);
+	});
+
+	it("never binds anything remotely", () => {
+		expect(readFileSync(CONFIG, "utf8")).not.toMatch(/"remote"/);
+	});
+
+	it("sets TEAMSYNC_BOOTSTRAP_TOKEN in dev only", () => {
+		for (const env of [undefined, "production", "probe"]) {
+			expect("TEAMSYNC_BOOTSTRAP_TOKEN" in (resolved(env).vars as Record<string, string>)).toBe(
+				false,
+			);
+		}
+		expect((resolved("dev").vars as Record<string, string>).TEAMSYNC_BOOTSTRAP_TOKEN).toMatch(
+			/^teamsync-local-dev-bootstrap-token-not-secret/,
+		);
+	});
 
 	it("turns observability on in production only", () => {
 		expect(resolved("production").observability?.enabled).toBe(true);

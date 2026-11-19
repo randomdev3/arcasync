@@ -14,6 +14,10 @@
 		]
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountsDO", "WorkspaceRelay"] }],
+	// Environments do not inherit bindings either: production and dev repeat this, probe has none
+	// (no R2 in the probe, so its `features.chunks` stays false). Dev uses wrangler's local R2
+	// emulation; the production bucket is created by the user.
+	"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
 	"vars": {
 		"TEAMSYNC_DEV_OPEN_LOGIN": "0",
 		"TEAMSYNC_DEBUG_STATS": "0",
@@ -33,6 +37,7 @@
 					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
 				]
 			},
+			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
 			"vars": {
 				"TEAMSYNC_DEV_OPEN_LOGIN": "0",
 				"TEAMSYNC_DEBUG_STATS": "0",
@@ -48,9 +53,12 @@
 					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
 				]
 			},
+			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
 			"vars": {
 				"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
 				"TEAMSYNC_ALLOW_DEV_SECRET": "1",
+				// Public, dev only: the bearer for `POST /api/auth/bootstrap` in local tests and e2e.
+				"TEAMSYNC_BOOTSTRAP_TOKEN": "teamsync-local-dev-bootstrap-token-not-secret-0",
 				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
 				"TEAMSYNC_DEBUG_STATS": "1",
 				"TEAMSYNC_MAX_FILE_BYTES": "209715200"

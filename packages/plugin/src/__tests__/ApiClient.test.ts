@@ -67,7 +67,7 @@ describe("ApiClient", () => {
 		expect(calls).toHaveLength(0);
 	});
 
-	it("sends the requested dev-login role, and omits it when unset", async () => {
+	it("sends the requested dev-login role and workspace, and omits them when unset", async () => {
 		const user = {
 			id: "u1",
 			name: "carol",
@@ -81,8 +81,14 @@ describe("ApiClient", () => {
 
 		await api(null).devLogin("carol", device, "viewer");
 		await api(null).devLogin("carol", device);
+		await api(null).devLogin("carol", device, undefined, "second");
 
 		expect(JSON.parse(String(calls[0]?.body))).toEqual({ name: "carol", device, role: "viewer" });
 		expect(JSON.parse(String(calls[1]?.body))).toEqual({ name: "carol", device });
+		expect(JSON.parse(String(calls[2]?.body))).toEqual({
+			name: "carol",
+			device,
+			workspace: "second",
+		});
 	});
 });

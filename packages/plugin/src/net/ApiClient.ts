@@ -62,11 +62,19 @@ export class ApiClient {
 		return this.request("/server-info", { schema: ServerInfo, auth: false });
 	}
 
-	/** `role` applies only when the server creates a new membership for this user. */
-	devLogin(name: string, device: DeviceInfo, role?: Role): Promise<SessionResponse> {
+	/**
+	 * `role` applies only when the server creates a new membership for this user. `workspace`
+	 * (a slug) joins or creates that workspace instead of the default dev one (relay-cf only).
+	 */
+	devLogin(
+		name: string,
+		device: DeviceInfo,
+		role?: Role,
+		workspace?: string,
+	): Promise<SessionResponse> {
 		return this.request("/auth/dev-login", {
 			method: "POST",
-			body: { name, device, role },
+			body: { name, device, role, workspace },
 			schema: SessionResponse,
 			auth: false,
 		});

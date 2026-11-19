@@ -14,7 +14,7 @@ const PORT = 21_100 + Math.floor(Math.random() * 100);
 
 type Relay = { url: string; stop: () => Promise<void> };
 
-async function devLogin(base: string, name: string, role?: string) {
+async function devLogin(base: string, name: string, role?: string, workspace?: string) {
 	return fetch(`${base}/api/auth/dev-login`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -22,6 +22,7 @@ async function devLogin(base: string, name: string, role?: string) {
 			name,
 			device: { name: `${name}-device`, platform: "macos", vaultId: `${name}-vault` },
 			...(role ? { role } : {}),
+			...(workspace ? { workspace } : {}),
 		}),
 	});
 }
@@ -73,6 +74,26 @@ describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
 		const { workspaces } = WorkspacesResponse.parse(await res.json());
 		expect(workspaces).toHaveLength(1);
 		expect(workspaces[0]?.role).toBe("viewer");
+	});
+
+	it("joins or creates the dev-login workspace slug", async () => {
+		await devLogin(relay.url, "alice");
+		const alice = SessionResponse.parse(
+			await (await devLogin(relay.url, "alice", undefined, "second")).json(),
+		);
+		const bySlug = (s: SessionResponse, slug: string) => s.workspaces.find((w) => w.slug === slug);
+		expect(alice.workspaces.map((w) => w.slug).sort()).toEqual(["dev", "second"]);
+		// alice is the first member of `second`, so she owns it; her `dev` role is unchanged.
+		expect(bySlug(alice, "second")?.role).toBe("owner");
+		expect(bySlug(alice, "dev")?.role).toBe("owner");
+
+		const erin = SessionResponse.parse(
+			await (await devLogin(relay.url, "erin", undefined, "second")).json(),
+		);
+		expect(erin.workspaces.map((w) => [w.slug, w.role])).toEqual([["second", "editor"]]);
+		expect(bySlug(erin, "second")?.id).toBe(bySlug(alice, "second")?.id);
+
+		expect((await devLogin(relay.url, "erin", undefined, "Not A Slug")).status).toBe(400);
 	});
 
 	it("rejects an unknown role", async () => {

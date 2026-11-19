@@ -22,7 +22,7 @@ export const SESSION_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DEV_WORKSPACE_SLUG = "dev";
 
 export interface ApiError {
-	status: 400 | 401 | 403 | 404;
+	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 429 | 503;
 	code: string;
 	message: string;
 }
@@ -128,17 +128,17 @@ export class AccountsDO extends DurableObject<Env> {
 		return hex(await sha256(`${this.env.TEAMSYNC_SECRET}:${token}`));
 	}
 
-	private ensureDevWorkspace(): string {
+	private ensureDevWorkspace(slug = DEV_WORKSPACE_SLUG): string {
 		const existing = this.sql
-			.exec<{ id: string }>("SELECT id FROM workspaces WHERE slug = ?", DEV_WORKSPACE_SLUG)
+			.exec<{ id: string }>("SELECT id FROM workspaces WHERE slug = ?", slug)
 			.toArray()[0];
 		if (existing) return existing.id;
 		const id = crypto.randomUUID();
 		this.sql.exec(
 			"INSERT INTO workspaces (id, slug, name) VALUES (?, ?, ?)",
 			id,
-			DEV_WORKSPACE_SLUG,
-			"Dev",
+			slug,
+			slug === DEV_WORKSPACE_SLUG ? "Dev" : slug,
 		);
 		return id;
 	}
@@ -159,8 +159,16 @@ export class AccountsDO extends DurableObject<Env> {
 		return this.sql.exec<UserRow>("SELECT * FROM users WHERE id = ?", id).toArray()[0];
 	}
 
-	/** `role` applies only when this creates the membership; existing memberships keep theirs. */
-	async devLogin(name: string, device: DeviceInfo, role?: Role): Promise<Result<SessionResponse>> {
+	/**
+	 * `role` applies only when this creates the membership; existing memberships keep theirs.
+	 * `workspace` joins (or creates) that slug instead of `dev`.
+	 */
+	async devLogin(
+		name: string,
+		device: DeviceInfo,
+		role?: Role,
+		workspace?: string,
+	): Promise<Result<SessionResponse>> {
 		if (this.env.TEAMSYNC_DEV_OPEN_LOGIN !== "1") {
 			return fail(403, "forbidden", "Dev login is disabled");
 		}
@@ -181,7 +189,7 @@ export class AccountsDO extends DurableObject<Env> {
 		}
 		if (!user) return fail(400, "bad_request", "Could not create user");
 
-		const workspaceId = this.ensureDevWorkspace();
+		const workspaceId = this.ensureDevWorkspace(workspace);
 		const firstMember = this.sql
 			.exec("SELECT user_id FROM memberships WHERE workspace_id = ? LIMIT 1", workspaceId)
 			.toArray()[0];
