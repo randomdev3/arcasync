@@ -321,6 +321,24 @@ api.get("/debug/chunks", async (c) => {
 	});
 });
 
+/** Dev-only chunk GC: run it now (`graceMs` defaults to 0), or read the pending alarm. */
+api.post("/debug/gc", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const ws = c.req.query("ws") ?? "";
+	const graceMs = Number(c.req.query("graceMs") ?? 0);
+	if (!WORKSPACE_ID.test(ws) || !(Number.isFinite(graceMs) && graceMs >= 0)) {
+		return c.json(errorBody("bad_request", "Missing ?ws= or bad ?graceMs="), 400);
+	}
+	return c.json(await c.env.RELAY.getByName(ws).debugGc(ws, graceMs));
+});
+
+api.get("/debug/alarm", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const ws = c.req.query("ws") ?? "";
+	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
+	return c.json(await c.env.RELAY.getByName(ws).debugAlarm());
+});
+
 /** Dev-only attribution readout of one doc (P1-8): rows per user, client ids, tail, state size. */
 api.get("/debug/doc", async (c) => {
 	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);

@@ -6,12 +6,15 @@
  * attachment, document state is SQLite (`DocStore`), and peers are found by scanning
  * `ctx.getWebSockets()`. In-memory maps are caches (awareness, merged doc state) or
  * short-lived ordering state (the per-socket promise chain, frames that precede their Auth),
- * plus the `revocations` table loaded once per wake. No timers or alarms, so the object can
- * hibernate between messages.
+ * plus the `revocations` table loaded once per wake. No timers, so the object can hibernate
+ * between messages. The one alarm is chunk GC (D13): an index-doc write arms it at +24 h when none
+ * is pending; it fires once and only re-arms itself to continue a capped run.
  */
 
 import { DurableObject } from "cloudflare:workers";
 import {
+	CHUNK_GC_DELAY_MS,
+	CHUNK_GC_GRACE_MS,
 	CLOSE_MEMBERSHIP_CHANGED,
 	CloneRequest,
 	docName,
@@ -22,7 +25,8 @@ import {
 import { CloneRateLimiter, cloneDocs } from "./clone";
 import type { Env } from "./env";
 import { errorBody } from "./errors";
-import { FILES_TABLE, listFiles, projectFiles } from "./files";
+import { FILES_TABLE, listFiles, projectFiles, referencedChunks } from "./files";
+import { type ChunkGcResult, runChunkGc } from "./gc";
 import { verifyWsToken, type WsClaims } from "./jwt";
 import {
 	type AwarenessEntry,
@@ -37,7 +41,7 @@ import {
 	SyncStep,
 } from "./protocol";
 import { type DocDebug, DocStore } from "./store";
-import { bearerClaims } from "./wsAuth";
+import { bearerClaims, chunkPrefix } from "./wsAuth";
 
 interface DocAuth {
 	ro: boolean;
@@ -183,6 +187,8 @@ export class WorkspaceRelay extends DurableObject<Env> {
 	/** userId → last revocation (ms); loaded from `revocations` on the first Auth of a wake. */
 	private revoked: Map<string, number> | null = null;
 	private readonly cloneLimiter = new CloneRateLimiter();
+	/** Set once this wake has checked (and maybe armed) the chunk GC alarm. */
+	private gcArmChecked = false;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -501,6 +507,9 @@ export class WorkspaceRelay extends DurableObject<Env> {
 			for (const peer of this.peers(doc, att.id)) {
 				this.send(peer.ws, encode.update(peer.address, payload));
 			}
+			if (!this.gcArmChecked && this.env.CHUNKS && parseDocName(doc)?.kind === "index") {
+				this.armChunkGc();
+			}
 		}
 		// The SQL write above is durable before this ack leaves (DO output gate).
 		this.send(ws, encode.syncStatus(address, true));
@@ -679,6 +688,69 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		this.stats?.addRows(rowsWritten);
 	}
 
+	// --- chunk GC (D13) ---
+
+	/** One `getAlarm` per wake; arms `+delay` only when no alarm is pending. */
+	private armChunkGc(): void {
+		this.gcArmChecked = true;
+		const override = Number(this.env.TEAMSYNC_CHUNK_GC_DELAY_MS);
+		const delay = Number.isFinite(override) && override > 0 ? override : CHUNK_GC_DELAY_MS;
+		void (async () => {
+			if ((await this.ctx.storage.getAlarm()) === null) {
+				await this.ctx.storage.setAlarm(Date.now() + delay);
+			}
+		})().catch((err) => console.error("relay: could not arm chunk GC", err));
+	}
+
+	/** The workspace this object serves, from any stored doc name (alarms carry no request). */
+	private storedWorkspaceId(): string | null {
+		for (const table of ["doc_updates", "doc_state"]) {
+			const row = this.ctx.storage.sql
+				.exec<{ doc: string }>(`SELECT doc FROM ${table} LIMIT 1`)
+				.toArray()[0];
+			const ref = row ? parseDocName(row.doc) : null;
+			if (ref) return ref.workspaceId;
+		}
+		return null;
+	}
+
+	async alarm(): Promise<void> {
+		// Errors are logged, not thrown: a thrown alarm is retried, which would re-arm it.
+		try {
+			const workspaceId = this.storedWorkspaceId();
+			const result = workspaceId ? await this.collectChunks(workspaceId, CHUNK_GC_GRACE_MS) : null;
+			// Uncapped and done: the next index write (even in this wake) may arm again.
+			if (!result?.capped) this.gcArmChecked = false;
+		} catch (err) {
+			console.error("relay: chunk GC failed", err);
+		}
+		this.stats?.flush();
+	}
+
+	private async collectChunks(workspaceId: string, graceMs: number): Promise<ChunkGcResult | null> {
+		const bucket = this.env.CHUNKS;
+		if (!bucket) return null;
+		const sql = this.ctx.storage.sql;
+		const now = Date.now();
+		const result = await runChunkGc({
+			bucket,
+			prefix: chunkPrefix(workspaceId),
+			project: () => {
+				this.projectFiles(workspaceId);
+				return referencedChunks(sql);
+			},
+			now,
+			graceMs,
+			rearm: (at) => this.ctx.storage.setAlarm(at),
+		});
+		sql.exec(
+			`INSERT INTO _meta (key, value) VALUES ('gc_last', ?)
+			 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+			JSON.stringify({ at: now, ...result }),
+		);
+		return result;
+	}
+
 	// --- dev-only instrumentation (worker gates these on TEAMSYNC_DEBUG_STATS) ---
 
 	async debugStats(): Promise<Record<string, unknown>> {
@@ -703,6 +775,23 @@ export class WorkspaceRelay extends DurableObject<Env> {
 
 	async debugDoc(doc: string): Promise<DocDebug> {
 		return this.store.debug(doc);
+	}
+
+	async debugAlarm(): Promise<{ alarmAt: number | null; gcLast: unknown }> {
+		const row = this.ctx.storage.sql
+			.exec<{ value: string }>("SELECT value FROM _meta WHERE key = 'gc_last'")
+			.toArray()[0];
+		return {
+			alarmAt: await this.ctx.storage.getAlarm(),
+			gcLast: row ? (JSON.parse(row.value) as unknown) : null,
+		};
+	}
+
+	/** Runs chunk GC now with `graceMs` (re-arms only if capped, like the alarm). */
+	async debugGc(workspaceId: string, graceMs: number): Promise<ChunkGcResult | null> {
+		const result = await this.collectChunks(workspaceId, graceMs);
+		this.stats?.flush();
+		return result;
 	}
 
 	async debugReset(): Promise<{ ok: true }> {
