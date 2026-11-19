@@ -432,7 +432,11 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		options.onFail();
 	};
 	canvas.addEventListener("webglcontextlost", onLost);
-	window.addEventListener("pagehide", dispose);
+	// Kept in the back/forward cache, the page comes back as it was; only a real unload disposes.
+	const onPageHide = (event: PageTransitionEvent) => {
+		if (!event.persisted) dispose();
+	};
+	window.addEventListener("pagehide", onPageHide);
 
 	function dispose() {
 		if (disposed) return;
@@ -442,7 +446,7 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		intersection.disconnect();
 		document.removeEventListener("visibilitychange", onVisibility);
 		window.removeEventListener("pointermove", onPointer);
-		window.removeEventListener("pagehide", dispose);
+		window.removeEventListener("pagehide", onPageHide);
 		canvas.removeEventListener("webglcontextlost", onLost);
 		page.traverse((object) => {
 			const mesh = object as Mesh;

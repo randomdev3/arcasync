@@ -60,9 +60,17 @@ function render(state: ApproveState) {
 			codeError.hidden = !state.fieldError;
 			codeError.textContent = state.fieldError ?? "";
 			input.setAttribute("aria-invalid", String(Boolean(state.fieldError)));
+			// The flow's own rate-limit copy ("Too many lookups…") wins over the shared one.
 			renderError(
 				$("[data-ready-error]"),
-				state.error ? { message: describeError(state.error).message } : null,
+				state.error
+					? {
+							message:
+								state.error.code === "rate_limited"
+									? state.error.message
+									: describeError(state.error).message,
+						}
+					: null,
 			);
 			const cooling = state.cooldownUntil !== null;
 			$("[data-cooldown]").hidden = !cooling;
@@ -74,7 +82,11 @@ function render(state: ApproveState) {
 				focus(input);
 				announce(state.fieldError);
 			} else if (state.error) {
-				announce(state.error.message);
+				announce(
+					state.error.code === "rate_limited"
+						? state.error.message
+						: describeError(state.error).message,
+				);
 			}
 			break;
 		}
