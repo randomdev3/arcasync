@@ -5,7 +5,6 @@
 import {
 	API_PREFIX,
 	BootstrapRequest,
-	CHUNK_BYTES,
 	DeviceApproveRequest,
 	DeviceCodePollRequest,
 	DeviceCodeStartRequest,
@@ -16,9 +15,7 @@ import {
 	ME_CACHE_TTL_MS,
 	MemberUpdateRequest,
 	type MeResponse,
-	PRESENCE_RENEWAL_MS,
 	parseDocName,
-	type ServerInfo,
 	WorkspaceCreateRequest,
 	WS_PATH,
 	WsTokenRequest,
@@ -27,14 +24,17 @@ import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import type { z } from "zod";
 import type { ApiError, Result } from "./AccountsDO";
+import { chunks } from "./chunks";
 import { configError } from "./config";
 import type { Env } from "./env";
+import { errorBody } from "./errors";
 import { cachedResult, createMeCache } from "./meCache";
+import { RELAY_VERSION, serverInfo } from "./serverInfo";
+import { chunkPrefix } from "./wsAuth";
 
 export { AccountsDO } from "./AccountsDO";
 export { WorkspaceRelay } from "./WorkspaceRelay";
 
-const RELAY_VERSION = "0.0.1-cf";
 const ACCOUNTS_NAME = "accounts";
 const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -64,10 +64,6 @@ app.use(
 		maxAge: 600,
 	}),
 );
-
-const errorBody = (code: string, message: string, details?: unknown) => ({
-	error: { code, message, ...(details === undefined ? {} : { details }) },
-});
 
 let configErrorLogged = false;
 
@@ -124,22 +120,9 @@ const api = new Hono<{ Bindings: Env }>();
 
 api.get("/health", (c) => c.json({ ok: true, version: RELAY_VERSION }));
 
-api.get("/server-info", (c) =>
-	c.json({
-		name: "TeamSync",
-		version: RELAY_VERSION,
-		publicUrl: publicUrl(c),
-		features: {
-			devOpenLogin: c.env.TEAMSYNC_DEV_OPEN_LOGIN === "1",
-			presign: false,
-			excalidraw: false,
-			textKeepalive: true,
-			presenceRenewalMs: PRESENCE_RENEWAL_MS,
-			accounts: true,
-		},
-		limits: { maxFileBytes: Number(c.env.TEAMSYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
-	} satisfies ServerInfo),
-);
+api.get("/server-info", (c) => c.json(serverInfo(c.env, publicUrl(c))));
+
+api.route("/chunks", chunks);
 
 api.post("/auth/dev-login", async (c) => {
 	const body = DevLoginRequest.safeParse(await jsonBody(c.req.raw));
@@ -306,6 +289,24 @@ api.on(["GET", "POST"], "/debug/:op{stats|reset}", async (c) => {
 	const op = c.req.param("op");
 	if (op === "reset") return c.json(await relay.debugReset());
 	return c.json(await relay.debugStats());
+});
+
+const DEBUG_CHUNKS_MAX = 1000;
+
+/** Dev-only: the workspace's R2 objects (≤ 1000), so tests see what is stored. */
+api.get("/debug/chunks", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	const ws = c.req.query("ws") ?? "";
+	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
+	if (!c.env.CHUNKS) return c.json(errorBody("chunks_unavailable", "No chunk storage"), 503);
+	const listed = await c.env.CHUNKS.list({ prefix: chunkPrefix(ws), limit: DEBUG_CHUNKS_MAX });
+	return c.json({
+		objects: listed.objects.map((o) => ({
+			key: o.key,
+			size: o.size,
+			uploaded: o.uploaded.getTime(),
+		})),
+	});
 });
 
 /** Dev-only attribution readout of one doc (P1-8): rows per user, client ids, tail, state size. */

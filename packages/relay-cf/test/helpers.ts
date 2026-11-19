@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import {
 	BootstrapResponse,
 	createKeepaliveWebSocket,
 	installPresencePolicy,
+	type Role,
 	SessionResponse,
 	type WebSocketClass,
 	WS_PATH,
@@ -245,4 +247,50 @@ export async function resetStats(base: string, workspaceId: string): Promise<voi
 export async function stats(base: string, workspaceId: string): Promise<RelayStats> {
 	const res = await fetch(`${base}/api/debug/stats?ws=${workspaceId}`);
 	return (await res.json()) as RelayStats;
+}
+
+/** dev-login into workspace `slug` (joined or created; `role` only applies to a new membership). */
+export async function loginTo(base: string, name: string, slug: string, role?: Role) {
+	const session = SessionResponse.parse(
+		await post(base, "/api/auth/dev-login", { name, device: device(name), workspace: slug, role }),
+	);
+	const workspace = session.workspaces.find((w) => w.slug === slug);
+	if (!workspace) throw new Error(`no workspace ${slug}`);
+	const token = wsTokenFor(base, session.sessionToken, workspace.id);
+	return { session, workspaceId: workspace.id, token };
+}
+
+export const sha256Hex = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
+
+/** `PUT /api/chunks/:sha` with a WS-JWT bearer; `fetch` sets Content-Length from the bytes. */
+export async function putChunk(base: string, jwt: string, sha: string, data: Uint8Array) {
+	const res = await fetch(`${base}/api/chunks/${sha}`, {
+		method: "PUT",
+		headers: { authorization: `Bearer ${jwt}`, "content-type": "application/octet-stream" },
+		body: data as Uint8Array<ArrayBuffer>,
+	});
+	const text = await res.text();
+	return { status: res.status, body: text ? (JSON.parse(text) as unknown) : null };
+}
+
+export async function getChunk(base: string, jwt: string, sha: string) {
+	const res = await fetch(`${base}/api/chunks/${sha}`, {
+		headers: { authorization: `Bearer ${jwt}` },
+	});
+	return {
+		status: res.status,
+		headers: res.headers,
+		bytes: new Uint8Array(await res.arrayBuffer()),
+	};
+}
+
+export interface ChunkObject {
+	key: string;
+	size: number;
+	uploaded: number;
+}
+
+export async function debugChunks(base: string, workspaceId: string): Promise<ChunkObject[]> {
+	return ((await get(base, `/api/debug/chunks?ws=${workspaceId}`)) as { objects: ChunkObject[] })
+		.objects;
 }
