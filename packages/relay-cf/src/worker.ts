@@ -70,7 +70,8 @@ app.use(
 		origin: (origin, c) => (origin && isAllowedOrigin(origin, c.env) ? origin : ALLOWED_ORIGINS[0]),
 		allowHeaders: ["Authorization", "Content-Type", "X-Workspace-Id"],
 		allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-		credentials: true,
+		// Bearer tokens only, never cookies: no `Access-Control-Allow-Credentials`.
+		credentials: false,
 		// Preflights are Worker requests too: let browsers cache them as long as they will (2 h).
 		maxAge: 7200,
 	}),

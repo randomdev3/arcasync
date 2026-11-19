@@ -74,6 +74,8 @@ describe("CORS for the website", () => {
 		expect(headers).toContain("content-type");
 		expect(res.headers.get("access-control-allow-methods")).toContain("POST");
 		expect(res.headers.get("access-control-max-age")).toBe("7200");
+		// Bearer tokens, no cookies: credentialed cross-origin requests are not allowed.
+		expect(res.headers.get("access-control-allow-credentials")).toBeNull();
 	});
 
 	it("never reflects an origin that is not allowed", async () => {
