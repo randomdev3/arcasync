@@ -28,8 +28,10 @@ const SUB_EDITOR = ".markdown-embed, .table-cell-wrapper, .popover";
 
 /** What the bindings need from the plugin; `TeamSyncPlugin` provides it. */
 export interface BindingHost {
-	/** The connected workspace session, or null. */
-	readonly session: WorkspaceSession | null;
+	/** Every connected workspace session. */
+	readonly sessions: readonly WorkspaceSession[];
+	/** The session whose mapped folder contains `vaultPath`, or null. */
+	sessionFor(vaultPath: string): WorkspaceSession | null;
 	/** The view in the active leaf, if it is a Markdown view. */
 	activeView(): MarkdownView | null;
 }
@@ -75,9 +77,10 @@ export function minimalChange(from: string, to: string): ChangeSpec | null {
  * Binds every Markdown editor showing a synced note to that note's CRDT with y-codemirror.next.
  *
  * One `EditorBinding` per CodeMirror view; Obsidian replaces the editor state on every file load,
- * which recreates the binding, so a file switch is an unbind plus a fresh bind. Bindings are
- * re-evaluated whenever the session changes (connect, disconnect, stop/start) and on every index
- * change (a note just created or renamed gains its file id later than its editor opens).
+ * which recreates the binding, so a file switch is an unbind plus a fresh bind. Each note binds to
+ * the session whose mapped folder contains it. Bindings are re-evaluated whenever the sessions
+ * change (connect, disconnect, stop/start, a mapping added or removed) and on every index change
+ * of any session (a note just created or renamed gains its file id later than its editor opens).
  *
  * Budget rule: only the note of the active leaf publishes an awareness state; every other bound
  * note's local state is null, which also stops its presence renewals.
@@ -86,8 +89,8 @@ export class EditorBindings {
 	/** Holds `yCollab` (and read-only facets) for bound editors; empty otherwise. */
 	readonly collab = new Compartment();
 	private readonly views = new Set<EditorBinding>();
-	private session: WorkspaceSession | null = null;
-	private offIndex: (() => void) | null = null;
+	/** Index-change subscriptions, one per session the host had at the last `sessionChanged`. */
+	private readonly watched = new Map<WorkspaceSession, () => void>();
 
 	constructor(readonly host: BindingHost) {}
 
@@ -104,13 +107,20 @@ export class EditorBindings {
 		this.views.delete(binding);
 	}
 
-	/** Re-reads the host's session; call when it may have changed. */
+	/** Re-reads the host's sessions; call when they may have changed. */
 	sessionChanged(): void {
-		const session = this.host.session;
-		if (session !== this.session) {
-			this.offIndex?.();
-			this.offIndex = session?.onIndexChange(() => this.refresh()) ?? null;
-			this.session = session;
+		const sessions = new Set(this.host.sessions);
+		for (const [session, off] of this.watched) {
+			if (sessions.has(session)) continue;
+			off();
+			this.watched.delete(session);
+		}
+		for (const session of sessions) {
+			if (!this.watched.has(session))
+				this.watched.set(
+					session,
+					session.onIndexChange(() => this.refresh()),
+				);
 		}
 		this.refresh();
 	}
@@ -127,7 +137,7 @@ export class EditorBindings {
 		const file = info.file;
 		if (file?.extension !== "md") return null;
 		if (view.dom.closest(SUB_EDITOR)) return null;
-		const session = this.host.session;
+		const session = this.host.sessionFor(file.path);
 		const docs = session?.docs;
 		if (!session || !docs) return null;
 		const fileId = session.fileIdOf(file.path);
@@ -153,7 +163,7 @@ export class EditorBindings {
 				focusedView = binding.view;
 			}
 		}
-		const user = this.host.session?.user;
+		const user = this.host.sessions[0]?.user;
 		for (const note of notes) {
 			const state = note.awareness.getLocalState();
 			if (note === focused && user) {
@@ -176,9 +186,8 @@ export class EditorBindings {
 	}
 
 	destroy(): void {
-		this.offIndex?.();
-		this.offIndex = null;
-		this.session = null;
+		for (const off of this.watched.values()) off();
+		this.watched.clear();
 	}
 }
 
