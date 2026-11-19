@@ -77,7 +77,13 @@ It prints the invite link (`invite.url`). With `ARCASYNC_PUBLIC_URL` set (produc
 unset, it is an `obsidian://arcasync?…` deep link carrying the server URL and the invite token. A second bootstrap answers `409 already_bootstrapped`; a missing or wrong
 token answers `401`, and a server without `ARCASYNC_BOOTSTRAP_TOKEN` answers `404`. Delete the
 secret afterwards if you like (`wrangler secret delete ARCASYNC_BOOTSTRAP_TOKEN --env production`);
-it is never needed again.
+it is only needed again for a reset.
+
+**Reset (start over).** Sending `"reset": true` with the same bearer deletes every account,
+device, session, membership, invite, PIN and password, then issues a fresh owner + admin invite.
+Workspaces and their notes stay; the one named `workspaceName` is reused, so pass the same name
+(`{"workspaceName":"Friends","reset":true}`). Use it when the bootstrap link expired unused or the
+wrong person took it. Put the secret back first if you deleted it, and delete it again afterwards.
 
 **First sign-in.** Open the printed link. On the website's join page, either create the account
 in the browser (then sign Obsidian in with a device code approved on `/approve`) or choose "Open in
