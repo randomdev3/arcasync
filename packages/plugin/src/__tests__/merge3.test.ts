@@ -107,6 +107,40 @@ describe("merge3", () => {
 		}
 	});
 
+	it("merges 200 random disjoint edits of notes made of repeated lines", () => {
+		// Checklists and tables: the same line many times, so a patch's context is not unique.
+		const vocab = ["- [ ] task", "- [x] done", "| a | b |", "|---|---|", "", "## Heading", "text"];
+		for (let seed = 1; seed <= 200; seed++) {
+			const r = rng(500 + seed);
+			const n = 4 + r.int(12);
+			const base = Array.from({ length: n }, () => vocab[r.int(vocab.length)] as string);
+			const s1 = r.int(n - 2);
+			const e1 = s1 + r.int(Math.min(3, n - 2 - s1));
+			const s2 = e1 + 1 + r.int(n - e1 - 1);
+			const e2 = s2 + r.int(Math.min(3, n - s2) + 1);
+			const repl = (tag: string) =>
+				Array.from({ length: r.int(3) }, (_, i) => `${tag}${i} ${vocab[r.int(vocab.length)]}`);
+			const ours = repl("O");
+			const theirs = repl("T");
+			const text = (lines: string[]) => `${lines.join("\n")}\n`;
+			const result = merge3(
+				text(base),
+				text([...base.slice(0, s1), ...ours, ...base.slice(e1)]),
+				text([...base.slice(0, s2), ...theirs, ...base.slice(e2)]),
+			);
+			// Repeated context may make a merge ambiguous; it is then refused, never wrong.
+			if (!result.ok) continue;
+			const expected = [
+				...base.slice(0, s1),
+				...ours,
+				...base.slice(e1, s2),
+				...theirs,
+				...base.slice(e2),
+			];
+			expect(result.text, `seed ${seed}`).toBe(text(expected));
+		}
+	});
+
 	it("never drops either side's insert in 200 random overlapping edits", () => {
 		let merged = 0;
 		for (let seed = 1; seed <= 200; seed++) {
