@@ -194,3 +194,24 @@ export function readPng(file) {
 export function notices(v) {
 	return v.eval('return [...document.querySelectorAll(".notice")].map((n) => n.textContent);');
 }
+
+/**
+ * Runs `body` in vault `v` with \`root\` = the TeamSync modal that contains \`args.selector\`;
+ * null while there is none. Modals are found through the plugin (`modals`), since Obsidian may
+ * open one in another window's document.
+ */
+export function inModal(v, selector, body, args = {}) {
+	return v.eval(
+		`const modal = [...app.plugins.plugins.teamsync.modals].find((m) =>
+			m.modalEl.querySelector(args.selector));
+		if (!modal) return null;
+		const root = modal.modalEl;
+		${body}`,
+		{ ...args, selector },
+	);
+}
+
+/** The text of the open modal's element matching `selector`, or null while absent. */
+export function modalText(v, selector) {
+	return inModal(v, selector, "return root.querySelector(args.selector).textContent.trim();");
+}

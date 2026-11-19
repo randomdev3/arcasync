@@ -3,6 +3,7 @@
 // with a device code that dave approves (polling no faster than every 5 s); sign-out revokes the
 // session on the relay, past the Worker's `/me` cache.
 import assert from "node:assert/strict";
+import { inModal, modalText } from "../editor.mjs";
 import { waitFor } from "../obsidian.mjs";
 
 const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? null;`;
@@ -37,26 +38,6 @@ async function settingsForm(v, { fill = {}, click, keepOpen = false }) {
 	} finally {
 		if (!keepOpen) await v.eval("app.setting.close(); return true;");
 	}
-}
-
-/**
- * Runs `body` with \`root\` = the plugin's open modal containing \`args.selector\`, or returns null.
- * Modals are found through the plugin: Obsidian may open one in another window's document.
- */
-function inModal(v, selector, body, args = {}) {
-	return v.eval(
-		`const modal = [...app.plugins.plugins.teamsync.modals].find((m) =>
-			m.modalEl.querySelector(args.selector));
-		if (!modal) return null;
-		const root = modal.modalEl;
-		${body}`,
-		{ ...args, selector },
-	);
-}
-
-/** The text of the open modal's element matching `selector`, or null while absent. */
-function modalText(v, selector) {
-	return inModal(v, selector, "return root.querySelector(args.selector).textContent.trim();");
 }
 
 function plugin(v) {
