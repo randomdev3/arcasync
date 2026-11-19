@@ -14,6 +14,16 @@
 		]
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountsDO", "WorkspaceRelay"] }],
+	// The website (packages/site, built by turbo before this package). Static files are served by
+	// the asset layer and never invoke the Worker (free, unlimited); unknown paths get 404.html from
+	// the asset layer too. Only `/api/*` and `/ws` run the Worker. No binding: the Worker never
+	// reads assets. Inherited by every env (test/config.test.ts checks it).
+	"assets": {
+		"directory": "../site/dist",
+		"html_handling": "auto-trailing-slash",
+		"not_found_handling": "404-page",
+		"run_worker_first": ["/api/*", "/ws"]
+	},
 	// Environments do not inherit bindings either: production and dev repeat this, probe has none
 	// (no R2 in the probe, so its `features.chunks` stays false). Dev uses wrangler's local R2
 	// emulation; the production bucket is created by the user.
@@ -61,7 +71,11 @@
 				"ARCASYNC_BOOTSTRAP_TOKEN": "arcasync-local-dev-bootstrap-token-not-secret-0",
 				"ARCASYNC_DEV_OPEN_LOGIN": "1",
 				"ARCASYNC_DEBUG_STATS": "1",
-				"ARCASYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_MAX_FILE_BYTES": "209715200",
+				// Base of invite and device-code links (`/join?invite=`, `/approve?code=`). Unset in
+				// production and probe until the public host is decided: the request origin is used.
+				// scripts/dev-server.mjs overrides it with the port it starts on.
+				"ARCASYNC_PUBLIC_URL": "http://localhost:8789"
 			}
 		},
 		// Throwaway free-tier probe (R-9): open dev login and debug stats, secret via `wrangler

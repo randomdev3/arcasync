@@ -76,9 +76,22 @@ async function userColor(seed: string): Promise<string> {
 	return PALETTE[(digest[0] ?? 0) % PALETTE.length] ?? "#2f90d0";
 }
 
-/** `obsidian://` link the plugin's protocol handler turns into a prefilled join. */
+/**
+ * The website's join page (`packages/site`), which offers "create your account here" and "open in
+ * Obsidian" (the `obsidian://arcasync?server=…&invite=…` link, built by the page). The plugin also
+ * accepts this https link pasted into its settings. Older `obsidian://` links keep working.
+ */
 export function inviteUrl(publicUrl: string, token: string): string {
-	return `obsidian://arcasync?server=${encodeURIComponent(publicUrl)}&invite=${token}`;
+	return `${trimSlashes(publicUrl)}/join?invite=${token}`;
+}
+
+/** The website's approve page, prefilled with the code (`verificationUri` of a device code). */
+export function approveUrl(publicUrl: string, userCode: string): string {
+	return `${trimSlashes(publicUrl)}/approve?code=${userCode}`;
+}
+
+function trimSlashes(url: string): string {
+	return url.replace(/\/+$/, "");
 }
 
 /** Lowercase `a-z0-9-`, at most 40 characters (the `DevLoginRequest.workspace` slug shape). */
@@ -945,7 +958,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	/** Unauthenticated: a new device asks for a code that a signed-in device approves. */
-	async deviceStart(device: DeviceInfo): Promise<Result<DeviceCodeResponse>> {
+	async deviceStart(device: DeviceInfo, publicUrl: string): Promise<Result<DeviceCodeResponse>> {
 		this.calls += 1;
 		const deviceCode = newOpaqueToken();
 		const codeHash = await this.hashToken(deviceCode);
@@ -969,7 +982,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({
 			deviceCode,
 			userCode,
-			verificationUri: `obsidian://arcasync?approve=${userCode}`,
+			verificationUri: approveUrl(publicUrl, userCode),
 			interval: DEVICE_CODE_INTERVAL_S,
 			expiresIn: ttl,
 		});

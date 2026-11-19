@@ -261,7 +261,7 @@ api.get("/admin/audit", async (c) => {
 api.post("/auth/device/start", async (c) => {
 	const body = await parseBody(c, DeviceCodeStartRequest);
 	if (!body) return badRequest(c);
-	return reply(c, await accounts(c.env).deviceStart(body.device));
+	return reply(c, await accounts(c.env).deviceStart(body.device, publicUrl(c)));
 });
 
 api.post("/auth/device/poll", async (c) => {

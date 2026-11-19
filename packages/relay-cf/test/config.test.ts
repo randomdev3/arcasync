@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { unstable_readConfig } from "wrangler";
@@ -71,6 +71,29 @@ describe("wrangler.jsonc", () => {
 	it("turns observability on in production only", () => {
 		expect(resolved("production").observability?.enabled).toBe(true);
 		expect(resolved(undefined).observability?.enabled).toBe(false);
+	});
+
+	it("serves the site from static assets in every env, with only /api/* and /ws on the Worker", () => {
+		const site = resolve(dirname(CONFIG), "..", "site", "dist");
+		for (const env of [undefined, "production", "dev", "probe"]) {
+			const assets = resolved(env).assets;
+			expect(assets, `env ${env}`).toBeDefined();
+			expect(resolve(dirname(CONFIG), assets?.directory ?? "")).toBe(site);
+			expect(assets?.run_worker_first).toEqual(["/api/*", "/ws"]);
+			// Unknown paths stay on the (free) asset layer instead of falling through to the Worker.
+			expect(assets?.not_found_handling).toBe("404-page");
+			expect(assets?.html_handling).toBe("auto-trailing-slash");
+			expect(assets?.binding).toBeUndefined();
+		}
+	});
+
+	it("sets ARCASYNC_PUBLIC_URL for dev only (elsewhere the request origin is used)", () => {
+		for (const env of [undefined, "production", "probe"]) {
+			expect("ARCASYNC_PUBLIC_URL" in (resolved(env).vars as Record<string, string>)).toBe(false);
+		}
+		expect((resolved("dev").vars as Record<string, string>).ARCASYNC_PUBLIC_URL).toBe(
+			"http://localhost:8789",
+		);
 	});
 
 	it("serves wrangler dev on 8789", () => {
