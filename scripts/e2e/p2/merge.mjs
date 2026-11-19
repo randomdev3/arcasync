@@ -25,13 +25,21 @@ function rev(v, id) {
 	);
 }
 
-/** The merge base bob's note doc keeps in IndexedDB (null while the note is not attached). */
+/**
+ * The merge base bob's note doc keeps in IndexedDB. The note is acquired for the read: after a
+ * session restart (an earlier scenario's sign-out) an up-to-date note is not attached.
+ */
 function base(v, path) {
 	return v.eval(
 		`const s = app.plugins.plugins.teamsync?.session;
 		const id = s?.fileIdOf(args.path);
-		const note = id ? await s.docs?.peek(id) : null;
-		return note ? ((await note.getLastSyncedText()) ?? null) : null;`,
+		if (!id || !s.docs) return null;
+		const note = await s.docs.acquire(id, args.path);
+		try {
+			return (await note.getLastSyncedText()) ?? null;
+		} finally {
+			s.docs.release(note);
+		}`,
 		{ path },
 	);
 }
