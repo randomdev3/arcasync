@@ -63,8 +63,95 @@
 						</table>
 						<p class="muted" data-no-workspaces hidden>No workspaces yet.</p>
 					</div>
+					<form class="card" data-password-form novalidate>
+						<h2 class="card__title" data-password-title>Password</h2>
+						<p class="muted" data-password-desc></p>
+						<input type="text" class="visually-hidden" autocomplete="username" tabindex="-1" aria-hidden="true" data-password-username />
+						<div class="field" data-password-current>
+							<label for="password-current">Current password</label>
+							<input
+								id="password-current"
+								class="input"
+								type="password"
+								autocomplete="current-password"
+								maxlength="256"
+								aria-describedby="password-current-error"
+							/>
+							<p class="field-error" id="password-current-error" hidden></p>
+						</div>
+						<div class="field">
+							<label for="password-new">New password</label>
+							<input
+								id="password-new"
+								class="input"
+								type="password"
+								autocomplete="new-password"
+								maxlength="256"
+								aria-describedby="password-new-hint password-new-error"
+							/>
+							<p class="hint" id="password-new-hint">At least 10 characters. A few random words work well.</p>
+							<p class="field-error" id="password-new-error" hidden></p>
+						</div>
+						<div class="field">
+							<label for="password-confirm">New password again</label>
+							<input
+								id="password-confirm"
+								class="input"
+								type="password"
+								autocomplete="new-password"
+								maxlength="256"
+								aria-describedby="password-confirm-error"
+							/>
+							<p class="field-error" id="password-confirm-error" hidden></p>
+						</div>
+						<p class="callout callout--ok" data-password-done hidden></p>
+						<p class="callout callout--error" data-password-error hidden></p>
+						<div class="btn-row">
+							<button class="btn" type="submit" data-password-submit>Set password</button>
+						</div>
+					</form>
+					<div class="card" data-pins hidden>
+						<h2 class="card__title">Invite PINs</h2>
+						<p class="muted">
+							A 4-digit code to type at <a href="/join">/join</a> or in Obsidian instead of an invite
+							link. Each works once and lasts 72 hours; whoever uses it picks a name and a password.
+						</p>
+						<p class="callout callout--error" data-pins-locked hidden></p>
+						<div class="btn-row" data-pins-unlock-row hidden>
+							<button class="btn btn--small" type="button" data-pins-unlock>Unlock PIN entry</button>
+						</div>
+						<div class="field" data-pins-workspace-field hidden>
+							<label for="pins-workspace">Workspace</label>
+							<select id="pins-workspace" class="input"></select>
+						</div>
+						<div class="field">
+							<label for="pin-role">Role</label>
+							<select id="pin-role" class="input">
+								<option value="viewer">Viewer</option>
+								<option value="editor" selected>Editor</option>
+								<option value="owner">Owner</option>
+							</select>
+						</div>
+						<div class="btn-row">
+							<button class="btn btn--primary" type="button" data-pin-create>Create PIN</button>
+						</div>
+						<p class="callout callout--error" data-pins-error hidden></p>
+						<div class="loader" aria-hidden="true" data-pins-loading hidden><span></span><span></span><span></span></div>
+						<table class="plain pins-table" data-pins-table hidden>
+							<thead>
+								<tr>
+									<th scope="col">PIN</th>
+									<th scope="col">Role</th>
+									<th scope="col">Status</th>
+									<th scope="col"><span class="visually-hidden">Actions</span></th>
+								</tr>
+							</thead>
+							<tbody data-pins-list></tbody>
+						</table>
+						<p class="muted" data-no-pins hidden>No PINs yet.</p>
+					</div>
 					<p class="callout" data-owner-note hidden>
-						Manage members and create invites from Obsidian:
+						Manage members and create invite links from Obsidian:
 						<strong>ArcaSync: Manage workspace members</strong>,
 						<strong>ArcaSync: Create an invite link</strong>.
 					</p>

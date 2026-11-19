@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createJoinFlow, NAME_RULE_COPY, NAME_TAKEN_COPY } from "../flows/join";
+import {
+	BAD_PIN_COPY,
+	CONFIRM_COPY,
+	createJoinFlow,
+	NAME_RULE_COPY,
+	NAME_TAKEN_COPY,
+	PIN_RULE_COPY,
+} from "../flows/join";
 import { memoryStorage, PENDING_INVITE_KEY } from "../lib/session";
 import { DEVICE, fail, fakeApi, flush, ok, sessionWith, USER, WORKSPACES } from "./fakes";
 
@@ -184,5 +191,154 @@ describe("join flow", () => {
 			null,
 		);
 		expect(flow.getState()).toMatchObject({ kind: "choose", token: TOKEN });
+	});
+
+	describe("PIN", () => {
+		const PASSWORD = "correct horse battery";
+		function pinSetup(routes: Parameters<typeof fakeApi>[0], token: string | null = null) {
+			const fake = fakeApi(routes);
+			const { session } = sessionWith(token);
+			const flow = createJoinFlow(
+				{ api: fake.api, session, pending: memoryStorage(), device: () => DEVICE },
+				null,
+			);
+			flow.send({ type: "use-pin" });
+			return { ...fake, session, flow };
+		}
+		const submit = (
+			flow: ReturnType<typeof createJoinFlow>,
+			fields: Partial<{ pin: string; name: string; password: string; confirm: string }> = {},
+		) =>
+			flow.send({
+				type: "pin-submit",
+				pin: "0420",
+				name: "pia",
+				password: PASSWORD,
+				confirm: PASSWORD,
+				...fields,
+			});
+
+		it("switches between the link field and the PIN form", () => {
+			const { flow } = pinSetup({});
+			expect(flow.getState()).toMatchObject({ kind: "pin", signedIn: false });
+			flow.send({ type: "use-link" });
+			expect(flow.getState()).toEqual({ kind: "no-invite", pasteError: null });
+		});
+
+		it("checks PIN, name, password and confirmation locally first", () => {
+			const { flow, calls } = pinSetup({});
+			submit(flow, { pin: "42", name: " ", password: "short", confirm: "short" });
+			expect(flow.getState()).toMatchObject({
+				pinError: PIN_RULE_COPY,
+				nameError: NAME_RULE_COPY,
+				passwordError: expect.stringMatching(/at least 10/),
+				confirmError: null,
+			});
+			submit(flow, { confirm: "something else" });
+			expect(flow.getState()).toMatchObject({ pinError: null, confirmError: CONFIRM_COPY });
+			expect(calls).toHaveLength(0);
+		});
+
+		it("creates the account and keeps the session; next steps use the password", async () => {
+			const { flow, session, calls } = pinSetup({ "POST /api/auth/pin/accept": [ok(SESSION)] });
+			submit(flow, { pin: " 04 20 ", name: " pia " });
+			await flush();
+			expect(calls[0]?.options.body).toEqual({
+				pin: "0420",
+				name: "pia",
+				password: PASSWORD,
+				device: DEVICE,
+			});
+			expect(flow.getState()).toMatchObject({
+				kind: "joined",
+				withPassword: true,
+				welcomeBack: false,
+			});
+			expect(session.token()).toBe("sess");
+		});
+
+		it("puts invalid_pin, name_taken and weak_password on their fields", async () => {
+			const { flow } = pinSetup({
+				"POST /api/auth/pin/accept": [
+					fail(404, "invalid_pin"),
+					fail(409, "name_taken"),
+					fail(400, "weak_password", "That password is too common; pick another"),
+				],
+			});
+			submit(flow);
+			await flush();
+			expect(flow.getState()).toMatchObject({
+				kind: "pin",
+				pinError: BAD_PIN_COPY,
+				submitting: false,
+			});
+			submit(flow);
+			await flush();
+			expect(flow.getState()).toMatchObject({ pinError: null, nameError: NAME_TAKEN_COPY });
+			submit(flow);
+			await flush();
+			expect(flow.getState()).toMatchObject({
+				passwordError: "That password is too common; pick another",
+			});
+		});
+
+		it("rate_limited and pins_locked turn the button off for the relay's wait", async () => {
+			vi.useFakeTimers();
+			try {
+				const { flow, calls } = pinSetup({
+					"POST /api/auth/pin/accept": [
+						fail(429, "rate_limited", "m", 120),
+						fail(423, "pins_locked", "m", 86_400),
+						fail(0, "network"),
+					],
+				});
+				submit(flow);
+				await flush();
+				const limited = flow.getState();
+				expect(limited).toMatchObject({ formError: { code: "rate_limited", retryAfter: 120 } });
+				expect(limited.kind === "pin" && (limited.cooldownUntil ?? 0) - Date.now()).toBe(120_000);
+				submit(flow);
+				expect(calls).toHaveLength(1);
+				vi.advanceTimersByTime(120_000);
+				expect(flow.getState()).toMatchObject({ cooldownUntil: null });
+				submit(flow);
+				await flush();
+				expect(flow.getState()).toMatchObject({ formError: { code: "pins_locked" } });
+				vi.advanceTimersByTime(86_400_000);
+				submit(flow);
+				await flush();
+				expect(flow.getState()).toMatchObject({
+					formError: { code: "network" },
+					cooldownUntil: null,
+				});
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("signed in, the PIN alone adds its workspace (redeem-pin)", async () => {
+			const { flow, calls } = pinSetup(
+				{ "POST /api/invites/redeem-pin": [ok({ workspaces: WORKSPACES })] },
+				"sess",
+			);
+			expect(flow.getState()).toMatchObject({ kind: "pin", signedIn: true });
+			flow.send({ type: "pin-submit", pin: "0420", name: "", password: "", confirm: "" });
+			await flush();
+			expect(calls[0]).toMatchObject({ options: { auth: true, body: { pin: "0420" } } });
+			expect(flow.getState()).toEqual({
+				kind: "pin-redeemed",
+				workspaces: [{ name: "Team", role: "editor" }],
+			});
+		});
+
+		it("signed in with a dead session, falls back to the new-account form", async () => {
+			const { flow } = pinSetup(
+				{ "POST /api/invites/redeem-pin": [fail(401, "unauthorized")] },
+				"sess",
+			);
+			submit(flow);
+			await flush();
+			expect(flow.getState()).toMatchObject({ kind: "pin", signedIn: false, formError: null });
+		});
 	});
 });

@@ -1,6 +1,7 @@
 import type { DeviceInfo } from "@arcasync/shared";
 import type { Api, ApiFailure } from "../lib/api";
 import { DEVICE_CODE_INTERVAL_S } from "../lib/codes";
+import { RATE_LIMIT_COOLDOWN_MS } from "../lib/errors";
 import type { Session } from "../lib/session";
 import { type Clock, createStore, type Flow, type Person, person, systemClock } from "./store";
 
@@ -160,6 +161,101 @@ export function createSigninFlow(deps: SigninDeps): Flow<SigninState, SigninEven
 					}
 					break;
 			}
+		},
+	};
+}
+
+type Failure = Pick<ApiFailure, "code" | "message" | "retryAfter">;
+
+export type LoginState =
+	| {
+			kind: "form";
+			submitting: boolean;
+			nameError: string | null;
+			passwordError: string | null;
+			/** Next to the button: wrong name or password, rate limit, network. */
+			error: Failure | null;
+			cooldownUntil: number | null;
+	  }
+	| { kind: "done"; user: Person; next: string };
+
+export type LoginEvent = { type: "login"; name: string; password: string };
+
+export const LOGIN_NAME_COPY = "Enter your name.";
+export const LOGIN_PASSWORD_COPY = "Enter your password.";
+
+/**
+ * `/signin` with name + password (accounts that set one, e.g. after joining with a PIN). One
+ * request at a time; a 429 turns the button off for the relay's `retryAfter`.
+ */
+export function createLoginFlow(deps: {
+	api: Api;
+	session: Session;
+	device: () => DeviceInfo;
+	next: string;
+	clock?: Clock;
+}): Flow<LoginState, LoginEvent> {
+	const clock = deps.clock ?? systemClock;
+	const store = createStore<LoginState>({
+		kind: "form",
+		submitting: false,
+		nameError: null,
+		passwordError: null,
+		error: null,
+		cooldownUntil: null,
+	});
+	let timer: unknown = null;
+
+	async function login(rawName: string, password: string) {
+		const state = store.get();
+		if (state.kind !== "form" || state.submitting) return;
+		if (state.cooldownUntil !== null && clock.now() < state.cooldownUntil) return;
+		const name = rawName.trim();
+		const checked = {
+			...state,
+			nameError: name.length >= 1 && name.length <= 60 ? null : LOGIN_NAME_COPY,
+			passwordError: password ? null : LOGIN_PASSWORD_COPY,
+			error: null,
+		};
+		if (checked.nameError || checked.passwordError) {
+			store.set(checked);
+			return;
+		}
+		store.set({ ...checked, submitting: true });
+		const res = await deps.api.call<{ sessionToken?: unknown; user?: unknown }>(
+			"POST",
+			"/api/auth/login",
+			{ body: { name, password, device: deps.device() } },
+		);
+		const user = res.ok ? person(res.data.user) : null;
+		if (res.ok && typeof res.data.sessionToken === "string" && user) {
+			deps.session.set(res.data.sessionToken);
+			store.set({ kind: "done", user, next: deps.next });
+			return;
+		}
+		const failure: Failure = res.ok
+			? { code: "server_error", message: "Unexpected response" }
+			: res;
+		const base = { ...checked, submitting: false, error: failure };
+		if (failure.code === "rate_limited") {
+			const ms = (failure.retryAfter ?? RATE_LIMIT_COOLDOWN_MS / 1000) * 1000;
+			if (timer !== null) clock.clearTimeout(timer);
+			timer = clock.setTimeout(() => {
+				timer = null;
+				const now = store.get();
+				if (now.kind === "form") store.set({ ...now, cooldownUntil: null });
+			}, ms);
+			store.set({ ...base, cooldownUntil: clock.now() + ms });
+		} else {
+			store.set(base);
+		}
+	}
+
+	return {
+		getState: store.get,
+		subscribe: store.subscribe,
+		send(event) {
+			if (event.type === "login") void login(event.name, event.password);
 		},
 	};
 }

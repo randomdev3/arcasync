@@ -6,7 +6,11 @@ export interface ApiFailure {
 	/** The relay's `error.code`, or `network`, `rate_limited`, `server_error`, `http_<status>`. */
 	code: string;
 	message: string;
+	/** Seconds to wait (429 `rate_limited`, 423 `pins_locked`): `details.retryAfter` or `Retry-After`. */
+	retryAfter?: number;
 }
+
+export type Method = "GET" | "POST" | "DELETE";
 
 export type ApiResult<T> = { ok: true; data: T } | ApiFailure;
 
@@ -17,7 +21,7 @@ export interface CallOptions {
 }
 
 export interface Api {
-	call<T>(method: "GET" | "POST", path: string, options?: CallOptions): Promise<ApiResult<T>>;
+	call<T>(method: Method, path: string, options?: CallOptions): Promise<ApiResult<T>>;
 }
 
 export interface ApiDeps {
@@ -43,10 +47,25 @@ function statusFailure(status: number): ApiFailure {
 	return { ok: false, status, code: `http_${status}`, message: `HTTP ${status}` };
 }
 
-function errorFrom(body: unknown): { code: string; message: string } | null {
-	const error = (body as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+function errorFrom(body: unknown): { code: string; message: string; retryAfter?: number } | null {
+	const error = (
+		body as {
+			error?: { code?: unknown; message?: unknown; details?: { retryAfter?: unknown } };
+		} | null
+	)?.error;
 	if (!error || typeof error.code !== "string") return null;
-	return { code: error.code, message: typeof error.message === "string" ? error.message : "" };
+	const retryAfter = error.details?.retryAfter;
+	return {
+		code: error.code,
+		message: typeof error.message === "string" ? error.message : "",
+		...(typeof retryAfter === "number" && retryAfter > 0 ? { retryAfter } : {}),
+	};
+}
+
+/** `Retry-After` in seconds (the relay sends whole seconds), or undefined. */
+function retryAfterHeader(res: Response): number | undefined {
+	const value = Number(res.headers.get("retry-after"));
+	return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 /**
@@ -55,7 +74,7 @@ function errorFrom(body: unknown): { code: string; message: string } | null {
  */
 export function createApi(deps: ApiDeps): Api {
 	return {
-		async call<T>(method: "GET" | "POST", path: string, options: CallOptions = {}) {
+		async call<T>(method: Method, path: string, options: CallOptions = {}) {
 			const headers: Record<string, string> = { Accept: "application/json" };
 			if (options.body !== undefined) headers["Content-Type"] = "application/json";
 			const token = options.auth ? deps.session.token() : null;
@@ -90,6 +109,10 @@ export function createApi(deps: ApiDeps): Api {
 			const failure: ApiFailure = error
 				? { ok: false, status: res.status, ...error }
 				: statusFailure(res.status);
+			if (failure.retryAfter === undefined) {
+				const wait = retryAfterHeader(res);
+				if (wait !== undefined) failure.retryAfter = wait;
+			}
 			if (failure.code === "misconfigured") deps.onMisconfigured?.();
 			if (res.status === 401 && options.auth) {
 				deps.session.clear();

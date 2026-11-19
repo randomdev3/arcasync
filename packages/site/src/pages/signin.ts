@@ -1,9 +1,24 @@
 import "../styles/main.css";
 import "../styles/flow.css";
-import { createSigninFlow, type SigninState, safeNext } from "../flows/signin";
+import {
+	createLoginFlow,
+	createSigninFlow,
+	type LoginState,
+	type SigninState,
+	safeNext,
+} from "../flows/signin";
 import { initChrome, refreshNav } from "../lib/chrome";
 import { spellCode } from "../lib/codes";
-import { $, announce, countdown, focus, paintDot, renderError, showState } from "../lib/dom";
+import {
+	$,
+	announce,
+	countdown,
+	focus,
+	paintDot,
+	renderError,
+	setBusy,
+	showState,
+} from "../lib/dom";
 import { describeError } from "../lib/errors";
 import { obsidianApproveLink } from "../lib/invite";
 
@@ -13,8 +28,19 @@ const next = safeNext(new URLSearchParams(location.search).get("next"));
 const device = app.device();
 const flow = createSigninFlow({ api: app.api, session: app.session, device: () => device, next });
 
+const login = createLoginFlow({ api: app.api, session: app.session, device: () => device, next });
 let lastKind = "";
 let stopCountdown: (() => void) | null = null;
+let stopLoginCooldown: (() => void) | null = null;
+
+function showApproved(user: { name: string; color: string }, to: string) {
+	showState(root, "approved");
+	$("[data-approved-text]").textContent = `Signed in as ${user.name}`;
+	paintDot($("[data-user-dot]"), user.color);
+	refreshNav(app);
+	announce(`Signed in as ${user.name}.`);
+	window.setTimeout(() => location.assign(to), 800);
+}
 
 function render(state: SigninState) {
 	const changed = state.kind !== lastKind;
@@ -42,11 +68,7 @@ function render(state: SigninState) {
 			break;
 		}
 		case "approved":
-			$("[data-approved-text]").textContent = `Signed in as ${state.user.name}`;
-			paintDot($("[data-user-dot]"), state.user.color);
-			refreshNav(app);
-			announce(`Signed in as ${state.user.name}.`);
-			window.setTimeout(() => location.assign(state.next), 800);
+			showApproved(state.user, state.next);
 			break;
 		case "denied":
 		case "expired":
@@ -63,6 +85,55 @@ function render(state: SigninState) {
 
 flow.subscribe(render);
 render(flow.getState());
+
+const loginName = $<HTMLInputElement>("#login-name");
+const loginPassword = $<HTMLInputElement>("#login-password");
+const loginSubmit = $<HTMLButtonElement>("[data-login-submit]");
+
+function renderLogin(state: LoginState) {
+	if (state.kind === "done") {
+		showApproved(state.user, state.next);
+		return;
+	}
+	setBusy(loginSubmit, state.submitting, "Signing in…");
+	const fields = [
+		[loginName, $("#login-name-error"), state.nameError],
+		[loginPassword, $("#login-password-error"), state.passwordError],
+	] as const;
+	let first: HTMLInputElement | null = null;
+	for (const [input, error, message] of fields) {
+		error.hidden = !message;
+		error.textContent = message ?? "";
+		input.setAttribute("aria-invalid", String(Boolean(message)));
+		if (message && !first) first = input;
+	}
+	const copy = state.error ? describeError(state.error) : null;
+	renderError($("[data-login-error]"), copy);
+	stopLoginCooldown?.();
+	stopLoginCooldown = null;
+	const cooling = state.cooldownUntil !== null;
+	$("[data-login-cooldown]").hidden = !cooling;
+	if (cooling && state.cooldownUntil !== null) {
+		loginSubmit.disabled = true;
+		stopLoginCooldown = countdown($("[data-login-cooldown-time]"), state.cooldownUntil);
+	}
+	if (first && !state.submitting) focus(first);
+	if (copy && !state.submitting) {
+		announce(copy.message);
+		if (state.error?.code === "invalid_credentials") {
+			loginPassword.value = "";
+			focus(loginPassword);
+		}
+	}
+}
+
+login.subscribe(renderLogin);
+renderLogin(login.getState());
+
+$("[data-login-form]").addEventListener("submit", (event) => {
+	event.preventDefault();
+	login.send({ type: "login", name: loginName.value, password: loginPassword.value });
+});
 
 $("[data-start]").addEventListener("click", () => flow.send({ type: "start" }));
 $("[data-cancel]").addEventListener("click", () => {

@@ -1,4 +1,4 @@
-import type { Api, ApiResult, CallOptions } from "../lib/api";
+import type { Api, ApiResult, CallOptions, Method } from "../lib/api";
 import { createSession, memoryStorage } from "../lib/session";
 
 export interface Call {
@@ -15,7 +15,7 @@ export function fakeApi(routes: Record<string, Reply[] | ((call: Call) => Reply)
 	let inFlight = 0;
 	let maxInFlight = 0;
 	const api: Api = {
-		async call<T>(method: "GET" | "POST", path: string, options: CallOptions = {}) {
+		async call<T>(method: Method, path: string, options: CallOptions = {}) {
 			const call = { method, path, options };
 			calls.push(call);
 			const key = `${method} ${path.split("?")[0]}`;
@@ -36,11 +36,17 @@ export function fakeApi(routes: Record<string, Reply[] | ((call: Call) => Reply)
 }
 
 export const ok = <T>(data: T): ApiResult<T> => ({ ok: true, data });
-export const fail = (status: number, code: string, message = code): ApiResult<never> => ({
+export const fail = (
+	status: number,
+	code: string,
+	message = code,
+	retryAfter?: number,
+): ApiResult<never> => ({
 	ok: false,
 	status,
 	code,
 	message,
+	...(retryAfter === undefined ? {} : { retryAfter }),
 });
 
 export function sessionWith(token: string | null = null) {

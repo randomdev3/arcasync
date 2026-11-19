@@ -12,8 +12,20 @@ export interface ErrorCopy {
 	retry?: boolean;
 }
 
+/** Seconds → "40 s", "12 min", "3 h" (rounded up). */
+export function formatWait(seconds: number): string {
+	if (seconds < 60) return `${Math.max(1, Math.ceil(seconds))} s`;
+	if (seconds < 5400) return `${Math.ceil(seconds / 60)} min`;
+	return `${Math.ceil(seconds / 3600)} h`;
+}
+
+export const PINS_LOCKED_COPY =
+	"PIN entry is locked after too many wrong PINs. Ask whoever runs the server, or use an invite link.";
+
 /** The copy shared by every page (`unauthorized` is handled by each page's signed-out state). */
-export function describeError(failure: Pick<ApiFailure, "code" | "message">): ErrorCopy {
+export function describeError(
+	failure: Pick<ApiFailure, "code" | "message" | "retryAfter">,
+): ErrorCopy {
 	switch (failure.code) {
 		case "network":
 			return {
@@ -21,7 +33,20 @@ export function describeError(failure: Pick<ApiFailure, "code" | "message">): Er
 				retry: true,
 			};
 		case "rate_limited":
-			return { message: "Too many tries. Wait a minute and try again." };
+			return {
+				message:
+					failure.retryAfter === undefined
+						? "Too many tries. Wait a minute and try again."
+						: `Too many tries. Try again in ${formatWait(failure.retryAfter)}.`,
+			};
+		case "pins_locked":
+			return { message: PINS_LOCKED_COPY };
+		case "invalid_pin":
+			return { message: "That PIN is wrong, already used or expired." };
+		case "invalid_credentials":
+			return { message: "Wrong name or password." };
+		case "too_many_pins":
+			return { message: "At most 10 PINs can be open at once. Revoke one first." };
 		case "server_error":
 		case "internal":
 			return { message: "Something broke on the server. Try again in a bit.", retry: true };

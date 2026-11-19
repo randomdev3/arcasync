@@ -2,6 +2,7 @@ import type { DeviceInfo, InviteAcceptRequest } from "@arcasync/shared";
 import type { Api, ApiFailure } from "../lib/api";
 import { RATE_LIMIT_COOLDOWN_MS } from "../lib/errors";
 import { INVITE_TOKEN, parseInvite } from "../lib/invite";
+import { normalizePin, passwordProblem } from "../lib/passwords";
 import { type KeyValue, PENDING_INVITE_KEY, type Session } from "../lib/session";
 import {
 	type Clock,
@@ -17,10 +18,28 @@ import {
 /** Errors that end the invite (shown as the page, not next to the form). */
 const PAGE_ERRORS = new Set(["not_found", "invite_expired", "invite_used", "forbidden"]);
 
-export type JoinFailure = Pick<ApiFailure, "code" | "message">;
+export type JoinFailure = Pick<ApiFailure, "code" | "message" | "retryAfter">;
+
+/** The PIN form: a new account (PIN, name, password twice), or, signed in, just the PIN. */
+export interface PinForm {
+	kind: "pin";
+	/** A session is stored: the PIN adds its workspace to that account (`redeem-pin`). */
+	signedIn: boolean;
+	submitting: boolean;
+	pinError: string | null;
+	nameError: string | null;
+	passwordError: string | null;
+	confirmError: string | null;
+	/** Next to the button (network, server, lock). */
+	formError: JoinFailure | null;
+	/** Until then the button is off (429 `rate_limited`, 423 `pins_locked`). */
+	cooldownUntil: number | null;
+}
 
 export type JoinState =
 	| { kind: "no-invite"; pasteError: string | null }
+	| PinForm
+	| { kind: "pin-redeemed"; workspaces: WorkspaceRow[] }
 	| { kind: "checking-session"; token: string }
 	| {
 			kind: "choose";
@@ -33,7 +52,14 @@ export type JoinState =
 			formError: JoinFailure | null;
 			cooldownUntil: number | null;
 	  }
-	| { kind: "joined"; user: Person; workspaces: WorkspaceRow[]; welcomeBack: boolean }
+	| {
+			kind: "joined";
+			user: Person;
+			workspaces: WorkspaceRow[];
+			welcomeBack: boolean;
+			/** Joined with a PIN: Obsidian signs in with name + password, not a code. */
+			withPassword?: boolean;
+	  }
 	| {
 			kind: "signed-in";
 			token: string;
@@ -49,7 +75,11 @@ export type JoinEvent =
 	| { type: "paste"; input: string; site: string; relay: string }
 	| { type: "submit"; name: string }
 	| { type: "redeem" }
-	| { type: "not-me" };
+	| { type: "not-me" }
+	/** Show the PIN form instead of the link field, or go back. */
+	| { type: "use-pin" }
+	| { type: "use-link" }
+	| { type: "pin-submit"; pin: string; name: string; password: string; confirm: string };
 
 export interface JoinDeps {
 	api: Api;
@@ -63,6 +93,9 @@ export interface JoinDeps {
 export const NAME_TAKEN_COPY = "Someone already uses that name. Try another.";
 export const NAME_RULE_COPY = "Names are 1–60 characters.";
 export const BAD_LINK_COPY = "That doesn't look like an ArcaSync invite link.";
+export const PIN_RULE_COPY = "A PIN is 4 digits.";
+export const BAD_PIN_COPY = "That PIN is wrong, already used or expired.";
+export const CONFIRM_COPY = "The two passwords differ.";
 
 /**
  * `/join`: create an account from an invite, or add its workspace to the signed-in account.
@@ -208,6 +241,111 @@ export function createJoinFlow(
 		void begin(parsed.token);
 	}
 
+	const pinForm = (): PinForm => ({
+		kind: "pin",
+		signedIn: deps.session.token() !== null,
+		submitting: false,
+		pinError: null,
+		nameError: null,
+		passwordError: null,
+		confirmError: null,
+		formError: null,
+		cooldownUntil: null,
+	});
+
+	function cooldown(seconds: number) {
+		if (cooldownTimer !== null) clock.clearTimeout(cooldownTimer);
+		cooldownTimer = clock.setTimeout(() => {
+			cooldownTimer = null;
+			const now = store.get();
+			if (now.kind === "pin" || now.kind === "choose") store.set({ ...now, cooldownUntil: null });
+		}, seconds * 1000);
+		return clock.now() + seconds * 1000;
+	}
+
+	async function submitPin(event: Extract<JoinEvent, { type: "pin-submit" }>) {
+		const state = store.get();
+		if (state.kind !== "pin" || state.submitting) return;
+		if (state.cooldownUntil !== null && clock.now() < state.cooldownUntil) return;
+		const pin = normalizePin(event.pin);
+		const name = event.name.trim();
+		const checked: PinForm = {
+			...state,
+			pinError: pin ? null : PIN_RULE_COPY,
+			nameError: null,
+			passwordError: null,
+			confirmError: null,
+			formError: null,
+		};
+		if (!state.signedIn) {
+			checked.nameError = name.length >= 1 && name.length <= 60 ? null : NAME_RULE_COPY;
+			checked.passwordError = passwordProblem(event.password);
+			checked.confirmError =
+				!checked.passwordError && event.password !== event.confirm ? CONFIRM_COPY : null;
+		}
+		if (!pin || checked.nameError || checked.passwordError || checked.confirmError) {
+			store.set(checked);
+			return;
+		}
+		store.set({ ...checked, submitting: true });
+		const res = state.signedIn
+			? await deps.api.call<{ workspaces?: unknown }>("POST", "/api/invites/redeem-pin", {
+					body: { pin },
+					auth: true,
+				})
+			: await deps.api.call<{ sessionToken?: unknown; user?: unknown; workspaces?: unknown }>(
+					"POST",
+					"/api/auth/pin/accept",
+					{ body: { pin, name, password: event.password, device: deps.device() } },
+				);
+		if (res.ok && state.signedIn) {
+			store.set({ kind: "pin-redeemed", workspaces: workspaceRows(res.data.workspaces) });
+			return;
+		}
+		const data = res.ok
+			? (res.data as { sessionToken?: unknown; user?: unknown; workspaces?: unknown })
+			: null;
+		const user = data ? person(data.user) : null;
+		if (data && typeof data.sessionToken === "string" && user) {
+			deps.session.set(data.sessionToken);
+			store.set({
+				kind: "joined",
+				user,
+				workspaces: workspaceRows(data.workspaces),
+				welcomeBack: false,
+				withPassword: true,
+			});
+			return;
+		}
+		const failure: JoinFailure = res.ok
+			? { code: "server_error", message: "Unexpected response" }
+			: res;
+		const base: PinForm = { ...checked, submitting: false };
+		switch (failure.code) {
+			case "invalid_pin":
+				store.set({ ...base, pinError: BAD_PIN_COPY });
+				break;
+			case "name_taken":
+				store.set({ ...base, nameError: NAME_TAKEN_COPY });
+				break;
+			case "weak_password":
+				store.set({ ...base, passwordError: failure.message || "Pick a longer password." });
+				break;
+			case "unauthorized":
+				// The stored session was dead (the API client cleared it): create an account instead.
+				store.set({ ...pinForm(), signedIn: false });
+				break;
+			case "rate_limited":
+			case "pins_locked": {
+				const wait = failure.retryAfter ?? RATE_LIMIT_COOLDOWN_MS / 1000;
+				store.set({ ...base, formError: failure, cooldownUntil: cooldown(wait) });
+				break;
+			}
+			default:
+				store.set({ ...base, formError: failure });
+		}
+	}
+
 	if (token) void begin(token);
 
 	return {
@@ -223,6 +361,15 @@ export function createJoinFlow(
 					break;
 				case "redeem":
 					void redeem();
+					break;
+				case "use-pin":
+					if (store.get().kind === "no-invite") store.set(pinForm());
+					break;
+				case "use-link":
+					if (store.get().kind === "pin") store.set({ kind: "no-invite", pasteError: null });
+					break;
+				case "pin-submit":
+					void submitPin(event);
 					break;
 				case "not-me": {
 					const state = store.get();

@@ -48,8 +48,110 @@
 						<p class="field-error" id="paste-error" hidden></p>
 					</form>
 					<p class="muted small">
+						Got a 4-digit PIN instead?
+						<button class="link-button" type="button" data-use-pin>Join with a PIN</button>
+					</p>
+					<p class="muted small">
 						Already have an account? <a href="/signin">Sign in</a> instead.
 					</p>
+				</section>
+
+				<section data-state="pin" hidden>
+					<div class="flow-head">
+						<p class="kicker">invite-only</p>
+						<h1 tabindex="-1">Join with a PIN</h1>
+					</div>
+					<p class="lede" data-pin-lede-new>
+						Type the 4-digit PIN you were given, then pick a name and a password. From now on you
+						sign in with them, here and in Obsidian.
+					</p>
+					<p class="lede" data-pin-lede-signed-in hidden>
+						You're signed in. The PIN adds its workspace to your account.
+					</p>
+					<form class="card" data-pin-form novalidate>
+						<div class="field">
+							<label for="pin">PIN</label>
+							<input
+								id="pin"
+								class="input input--mono input--pin"
+								type="text"
+								inputmode="numeric"
+								autocomplete="one-time-code"
+								maxlength="4"
+								spellcheck="false"
+								required
+								aria-describedby="pin-hint pin-error"
+							/>
+							<p class="hint" id="pin-hint">Single use. It expires a few days after it was made.</p>
+							<p class="field-error" id="pin-error" hidden></p>
+						</div>
+						<div class="field" data-pin-account>
+							<label for="pin-name">Your name</label>
+							<input
+								id="pin-name"
+								class="input"
+								type="text"
+								autocomplete="username"
+								maxlength="60"
+								required
+								aria-describedby="pin-name-hint pin-name-error"
+							/>
+							<p class="hint" id="pin-name-hint">Shown next to your caret. You sign in with it.</p>
+							<p class="field-error" id="pin-name-error" hidden></p>
+						</div>
+						<div class="field" data-pin-account>
+							<label for="pin-password">Password</label>
+							<input
+								id="pin-password"
+								class="input"
+								type="password"
+								autocomplete="new-password"
+								maxlength="256"
+								required
+								aria-describedby="pin-password-hint pin-password-error"
+							/>
+							<p class="hint" id="pin-password-hint">At least 10 characters. A few random words work well.</p>
+							<p class="field-error" id="pin-password-error" hidden></p>
+						</div>
+						<div class="field" data-pin-account>
+							<label for="pin-confirm">Password again</label>
+							<input
+								id="pin-confirm"
+								class="input"
+								type="password"
+								autocomplete="new-password"
+								maxlength="256"
+								required
+								aria-describedby="pin-confirm-error"
+							/>
+							<p class="field-error" id="pin-confirm-error" hidden></p>
+						</div>
+						<p class="callout callout--error" data-pin-form-error hidden></p>
+						<div class="btn-row">
+							<button class="btn btn--primary" type="submit" data-pin-submit>Create account</button>
+							<span class="muted small" data-pin-cooldown hidden>
+								Try again in <span class="mono" data-pin-cooldown-time aria-live="off">1:00</span>
+							</span>
+						</div>
+					</form>
+					<p class="muted small">
+						<button class="link-button" type="button" data-use-link>I have an invite link instead</button>
+					</p>
+				</section>
+
+				<section data-state="pin-redeemed" hidden>
+					<div class="flow-head">
+						<p class="kicker">you're in</p>
+						<h1 tabindex="-1">Workspace added</h1>
+					</div>
+					<div class="card">
+						<h2 class="card__title">Your workspaces</h2>
+						<ul class="workspace-list" data-pin-redeemed-list></ul>
+						<p>
+							Open Obsidian. The new workspace appears under <strong>ArcaSync settings → Shared
+							folders</strong> → workspace picker after you reconnect.
+						</p>
+					</div>
 				</section>
 
 				<section data-state="checking-session" hidden>
@@ -118,7 +220,18 @@
 						<ul class="workspace-list" data-workspaces></ul>
 					</div>
 					<h2>Next steps</h2>
-					<ol class="steps">
+					<ol class="steps" data-steps-password hidden>
+						<li><a href="/guide#install">Install the plugin</a> in Obsidian.</li>
+						<li>
+							In ArcaSync settings, set <strong>Server URL</strong> to:
+							<div class="copy-row">
+								<span class="copy-row__value" id="joined-server-password">{{relay}}</span>
+								<button class="btn btn--small" type="button" data-copy="joined-server-password">Copy</button>
+							</div>
+						</li>
+						<li>Under <strong>Sign in</strong>, enter your name and password.</li>
+					</ol>
+					<ol class="steps" data-steps-code>
 						<li><a href="/guide#install">Install the plugin</a> in Obsidian.</li>
 						<li>
 							In ArcaSync settings, set <strong>Server URL</strong> to:

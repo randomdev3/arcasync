@@ -4,7 +4,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>ArcaSync · Sign in</title>
-		<meta name="description" content="Sign this browser in to ArcaSync with a code approved in Obsidian." />
+		<meta name="description" content="Sign this browser in to ArcaSync with your name and password, or a code approved in Obsidian." />
 		<meta name="color-scheme" content="light dark" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 		<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
@@ -22,16 +22,54 @@
 
 				<section data-state="idle">
 					<div class="flow-head">
-						<p class="kicker">no passwords</p>
+						<p class="kicker">sign in</p>
 						<h1>Sign in</h1>
 					</div>
+					<form class="card" data-login-form novalidate>
+						<h2 class="card__title">With your name and password</h2>
+						<div class="field">
+							<label for="login-name">Name</label>
+							<input
+								id="login-name"
+								class="input"
+								type="text"
+								autocomplete="username"
+								maxlength="60"
+								spellcheck="false"
+								required
+								aria-describedby="login-name-error"
+							/>
+							<p class="field-error" id="login-name-error" hidden></p>
+						</div>
+						<div class="field">
+							<label for="login-password">Password</label>
+							<input
+								id="login-password"
+								class="input"
+								type="password"
+								autocomplete="current-password"
+								maxlength="256"
+								required
+								aria-describedby="login-password-error"
+							/>
+							<p class="field-error" id="login-password-error" hidden></p>
+						</div>
+						<p class="callout callout--error" data-login-error hidden></p>
+						<div class="btn-row">
+							<button class="btn btn--primary" type="submit" data-login-submit>Sign in</button>
+							<span class="muted small" data-login-cooldown hidden>
+								Try again in <span class="mono" data-login-cooldown-time aria-live="off">1:00</span>
+							</span>
+						</div>
+					</form>
+					<h2>Or approve this browser from Obsidian</h2>
 					<p class="lede">
-						ArcaSync has no passwords. You approve this browser from an Obsidian where you're
-						already signed in.
+						No password yet? Get a code here and approve it in an Obsidian where you're already
+						signed in.
 					</p>
 					<p class="callout callout--error" data-start-error hidden></p>
 					<div class="btn-row">
-						<button class="btn btn--primary" type="button" data-start>Get a code</button>
+						<button class="btn" type="button" data-start>Get a code</button>
 						<a href="/join">New here? You need an invite</a>
 					</div>
 				</section>

@@ -173,3 +173,19 @@
 	letter-spacing: 0;
 	white-space: nowrap;
 }
+
+/* A 4-digit PIN: as wide as its digits, spaced like a code. */
+.input--pin {
+	max-width: 9rem;
+	letter-spacing: 0.3em;
+}
+
+/* Invite PINs on /account: the digits never break, and the columns keep a gap on phones. */
+.pins-table th:not(:last-child),
+.pins-table td:not(:last-child) {
+	padding-right: var(--s3);
+}
+
+.pins-table code {
+	white-space: nowrap;
+}

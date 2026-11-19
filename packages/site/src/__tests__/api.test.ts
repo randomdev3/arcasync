@@ -86,4 +86,33 @@ describe("createApi", () => {
 		expect(await api.call("GET", "/api/x")).toMatchObject({ code: "misconfigured" });
 		expect(onMisconfigured).toHaveBeenCalledOnce();
 	});
+
+	it("reads the wait of a 429 or 423 from details.retryAfter, else Retry-After", async () => {
+		const body = setup(async () =>
+			response(429, '{"error":{"code":"rate_limited","message":"m","details":{"retryAfter":840}}}'),
+		);
+		expect(await body.api.call("POST", "/api/x")).toMatchObject({
+			code: "rate_limited",
+			retryAfter: 840,
+		});
+		const header = setup(
+			async () =>
+				new Response('{"error":{"code":"pins_locked","message":"m"}}', {
+					status: 423,
+					headers: { "content-type": "application/json", "retry-after": "86400" },
+				}),
+		);
+		expect(await header.api.call("POST", "/api/x")).toMatchObject({
+			code: "pins_locked",
+			retryAfter: 86400,
+		});
+		const none = setup(async () => response(404, '{"error":{"code":"invalid_pin","message":"m"}}'));
+		expect(await none.api.call("POST", "/api/x")).not.toHaveProperty("retryAfter");
+	});
+
+	it("sends DELETE", async () => {
+		const { api, fetch } = setup(async () => response(200, '{"ok":true}'));
+		await api.call("DELETE", "/api/workspaces/w/pins/p", { auth: true });
+		expect(fetch.mock.calls[0]?.[1]?.method).toBe("DELETE");
+	});
 });

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSigninFlow, safeNext } from "../flows/signin";
+import {
+	createLoginFlow,
+	createSigninFlow,
+	LOGIN_NAME_COPY,
+	LOGIN_PASSWORD_COPY,
+	safeNext,
+} from "../flows/signin";
 import { DEVICE, fail, fakeApi, flush, ok, sessionWith, USER } from "./fakes";
 
 const START = ok({ deviceCode: "dc", userCode: "BCDF-GHJK", interval: 5, expiresIn: 600 });
@@ -177,5 +183,66 @@ describe("safeNext", () => {
 		]) {
 			expect(safeNext(bad), String(bad)).toBe("/account");
 		}
+	});
+});
+
+describe("login flow (name + password)", () => {
+	function loginSetup(replies: ReturnType<typeof ok | typeof fail>[]) {
+		const fake = fakeApi({ "POST /api/auth/login": replies });
+		const { session } = sessionWith();
+		const flow = createLoginFlow({
+			api: fake.api,
+			session,
+			device: () => DEVICE,
+			next: "/account",
+		});
+		return { ...fake, session, flow };
+	}
+
+	it("signs in and keeps the session", async () => {
+		const { flow, session, calls } = loginSetup([SESSION]);
+		flow.send({ type: "login", name: " Mara ", password: "correct horse battery" });
+		await flush();
+		expect(calls[0]?.options.body).toEqual({
+			name: "Mara",
+			password: "correct horse battery",
+			device: DEVICE,
+		});
+		expect(flow.getState()).toEqual({
+			kind: "done",
+			user: { name: "mara", color: "#2fae8f", isAdmin: false },
+			next: "/account",
+		});
+		expect(session.token()).toBe("sess");
+	});
+
+	it("needs both fields, and never checks password rules at sign-in", async () => {
+		const { flow, calls } = loginSetup([fail(401, "invalid_credentials")]);
+		flow.send({ type: "login", name: "", password: "" });
+		expect(flow.getState()).toMatchObject({
+			nameError: LOGIN_NAME_COPY,
+			passwordError: LOGIN_PASSWORD_COPY,
+		});
+		flow.send({ type: "login", name: "mara", password: "x" });
+		await flush();
+		expect(calls).toHaveLength(1);
+		expect(flow.getState()).toMatchObject({
+			kind: "form",
+			submitting: false,
+			error: { code: "invalid_credentials" },
+		});
+	});
+
+	it("waits out a 429 for the relay's retryAfter", async () => {
+		const { flow, calls } = loginSetup([fail(429, "rate_limited", "m", 300), SESSION]);
+		flow.send({ type: "login", name: "mara", password: "pw" });
+		await flush();
+		expect(flow.getState()).toMatchObject({ error: { retryAfter: 300 } });
+		flow.send({ type: "login", name: "mara", password: "pw" });
+		expect(calls).toHaveLength(1);
+		await tick(300_000);
+		flow.send({ type: "login", name: "mara", password: "pw" });
+		await flush();
+		expect(flow.getState()).toMatchObject({ kind: "done" });
 	});
 });
