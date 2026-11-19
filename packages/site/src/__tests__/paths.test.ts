@@ -40,9 +40,12 @@ describe("loom paths", () => {
 
 	it("composes the still frame with two carets mid-follow", () => {
 		const sim = stillFrame();
-		const [leader, follower] = [sim.heads[0], sim.heads[1]];
-		expect(sim.follow).toMatchObject({ follower: 1, leader: 0 });
-		expect(Math.abs((leader?.y ?? 0) - (follower?.y ?? 9))).toBeLessThan(0.6);
+		const follow = sim.follow;
+		expect([follow?.follower, follow?.leader].sort()).toEqual([0, 1]);
+		const leader = sim.heads[follow?.leader ?? 0];
+		const follower = sim.heads[follow?.follower ?? 1];
+		expect(Math.abs((leader?.y ?? 0) - (follower?.y ?? 9))).toBeLessThan(0.4);
+		expect((leader?.x ?? 0) - (follower?.x ?? 0)).toBeGreaterThan(0);
 		expect(stillFrame().heads.map((h) => h.x)).toEqual(sim.heads.map((h) => h.x));
 	});
 });

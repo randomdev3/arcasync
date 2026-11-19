@@ -17,13 +17,18 @@ const SAMPLE_EVERY = 2;
 export const NAMES = ["mara", "jun", "teo", "ines"] as const;
 const BASELINES = [0.86, 0.3, -0.26, -0.82];
 const SPEEDS = [0.36, 0.42, 0.31, 0.39];
-const FOLLOW_GAP_X = 0.4;
-/** Far enough below the leader that the two name flags never overlap. */
-const FOLLOW_GAP_Y = 0.42;
+/**
+ * The follower rides one rule below and well behind the leader: the page's y is foreshortened by
+ * the tilt, so only distance along the line keeps the two (screen-sized) name flags apart.
+ */
+const FOLLOW_GAP_X = 0.8;
+const FOLLOW_GAP_Y = 0.18;
 
 export interface Head {
 	name: string;
+	/** The line it types on: home, or where it last followed someone to. */
 	baseline: number;
+	home: number;
 	speed: number;
 	phase: number;
 	x: number;
@@ -75,6 +80,7 @@ export function createSim(seed = 7): Sim {
 		const head: Head = {
 			name,
 			baseline: BASELINES[i] ?? 0,
+			home: BASELINES[i] ?? 0,
 			speed: SPEEDS[i] ?? 0.35,
 			phase: rand() * Math.PI * 2,
 			// Staggered so the carets are spread over the page from the first frame.
@@ -103,6 +109,9 @@ export function startFollow(sim: Sim, follower: number, leader: number, seconds:
 
 function maybeFollow(sim: Sim): void {
 	if (sim.follow && (sim.t >= sim.follow.until || !onPage(sim.heads[sim.follow.leader]?.x ?? 99))) {
+		// The follower stays on the line it moved to (no swerve back); it goes home on its next pass.
+		const follower = sim.heads[sim.follow.follower];
+		if (follower) follower.baseline = follower.y;
 		sim.follow = null;
 		sim.nextFollowAt = sim.t + 8 + sim.rand() * 4;
 	}
@@ -113,9 +122,16 @@ function maybeFollow(sim: Sim): void {
 		return;
 	}
 	const pick = () => candidates[Math.floor(sim.rand() * candidates.length)] ?? 0;
-	const leader = pick();
-	let follower = pick();
-	while (follower === leader) follower = pick();
+	const a = pick();
+	let b = pick();
+	while (b === a) b = pick();
+	// The one further back follows, and only from far enough back to glide forward into place.
+	const [follower, leader] = (sim.heads[a]?.x ?? 0) < (sim.heads[b]?.x ?? 0) ? [a, b] : [b, a];
+	const behind = (sim.heads[leader]?.x ?? 0) - (sim.heads[follower]?.x ?? 0);
+	if (behind < FOLLOW_GAP_X + 0.15) {
+		sim.nextFollowAt = sim.t + 0.5;
+		return;
+	}
 	startFollow(sim, follower, leader, 3.5 + sim.rand() * 1.5);
 }
 
@@ -133,15 +149,21 @@ function stepOnce(sim: Sim): void {
 			// Glide to just behind the leader, then keep its pace. Never backwards: a caret ahead of
 			// its spot just slows down, so the trail bends instead of folding back.
 			const gap = following.x - FOLLOW_GAP_X - head.x;
-			dx = Math.max(0.06 * STEP_S, Math.min(1.2 * STEP_S, (gap * 1.6 + 0.25) * STEP_S));
+			dx =
+				gap > 0
+					? Math.min(1.2 * STEP_S, (gap * 1.6 + 0.25) * STEP_S)
+					: Math.max(dx * 0.5, (0.25 + gap) * STEP_S);
 		}
 		head.x += dx;
-		head.y += (targetY - head.y) * Math.min(1, 1.5 * STEP_S);
+		// Rising or falling only as fast as the caret moves along: trails bend, never corner.
+		const rise = Math.min(Math.abs(targetY - head.y) * 2.5 * STEP_S, dx * 1.5);
+		head.y += Math.sign(targetY - head.y) * rise;
 		const limit = PAGE.height / 2 - 0.12;
 		head.y = Math.max(-limit, Math.min(limit, head.y));
 		if (head.x > X_END) {
 			head.x = X_START;
-			head.y = head.baseline;
+			head.baseline = head.home;
+			head.y = head.home;
 			if (sim.follow && (sim.follow.follower === i || sim.follow.leader === i))
 				sim.follow.until = sim.t;
 			resetTrail(head);
@@ -181,7 +203,8 @@ export function stillFrame(): Sim {
 	const sim = createSim(11);
 	sim.nextFollowAt = Number.POSITIVE_INFINITY;
 	advance(sim, 6);
-	startFollow(sim, 1, 0, 60);
+	const [follower, leader] = (sim.heads[1]?.x ?? 0) < (sim.heads[0]?.x ?? 0) ? [1, 0] : [0, 1];
+	startFollow(sim, follower, leader, 60);
 	advance(sim, 2.4);
 	return sim;
 }

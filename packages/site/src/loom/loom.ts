@@ -40,7 +40,7 @@ import {
 
 const THREADS = ["--t1", "--t2", "--t3", "--t4"];
 const RIBBON_WIDTH = 0.034;
-const DISTANCE = 7.2;
+const DISTANCE = 6.7;
 const FOG_NEAR = 6;
 const FOG_FAR = 10.5;
 
@@ -103,9 +103,9 @@ function surfaceMaterial(lift: number) {
 	return { material, u };
 }
 
-/** ~28 horizontal rules plus a margin line, as one LineSegments of short pieces. */
+/** 18 horizontal rules, as one LineSegments of short pieces (they follow the swell). */
 function rulesGeometry(): BufferGeometry {
-	const lines = 28;
+	const lines = 18;
 	const pieces = 96;
 	const positions: number[] = [];
 	const left = -PAGE.width / 2 + 0.06;
@@ -182,8 +182,8 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 	camera.position.set(0, 0, DISTANCE);
 
 	const page = new Group();
-	page.rotation.set(-0.62, -0.42, 0.16);
-	page.position.set(0.45, 0.05, 0);
+	page.rotation.set(-0.52, -0.32, 0.1);
+	page.position.set(0.6, 0.05, 0);
 	scene.add(page);
 
 	const surface = surfaceMaterial(0);
@@ -354,7 +354,7 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		// Keep the whole page in view on tall, narrow canvases.
 		camera.position.z = camera.aspect < 1 ? DISTANCE / Math.max(0.55, camera.aspect) : DISTANCE;
 		// Desktop: the canvas is the hero's right side, so the page leans right; phones: centred band.
-		page.position.x = window.innerWidth < 760 ? 0 : 0.45;
+		page.position.x = window.innerWidth < 760 ? 0 : 0.6;
 		camera.updateProjectionMatrix();
 	}
 

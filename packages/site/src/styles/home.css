@@ -53,12 +53,6 @@
 	stroke-width: 1;
 }
 
-.loom-margin {
-	stroke: #e8534a;
-	stroke-opacity: 0.35;
-	stroke-width: 1;
-}
-
 .loom-flag {
 	fill: #1b1a17;
 	font-family: var(--font-mono);
