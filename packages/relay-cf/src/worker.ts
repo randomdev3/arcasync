@@ -165,7 +165,10 @@ api.post("/auth/ws-token", async (c) => {
 api.post("/auth/logout", async (c) => {
 	const token = bearer(c);
 	if (token) meCache.drop(token);
-	return reply(c, await accounts(c.env).logout(token));
+	const result = await accounts(c.env).logout(token);
+	// Again after the DO call: a `/me` in flight meanwhile may have re-cached the old value.
+	if (token) meCache.drop(token);
+	return reply(c, result);
 });
 
 api.get("/workspaces", async (c) =>
@@ -189,7 +192,9 @@ api.post("/invites/redeem", async (c) => {
 	if (!body) return badRequest(c);
 	const token = bearer(c);
 	if (token) meCache.drop(token);
-	return reply(c, await accounts(c.env).redeemInvite(token, body.token));
+	const result = await accounts(c.env).redeemInvite(token, body.token);
+	if (token) meCache.drop(token);
+	return reply(c, result);
 });
 
 api.post("/workspaces", async (c) => {
