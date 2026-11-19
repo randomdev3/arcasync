@@ -19,6 +19,7 @@ import { waitFor } from "../obsidian.mjs";
 const NAME = "cursors";
 const NOTE = `Shared/${NAME}/cur.md`;
 const OTHER = `Shared/${NAME}/other.md`;
+const FRESH = `Shared/${NAME}/fresh.md`;
 const TEXT = "Line one\nLine two\nLine three\n";
 
 const USER_ID = "return app.plugins.plugins.teamsync.settings.user?.id ?? null;";
@@ -82,7 +83,7 @@ async function bobCaretAt(alice, bob, pos) {
 export default {
 	name: NAME,
 	needs: ["alice", "bob"],
-	seed: { alice: { [NOTE]: TEXT, [OTHER]: "Other\n" } },
+	seed: { alice: { [NOTE]: TEXT, [OTHER]: "Other\n", [FRESH]: TEXT } },
 	async run({ vaults, step, artifacts }) {
 		const { alice, bob } = vaults;
 		const bobId = await bob.eval(USER_ID);
@@ -195,6 +196,17 @@ export default {
 			const source = await bobCaretAt(alice, bobUser, { line: 2, ch: 5 });
 			step(`source mode: one bob caret at ${JSON.stringify(source.rect)}`);
 			assert.equal(await editorText(alice), TEXT, "carets never change the text");
+
+			// A caret placed right after opening a note bob never had open (no wait for the editor
+			// to bind) still reaches alice with no further move.
+			await setLivePreview(alice, true);
+			await openFile(alice, FRESH);
+			await waitEditorText(alice, TEXT, { timeout: 10000 });
+			const early = { line: 2, ch: 3 };
+			await openFile(bob, FRESH);
+			await setCursor(bob, early);
+			await bobCaretAt(alice, bobUser, early);
+			step("caret set right after bob opens a new note: alice sees it with no further move");
 		} finally {
 			await setLivePreview(alice, true).catch(() => undefined);
 			for (const v of [alice, bob]) {
