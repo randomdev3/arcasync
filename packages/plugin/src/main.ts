@@ -350,13 +350,15 @@ export default class TeamSyncPlugin extends Plugin {
 
 			if (!this.secrets.get()) await this.devLogin(info);
 			const me = await this.fetchMe();
-			// `/api/auth/me` may be cached by the relay for up to a minute; a mapped workspace it
-			// does not list yet (a membership that just changed) is checked against the uncached
-			// `/api/workspaces` before it is skipped.
+			// `/api/auth/me` may be cached by the relay for up to a minute; a mapped or primary
+			// workspace it does not list yet (a membership that just changed) is checked against the
+			// uncached `/api/workspaces` before it is skipped or replaced.
 			const known = new Set(this.settings.workspaces.map((w) => w.id));
-			if (this.settings.sharedFolders.some((f) => f.workspaceId && !known.has(f.workspaceId))) {
-				await this.refreshWorkspaces();
-			}
+			const wanted = [
+				this.settings.workspaceId,
+				...this.settings.sharedFolders.map((f) => f.workspaceId),
+			];
+			if (wanted.some((id) => id && !known.has(id))) await this.refreshWorkspaces();
 
 			const workspaceId =
 				this.settings.workspaces.find((w) => w.id === this.settings.workspaceId)?.id ??
