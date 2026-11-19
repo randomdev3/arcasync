@@ -11,11 +11,11 @@ import { constantTimeEqual } from "./tokens";
 /** The most a single PBKDF2 call may run in production Workers. */
 export const PBKDF2_MAX_ITERATIONS = 100_000;
 /**
- * 6 × 100 000 = 600 000 iterations: about 45 ms of CPU per hash in local workerd on an Apple M
+ * 7 × 100 000 = 700 000 iterations: about 45 ms of CPU per hash in local workerd on an Apple M
  * series (measured 2026-11-19; see docs/deploy-cloudflare.md). Run in AccountsDO, never in the
  * Worker (10 ms CPU on the free plan).
  */
-export const PASSWORD_ROUNDS = 6;
+export const PASSWORD_ROUNDS = 7;
 export const PASSWORD_ITERATIONS = PBKDF2_MAX_ITERATIONS;
 
 export interface PasswordHash {

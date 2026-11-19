@@ -29,7 +29,7 @@ describe("password hashing", () => {
 			},
 		);
 		expect(calls).toEqual(Array(PASSWORD_ROUNDS).fill(PASSWORD_ITERATIONS));
-		expect(PASSWORD_ROUNDS * PASSWORD_ITERATIONS).toBe(600_000);
+		expect(PASSWORD_ROUNDS * PASSWORD_ITERATIONS).toBe(700_000);
 		await expect(derive(new Uint8Array([1]), new Uint8Array(16), 100_001, 1)).rejects.toThrow(
 			/iterations/,
 		);
