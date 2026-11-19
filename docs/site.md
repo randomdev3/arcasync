@@ -29,7 +29,7 @@ Geist Mono for labels and codes.
   pictograms, `/favicon.svg`, `/logo.svg` and `/mark.svg` from it, so there are no image files.
 - **The display.** The landing page's centrepiece: three people co-writing a note on a dot lattice.
   `src/matrix/scene.ts` is the scene (no DOM, deterministic, unit-tested); `src/matrix/display.ts`
-  draws it on a 2D canvas, on a pitch of whole device pixels, redrawing only the dots that changed.
+  draws it on a 2D canvas, on a pitch of whole device pixels (`--pitch` in `home.css`), redrawing only the dots that changed.
   It stops when off-screen or in a hidden tab. With reduced motion it shows one still frame, and
   without JavaScript (or with data saver on) the page keeps the same frame as an SVG that the build
   renders from the scene. Moving the mouse over it adds the visitor's own caret.

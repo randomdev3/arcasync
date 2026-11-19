@@ -111,6 +111,7 @@
 	position: relative;
 	display: grid;
 	place-items: center;
+	box-sizing: content-box;
 	height: calc(var(--pitch) * 51);
 	border-block: 1px solid var(--rule);
 	overflow: hidden;
@@ -164,18 +165,18 @@
 	opacity: 0;
 }
 
-/* The pitch steps with the width, as in `pitchFor` (src/matrix/display.ts). */
+/*
+ * The pitch steps with the width; the canvas reads it from here. Each step keeps at least 114
+ * dots across, the eighteen characters the long script needs (the short one, below 610px, needs
+ * 60).
+ */
 @media (max-width: 339px) {
 	.display {
 		--pitch: 4px;
 	}
 }
 
-@media (min-width: 736px) {
-	.display {
-		--pitch: 6px;
-	}
-
+@media (min-width: 610px) {
 	.display__still--wide {
 		display: block;
 	}
@@ -185,7 +186,13 @@
 	}
 }
 
-@media (min-width: 848px) {
+@media (min-width: 752px) {
+	.display {
+		--pitch: 6px;
+	}
+}
+
+@media (min-width: 862px) {
 	.display {
 		--pitch: 7px;
 	}

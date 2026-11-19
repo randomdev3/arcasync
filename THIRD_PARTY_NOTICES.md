@@ -10,5 +10,5 @@ Portions of this project are derived from MIT-licensed code:
 
 The website (`packages/site`) bundles:
 
-- **Doto** (Óliver Lalan), **Geist** and **Geist Mono** (Vercel), self-hosted through the
+- **Doto** (The Doto Project Authors), **Geist** and **Geist Mono** (Vercel), self-hosted through the
   `@fontsource` packages — SIL Open Font License 1.1.

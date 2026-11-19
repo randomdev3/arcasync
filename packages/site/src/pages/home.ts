@@ -73,7 +73,7 @@ async function startDisplay() {
 			// Let the new custom properties apply before reading them.
 			requestAnimationFrame(() => display.recolor());
 		});
-		(window as Window & { __display?: unknown }).__display = display;
+		if (import.meta.env.DEV) (window as Window & { __display?: unknown }).__display = display;
 	} catch {
 		// The still frame stays.
 	}

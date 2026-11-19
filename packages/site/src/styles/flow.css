@@ -147,17 +147,19 @@
 	line-height: 1.5;
 }
 
+/* A person's name keeps the capitals they typed. */
 .big-who {
+	text-transform: none;
 	display: flex;
 	align-items: baseline;
-	flex-wrap: wrap;
 	gap: var(--s3);
 }
 
 .big-who .dot {
 	width: 0.28em;
 	height: 0.28em;
-	align-self: center;
+	align-self: flex-start;
+	margin-top: 0.4em;
 }
 
 .big-who .badge {

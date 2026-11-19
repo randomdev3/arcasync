@@ -35,12 +35,6 @@ function parseColor(value: string, fallback: Rgb): Rgb {
 	return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as Rgb;
 }
 
-/** The CSS pitch for a display `width` pixels wide: 4 or 5 on a phone, 8 on a desktop. */
-export function pitchFor(width: number): number {
-	if (width < MIN_COLS * 5) return 4;
-	return Math.max(5, Math.min(8, Math.floor(width / 112)));
-}
-
 export function createDisplay(
 	host: HTMLElement,
 	canvas: HTMLCanvasElement,
@@ -58,7 +52,6 @@ export function createDisplay(
 	let drawn = new Int16Array(0);
 	let atlas: HTMLCanvasElement | null = null;
 	let pitch = 0;
-	let cssPitch = 0;
 	let raf = 0;
 	let last = 0;
 	let visible = true;
@@ -155,10 +148,13 @@ export function createDisplay(
 	}
 
 	function resize() {
-		const box = host.getBoundingClientRect();
+		// The inner box: the host's hairlines are not part of the lattice.
+		const box = { width: host.clientWidth, height: host.clientHeight };
 		const dpr = Math.min(window.devicePixelRatio || 1, 3);
-		cssPitch = pitchFor(box.width);
-		const nextPitch = Math.max(2, Math.round(cssPitch * dpr));
+		// The stylesheet owns the pitch (`--pitch`, stepped with the width) and sizes the host from
+		// it. Rounding down to a whole device pixel keeps the lattice inside the host at any ratio.
+		const cssPitch = Number.parseFloat(getComputedStyle(host).getPropertyValue("--pitch")) || 5;
+		const nextPitch = Math.max(2, Math.floor(cssPitch * dpr));
 		const cols = Math.floor((box.width * dpr) / nextPitch);
 		const rows = Math.floor((box.height * dpr) / nextPitch);
 		if (cols < MIN_COLS || rows < MIN_ROWS) return;
