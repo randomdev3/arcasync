@@ -4,6 +4,12 @@ import {
 	DeviceCodeResponse,
 	type DeviceInfo,
 	DeviceLookupResponse,
+	InviteCreated,
+	type InviteCreateRequest,
+	type InviteSummary,
+	InvitesResponse,
+	type Member,
+	MembersResponse,
 	MeResponse,
 	type Role,
 	ServerInfo,
@@ -128,6 +134,56 @@ export class ApiClient {
 			schema: WorkspacesResponse,
 		});
 		return response.workspaces;
+	}
+
+	/** Members of a workspace with their roles (any member may list). */
+	async members(workspaceId: string): Promise<Member[]> {
+		const response = await this.request(`/workspaces/${encodeURIComponent(workspaceId)}/members`, {
+			schema: MembersResponse,
+		});
+		return response.members;
+	}
+
+	/** Owner or admin; a demoted or promoted member's sockets are closed with 4401. */
+	async setRole(workspaceId: string, userId: string, role: Role): Promise<void> {
+		await this.request(
+			`/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+			{ method: "PATCH", body: { role }, schema: OkResponse },
+		);
+	}
+
+	/** Owner or admin, or the member themselves; rejects with `last_owner` for the last owner. */
+	async removeMember(workspaceId: string, userId: string): Promise<void> {
+		await this.request(
+			`/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+			{ method: "DELETE", schema: OkResponse },
+		);
+	}
+
+	/** Owner or admin; the result's `url` is the only time the token is shown. */
+	createInvite(
+		workspaceId: string,
+		invite: { role: Role } & Partial<Omit<InviteCreateRequest, "role">>,
+	): Promise<InviteCreated> {
+		return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+			method: "POST",
+			body: invite,
+			schema: InviteCreated,
+		});
+	}
+
+	async listInvites(workspaceId: string): Promise<InviteSummary[]> {
+		const response = await this.request(`/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+			schema: InvitesResponse,
+		});
+		return response.invites;
+	}
+
+	async revokeInvite(workspaceId: string, inviteId: string): Promise<void> {
+		await this.request(
+			`/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`,
+			{ method: "DELETE", schema: OkResponse },
+		);
 	}
 
 	/** Signed out: asks for a code that a signed-in device approves. */

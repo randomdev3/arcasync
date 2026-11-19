@@ -190,4 +190,68 @@ describe("ApiClient", () => {
 			.catch(() => {});
 		expect(client.requestCounts).toEqual({ "/auth/device/lookup": 2 });
 	});
+
+	it("lists members and changes or removes them", async () => {
+		const member = { user: { id: "u2", name: "bob", color: "#0f0" }, role: "editor" };
+		let calls = respond(200, { members: [member] });
+		expect(await api().members("ws 1")).toEqual([member]);
+		expect(calls[0]?.url).toBe("http://relay.test/api/workspaces/ws%201/members");
+
+		calls = respond(200, { ok: true });
+		await api().setRole("ws1", "u2", "viewer");
+		await api().removeMember("ws1", "u2");
+		expect(calls.map((c) => [c.method, c.url])).toEqual([
+			["PATCH", "http://relay.test/api/workspaces/ws1/members/u2"],
+			["DELETE", "http://relay.test/api/workspaces/ws1/members/u2"],
+		]);
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ role: "viewer" });
+
+		respond(409, { error: { code: "last_owner", message: "needs an owner" } });
+		await expect(api().removeMember("ws1", "u1")).rejects.toMatchObject({
+			status: 409,
+			code: "last_owner",
+		});
+	});
+
+	it("creates, lists and revokes invites", async () => {
+		const created = {
+			id: "i1",
+			token: "tok",
+			url: "obsidian://teamsync?server=x&invite=tok",
+			role: "editor",
+			admin: false,
+			maxUses: 3,
+			expiresAt: 9,
+		};
+		let calls = respond(200, created);
+		expect(await api().createInvite("ws1", { role: "editor", maxUses: 3 })).toEqual(created);
+		expect(calls[0]?.method).toBe("POST");
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ role: "editor", maxUses: 3 });
+
+		const summary = {
+			id: "i1",
+			role: "editor",
+			admin: false,
+			uses: 0,
+			maxUses: 3,
+			expiresAt: 9,
+			createdBy: "u1",
+			revoked: false,
+		};
+		calls = respond(200, { invites: [summary] });
+		expect(await api().listInvites("ws1")).toEqual([summary]);
+
+		calls = respond(200, { ok: true });
+		await api().revokeInvite("ws1", "i1");
+		expect([calls[0]?.method, calls[0]?.url]).toEqual([
+			"DELETE",
+			"http://relay.test/api/workspaces/ws1/invites/i1",
+		]);
+
+		respond(403, { error: { code: "forbidden", message: "Owner or admin only" } });
+		await expect(api().createInvite("ws1", { role: "viewer" })).rejects.toMatchObject({
+			status: 403,
+			code: "forbidden",
+		});
+	});
 });
