@@ -17,7 +17,10 @@ const fakes = vi.hoisted(() => {
 		on(event: string, fn: Fn | undefined): void {
 			if (!fn) return;
 			let set = this.handlers.get(event);
-			if (!set) this.handlers.set(event, (set = new Set()));
+			if (!set) {
+				set = new Set();
+				this.handlers.set(event, set);
+			}
 			set.add(fn);
 		}
 		off(event: string, fn: Fn): void {

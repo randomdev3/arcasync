@@ -1,4 +1,4 @@
-import type { DeviceInfo, ServerInfo, SessionResponse } from "@teamsync/shared";
+import type { DeviceInfo, ServerInfo, SessionResponse, WorkspaceSummary } from "@teamsync/shared";
 import { WS_PATH } from "@teamsync/shared";
 import {
 	type Modal,
@@ -27,11 +27,13 @@ import {
 } from "./settings";
 import { SecretStore } from "./storage/SecretStore";
 import { ApproveDeviceModal } from "./ui/ApproveDeviceModal";
-import { ConfirmModal } from "./ui/ConfirmModal";
+import { ConfirmModal, type ConfirmOptions } from "./ui/ConfirmModal";
+import { CreateInviteModal } from "./ui/CreateInviteModal";
 import type { SettingsViewState } from "./ui/components/settingsProps";
 import { DeviceCodeModal } from "./ui/DeviceCodeModal";
 import { FolderSuggest } from "./ui/FolderSuggest";
 import { InviteModal } from "./ui/InviteModal";
+import { MembersModal } from "./ui/MembersModal";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { containingRoot, foldersOverlap } from "./workspace/paths";
@@ -163,6 +165,24 @@ export default class TeamSyncPlugin extends Plugin {
 			id: "approve-device",
 			name: "Approve a device sign-in",
 			callback: () => this.approveDevice(),
+		});
+		this.addCommand({
+			id: "manage-members",
+			name: "Manage workspace members",
+			checkCallback: (checking) => {
+				if (this.manageableWorkspaces().length === 0) return false;
+				if (!checking) this.manageMembers();
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "create-invite",
+			name: "Create an invite link",
+			checkCallback: (checking) => {
+				if (this.manageableWorkspaces().length === 0) return false;
+				if (!checking) this.createInvite();
+				return true;
+			},
 		});
 		this.registerObsidianProtocolHandler("teamsync", (params) => this.handleLink(params));
 		registerNavigatorCommands(this);
@@ -596,6 +616,44 @@ export default class TeamSyncPlugin extends Plugin {
 		);
 	}
 
+	// --- owner tools ----------------------------------------------------------
+
+	/**
+	 * Workspaces whose members and invites this user may manage: those they own, or all of them
+	 * for an admin. Only hides the commands; the relay authorises every change itself.
+	 */
+	manageableWorkspaces(): WorkspaceSummary[] {
+		if (!this.signedIn) return [];
+		const admin = this.me?.user.isAdmin ?? false;
+		return this.settings.workspaces.filter((w) => admin || w.role === "owner");
+	}
+
+	/** The primary workspace when it is manageable, otherwise the first manageable one. */
+	private ownerToolTarget(): { workspaces: WorkspaceSummary[]; workspaceId: string } | null {
+		const workspaces = this.manageableWorkspaces();
+		const target = workspaces.find((w) => w.id === this.settings.workspaceId) ?? workspaces[0];
+		return target ? { workspaces, workspaceId: target.id } : null;
+	}
+
+	manageMembers(): void {
+		const target = this.ownerToolTarget();
+		if (!target) return;
+		this.openModal(
+			new MembersModal(this.app, {
+				api: this.api,
+				...target,
+				selfId: this.me?.user.id ?? this.settings.user?.id ?? null,
+				confirm: (options: ConfirmOptions) => this.openModal(new ConfirmModal(this.app, options)),
+			}),
+		);
+	}
+
+	createInvite(): void {
+		const target = this.ownerToolTarget();
+		if (!target) return;
+		this.openModal(new CreateInviteModal(this.app, { api: this.api, ...target }));
+	}
+
 	private openModal(modal: Modal): void {
 		const onClose = modal.onClose.bind(modal);
 		modal.onClose = () => {
@@ -649,12 +707,16 @@ export default class TeamSyncPlugin extends Plugin {
 		return this.live.get(this.settings.workspaceId) ?? this.live.values().next().value ?? null;
 	}
 
-	/** Workspace id → mapped folder (or null) of every workspace that should be connected. */
+	/**
+	 * Workspace id → mapped folder (or null) of every workspace that should be connected. A
+	 * mapping to a workspace this account is not (or no longer) a member of is kept but skipped.
+	 */
 	private wantedWorkspaces(): Map<string, string | null> {
 		const known = new Set(this.settings.workspaces.map((w) => w.id));
 		const mapped = this.settings.sharedFolders.filter((f) => known.has(f.workspaceId));
-		if (mapped.length === 0) return new Map([[this.settings.workspaceId, null]]);
-		return new Map(mapped.map((f) => [f.workspaceId, f.path]));
+		if (mapped.length > 0) return new Map(mapped.map((f) => [f.workspaceId, f.path]));
+		const primary = this.settings.workspaceId;
+		return known.has(primary) ? new Map([[primary, null]]) : new Map();
 	}
 
 	/**
@@ -688,11 +750,16 @@ export default class TeamSyncPlugin extends Plugin {
 		const connections = new ConnectionManager({
 			// `?ws=` routes the socket to the workspace's relay; the Node server ignores it.
 			url: `${websocketUrl(this.settings.serverUrl, WS_PATH)}?ws=${encodeURIComponent(workspaceId)}`,
+			workspaceId,
 			tokenStore: this.tokens,
 			features: this.serverInfo?.features,
 			isIdle: () => session?.presence?.idle ?? false,
 		});
 		const offState = connections.onStateChange(() => this.updateConnectionState());
+		const offMembership = connections.onMembershipChanged(({ removed }) => {
+			// Out of the provider's callback: stopping the workspace destroys this socket.
+			setTimeout(() => void this.onMembershipChanged(workspaceId, connections, removed), 0);
+		});
 		connections.connect();
 		session = new WorkspaceSession({
 			app: this.app,
@@ -711,10 +778,40 @@ export default class TeamSyncPlugin extends Plugin {
 				offOnline();
 				started.stop();
 				offState();
+				offMembership();
 				connections.destroy();
 			},
 		});
 		started.start();
+	}
+
+	/**
+	 * The relay changed this user's membership in `workspaceId`. A new role needs nothing (the
+	 * socket re-mints and re-authenticates); only the cached roles are refreshed. A removal stops
+	 * that workspace's session and keeps its files and mapping (a later invite restores both).
+	 */
+	private async onMembershipChanged(
+		workspaceId: string,
+		connections: ConnectionManager,
+		removed: boolean,
+	): Promise<void> {
+		if (!removed) {
+			await this.refreshWorkspaces();
+			return;
+		}
+		const entry = this.live.get(workspaceId);
+		if (entry?.connections !== connections) return;
+		const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId;
+		this.live.delete(workspaceId);
+		entry.stop();
+		new Notice(`TeamSync: you were removed from ${name}`);
+		// Drop it locally first: if the uncached refresh fails, it still must not reconnect.
+		await this.updateSettings({
+			workspaces: this.settings.workspaces.filter((w) => w.id !== workspaceId),
+		});
+		await this.refreshWorkspaces();
+		if (this.settings.user) this.syncLive();
+		else this.updateConnectionState();
 	}
 
 	disconnect(): void {

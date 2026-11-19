@@ -49,6 +49,9 @@ interface Bound {
 	note: NoteDocHandle;
 	undoManager: Y.UndoManager;
 	offClose: () => void;
+	/** The read-only state the editor is configured with. */
+	readonly: boolean;
+	offAuthenticated: () => void;
 }
 
 /**
@@ -88,6 +91,8 @@ export function minimalChange(from: string, to: string): ChangeSpec | null {
 export class EditorBindings {
 	/** Holds `yCollab` (and read-only facets) for bound editors; empty otherwise. */
 	readonly collab = new Compartment();
+	/** Inside `collab`: the read-only facets alone, so a role change never rebuilds `yCollab`. */
+	readonly readOnly = new Compartment();
 	private readonly views = new Set<EditorBinding>();
 	/** Index-change subscriptions, one per session the host had at the last `sessionChanged`. */
 	private readonly watched = new Map<WorkspaceSession, () => void>();
@@ -210,7 +215,27 @@ function fileOf(state: EditorState): TFile | null {
 }
 
 /** Collab extension for one bound editor. */
-function collabExtension(note: NoteDocHandle, undoManager: Y.UndoManager): Extension {
+/** Read-only facets for a viewer's editor; empty for an editor. */
+function readOnlyExtension(readonly: boolean): Extension {
+	return readonly
+		? [
+				EditorState.readOnly.of(true),
+				EditorView.editable.of(false),
+				// Commands and widgets can still dispatch; a viewer's buffer only takes remote text.
+				EditorState.transactionFilter.of((tr) =>
+					tr.docChanged && !tr.annotation(ySyncAnnotation) && !tr.annotation(Transaction.remote)
+						? []
+						: tr,
+				),
+			]
+		: [];
+}
+
+function collabExtension(
+	note: NoteDocHandle,
+	undoManager: Y.UndoManager,
+	readOnly: Compartment,
+): Extension {
 	return [
 		yCollab(note.ytext, note.awareness, { undoManager }),
 		// Name labels for 2 s after a remote caret moves; remote carets hidden until the note is ready.
@@ -223,18 +248,7 @@ function collabExtension(note: NoteDocHandle, undoManager: Y.UndoManager): Exten
 		EditorState.transactionExtender.of((tr) =>
 			tr.annotation(ySyncAnnotation) ? { annotations: Transaction.addToHistory.of(false) } : null,
 		),
-		note.readonly
-			? [
-					EditorState.readOnly.of(true),
-					EditorView.editable.of(false),
-					// Commands and widgets can still dispatch; a viewer's buffer only takes remote text.
-					EditorState.transactionFilter.of((tr) =>
-						tr.docChanged && !tr.annotation(ySyncAnnotation) && !tr.annotation(Transaction.remote)
-							? []
-							: tr,
-					),
-				]
-			: [],
+		readOnly.of(readOnlyExtension(note.readonly)),
 	];
 }
 
@@ -337,11 +351,37 @@ export class EditorBinding implements PluginValue {
 		const changes = minimalChange(this.view.state.doc.toString(), note.ytext.toString());
 		this.view.dispatch({
 			...(changes ? { changes } : {}),
-			effects: this.bindings.collab.reconfigure(collabExtension(note, undoManager)),
+			effects: this.bindings.collab.reconfigure(
+				collabExtension(note, undoManager, this.bindings.readOnly),
+			),
 			annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
 		});
 		const offClose = note.onClose(() => this.unbind(true));
-		this.bound = { docs, fileId, file, note, undoManager, offClose };
+		// Every (re-)Auth carries the current role: a demotion or promotion arrives here after the
+		// relay closed the socket with 4401 and the provider re-authenticated.
+		const onAuthenticated = () => this.applyReadOnly();
+		note.provider.on("authenticated", onAuthenticated);
+		const offAuthenticated = () => note.provider.off("authenticated", onAuthenticated);
+		this.bound = {
+			docs,
+			fileId,
+			file,
+			note,
+			undoManager,
+			offClose,
+			readonly: note.readonly,
+			offAuthenticated,
+		};
+	}
+
+	/** Makes the editor read-only exactly when the note's `authorizedScope` is `readonly`. */
+	private applyReadOnly(): void {
+		const bound = this.bound;
+		if (!bound || this.destroyed || bound.readonly === bound.note.readonly) return;
+		bound.readonly = bound.note.readonly;
+		this.view.dispatch({
+			effects: this.bindings.readOnly.reconfigure(readOnlyExtension(bound.readonly)),
+		});
 	}
 
 	/** `reconfigure` is false while CodeMirror is replacing the state (no dispatch allowed). */
@@ -353,6 +393,7 @@ export class EditorBinding implements PluginValue {
 		if (!bound) return;
 		this.bound = null;
 		bound.offClose();
+		bound.offAuthenticated();
 		if (reconfigure && !this.destroyed) {
 			try {
 				this.view.dispatch({ effects: this.bindings.collab.reconfigure([]) });
