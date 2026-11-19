@@ -63,6 +63,13 @@ over the Chrome DevTools Protocol. It needs the Obsidian desktop app at
 `/Applications/Obsidian.app` (or `OBSIDIAN_BIN`) and a logged-in GUI session, so **e2e does not
 run in CI**. It never touches your own Obsidian windows or vaults.
 
+The test windows are invisible: they never take focus, let clicks pass through and have no Dock
+icon, so you can keep working while e2e runs. Obsidian's launcher loads the newest
+`obsidian-<version>.asar` in the profile, so the harness puts a small shim there
+(`scripts/e2e/hidden.mjs`) that patches the window before loading the real Obsidian package (the
+newest one your own Obsidian or the profile has downloaded). Pages still paint, so screenshots and
+typing work as usual. Set `E2E_VISIBLE=1` to watch the windows.
+
 Environment variables:
 
 | Variable | Default | Meaning |
@@ -72,6 +79,7 @@ Environment variables:
 | `E2E_PORT` | `8788` | Port of the local backend |
 | `E2E_CDP_PORT` | `9333` | DevTools port of the first vault; vault *n* uses this plus *n* |
 | `E2E_SERVER_LOG` | | Set to show backend logs |
+| `E2E_VISIBLE` | | Set to `1` to show the Obsidian windows (they are invisible by default) |
 | `OBSIDIAN_BIN` | `/Applications/Obsidian.app/Contents/MacOS/Obsidian` | Obsidian binary |
 
 On a failure every window is screenshotted. Screenshots and other artifacts go to

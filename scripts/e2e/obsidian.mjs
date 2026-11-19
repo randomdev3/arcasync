@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { prepareProfile } from "./hidden.mjs";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const OBSIDIAN_BIN =
@@ -140,10 +141,11 @@ export class VaultHandle {
 			join(this.profile, "obsidian.json"),
 			JSON.stringify({ vaults: { [this.id]: { path: this.path, ts: Date.now(), open: true } } }),
 		);
+		const env = { ...process.env, ...prepareProfile(this.profile, OBSIDIAN_BIN) };
 		const child = spawn(
 			OBSIDIAN_BIN,
 			[`--user-data-dir=${this.profile}`, `--remote-debugging-port=${this.port}`],
-			{ stdio: "ignore", detached: false },
+			{ stdio: "ignore", detached: false, env },
 		);
 		this.child = child;
 		this.exited = new Promise((r) => child.once("exit", r));
