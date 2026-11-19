@@ -54,8 +54,9 @@ export function vaultId(name) {
 /**
  * Creates vault folders under `.e2e/vaults`. Each vault is wiped first unless `keep` is set.
  * `seed` maps vault name → {relative path: content}.
- * The plugin is installed later by `connectPlugin`: a vault that already has plugins on its first
- * open makes Obsidian show a "trust the author" modal, which steals keyboard focus.
+ * The plugin is installed later by `installPlugin`/`connectPlugin`: a vault that already has
+ * plugins on its first open makes Obsidian show a "trust the author" modal, which steals keyboard
+ * focus.
  */
 export function prepareVaults(names, { seed = {}, keep = false } = {}) {
 	const base = join(ROOT, ".e2e", "vaults");
@@ -81,7 +82,7 @@ const PLUGIN_FILES = ["main.js", "manifest.json", "styles.css"];
  * Symlinks the built plugin files (`packages/plugin/dist/*`) into a real per-vault plugin folder.
  * Linking the whole `dist` folder would make every vault share one `data.json` (settings).
  */
-function installPlugin(vaultPath) {
+function linkPlugin(vaultPath) {
 	const dir = join(vaultPath, ".obsidian", "plugins", "teamsync");
 	if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) unlinkSync(dir);
 	mkdirSync(dir, { recursive: true });
@@ -356,23 +357,48 @@ export async function waitConnected(vault, { timeout = 20000 } = {}) {
 }
 
 /**
- * Installs the plugin, turns off restricted mode, loads the plugin, points it at `serverUrl`, logs in as `name`,
- * connects, and turns on `autoConnect` so a relaunch reconnects with the stored session.
- * `role` is written to `devLoginRole`. `sharedFolder` is a vault folder path (e.g. "Shared"),
- * written as `{path, workspaceId: ""}` so the plugin binds it to the workspace it connects to;
- * `null` unmaps. Leave either undefined to keep the vault's current setting.
+ * Installs the plugin into a running vault, turns off restricted mode, loads and enables the
+ * plugin, and points it at `serverUrl` (left unchanged when undefined). It does not log in or
+ * connect, so a vault that only gets this is a "fresh" device for sign-in tests.
  */
-export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
-	installPlugin(vault.path);
-	if (typeof sharedFolder === "string") sharedFolder = { path: sharedFolder, workspaceId: "" };
-	const result = await vault.eval(
+export async function installPlugin(vault, { serverUrl } = {}) {
+	linkPlugin(vault.path);
+	await vault.eval(
 		`
 		await app.plugins.loadManifests();
 		if (!app.plugins.isEnabled()) await app.plugins.setEnable(true);
 		if (!app.plugins.plugins.teamsync) await app.plugins.enablePluginAndSave("teamsync");
 		const p = app.plugins.plugins.teamsync;
 		if (!p) throw new Error("teamsync plugin did not load");
-		p.settings.serverUrl = args.serverUrl;
+		if (args.serverUrl !== undefined) {
+			p.settings.serverUrl = args.serverUrl;
+			await p.saveSettings();
+		}
+	`,
+		{ serverUrl },
+	);
+	// Obsidian writes `community-plugins.json` a few seconds after `enablePluginAndSave`. A quit
+	// inside that window loses it, and the relaunched vault never loads the plugin.
+	await waitFor(() => pluginEnabledOnDisk(vault.path), {
+		timeout: 15000,
+		label: `${vault.name} community-plugins.json lists teamsync`,
+	});
+}
+
+/**
+ * `installPlugin`, then logs in as `name`, connects, and turns on `autoConnect` so a relaunch
+ * reconnects with the stored session.
+ * `role` is written to `devLoginRole`. `sharedFolder` is a vault folder path (e.g. "Shared"),
+ * written as `{path, workspaceId: ""}` so the plugin binds it to the workspace it connects to;
+ * `null` unmaps. Leave either undefined to keep the vault's current setting.
+ */
+export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
+	await installPlugin(vault, { serverUrl });
+	if (typeof sharedFolder === "string") sharedFolder = { path: sharedFolder, workspaceId: "" };
+	return vault.eval(
+		`
+		const p = app.plugins.plugins.teamsync;
+		if (!p) throw new Error("teamsync plugin did not load");
 		p.settings.devLoginName = args.name;
 		p.settings.autoConnect = true;
 		if (args.role !== undefined) p.settings.devLoginRole = args.role;
@@ -382,13 +408,6 @@ export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder
 		for (let i = 0; i < 75 && p.connection?.status !== "connected"; i++) await new Promise(r => setTimeout(r, 200));
 		return { status: p.connection?.status, message: p.connection?.message ?? null, user: p.settings.user?.name ?? null };
 	`,
-		{ serverUrl, name, role, sharedFolder },
+		{ name, role, sharedFolder },
 	);
-	// Obsidian writes `community-plugins.json` a few seconds after `enablePluginAndSave`. A quit
-	// inside that window loses it, and the relaunched vault never loads the plugin.
-	await waitFor(() => pluginEnabledOnDisk(vault.path), {
-		timeout: 15000,
-		label: `${vault.name} community-plugins.json lists teamsync`,
-	});
-	return result;
 }

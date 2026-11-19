@@ -55,6 +55,7 @@ pnpm e2e:smoke        # the harness itself
 pnpm e2e:p0           # P0 counter in two vaults, including a relay restart
 pnpm e2e:p1           # every scenario in scripts/e2e/p1/
 pnpm e2e:p1 --only mapping,index-sync
+pnpm e2e:p2           # every scenario in scripts/e2e/p2/ (prints "no scenarios" while empty)
 ```
 
 The harness launches one Obsidian process per vault (`alice`, `bob`, and `carol` as a viewer
@@ -84,6 +85,21 @@ Environment variables:
 
 On a failure every window is screenshotted. Screenshots and other artifacts go to
 `.e2e/artifacts/<suite>/<scenario>/`. `.e2e/` is git-ignored and local to each checkout.
+
+### P2 suite
+
+`scripts/e2e/p2/` uses the same runner with more vaults: `alice`, `bob`, `carol` (viewer),
+`dave`, `dave-phone` and `erin`. Besides `needs`, a scenario can declare:
+
+- `fresh: [...]`: vaults launched with the plugin installed, enabled and pointed at the backend,
+  but not logged in or connected, for sign-in tests. A vault that an earlier scenario connected
+  cannot be fresh.
+- `backends: ["cf"]`: the scenario runs only on those `E2E_BACKEND` values and prints
+  `SKIP <name> (backend)` elsewhere.
+
+`ctx.api` (`scripts/e2e/api.mjs`) has HTTP helpers against the backend (dev-login with a
+`workspace` slug, bootstrap, workspace lookup, ws tokens, debug stats and chunks), and
+`ctx.backend` names the backend.
 
 ### Mobile: what emulation covers, and what needs a real device
 

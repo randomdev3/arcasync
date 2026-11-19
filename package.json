@@ -16,6 +16,7 @@
 		"db:generate": "pnpm --filter @teamsync/server db:generate",
 		"e2e:p0": "node scripts/e2e/p0-counter.mjs",
 		"e2e:p1": "node scripts/e2e/run.mjs --suite p1",
+		"e2e:p2": "node scripts/e2e/run.mjs --suite p2",
 		"e2e:smoke": "node scripts/e2e/smoke-harness.mjs"
 	},
 	"devDependencies": {
