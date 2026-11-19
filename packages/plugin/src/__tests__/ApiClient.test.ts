@@ -4,7 +4,7 @@ import {
 	type RequestUrlResponse,
 	requestUrlMock,
 } from "../__mocks__/obsidian";
-import { ApiClient, ApiRequestError } from "../net/ApiClient";
+import { ApiClient, ApiRequestError, NetworkError } from "../net/ApiClient";
 
 const defaultImpl = requestUrlMock.impl;
 
@@ -90,5 +90,104 @@ describe("ApiClient", () => {
 			device,
 			workspace: "second",
 		});
+	});
+
+	const user = {
+		id: "u1",
+		name: "dave",
+		email: null,
+		color: "#fff",
+		avatarUrl: null,
+		isAdmin: true,
+	};
+	const device = { name: "phone", platform: "ios", vaultId: "v2" } as const;
+	const workspace = { id: "ws1", slug: "team", name: "Team", role: "owner" };
+
+	it("accepts an invite without a session and parses the SessionResponse", async () => {
+		const calls = respond(200, { sessionToken: "s1", user, workspaces: [workspace] });
+
+		const session = await api(null).acceptInvite("inv", "dave", device);
+
+		expect(session).toEqual({ sessionToken: "s1", user, workspaces: [workspace] });
+		expect(calls[0]?.url).toBe("http://relay.test/api/auth/invite/accept");
+		expect(calls[0]?.method).toBe("POST");
+		expect(calls[0]?.headers?.Authorization).toBeUndefined();
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ token: "inv", name: "dave", device });
+	});
+
+	it("redeems an invite with the session and unwraps the workspaces", async () => {
+		const calls = respond(200, { workspaces: [workspace] });
+
+		expect(await api().redeemInvite("inv")).toEqual([workspace]);
+		expect(calls[0]?.url).toBe("http://relay.test/api/invites/redeem");
+		expect(calls[0]?.headers?.Authorization).toBe("Bearer session-token");
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ token: "inv" });
+	});
+
+	it("maps invite and device-code errors to ApiRequestError codes", async () => {
+		respond(410, { error: { code: "invite_used", message: "used" } });
+		await expect(api(null).acceptInvite("inv", "dave", device)).rejects.toMatchObject({
+			status: 410,
+			code: "invite_used",
+		});
+		respond(400, { error: { code: "authorization_pending", message: "wait" } });
+		await expect(api(null).devicePoll("dc")).rejects.toMatchObject({
+			status: 400,
+			code: "authorization_pending",
+		});
+		respond(429, { error: { code: "rate_limited", message: "later" } });
+		await expect(api().deviceLookup("BCDF-GHJK")).rejects.toMatchObject({
+			status: 429,
+			code: "rate_limited",
+		});
+	});
+
+	it("parses device start, lookup and approve", async () => {
+		const start = {
+			deviceCode: "dc",
+			userCode: "BCDF-GHJK",
+			verificationUri: "obsidian://teamsync?approve=BCDF-GHJK",
+			interval: 5,
+			expiresIn: 600,
+		};
+		let calls = respond(200, start);
+		expect(await api(null).deviceStart(device)).toEqual(start);
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ device });
+		expect(calls[0]?.headers?.Authorization).toBeUndefined();
+
+		calls = respond(200, { device: { name: "phone", platform: "ios" }, expiresAt: 5 });
+		expect(await api().deviceLookup("bcdf ghjk")).toEqual({
+			device: { name: "phone", platform: "ios" },
+			expiresAt: 5,
+		});
+		expect(calls[0]?.url).toBe("http://relay.test/api/auth/device/lookup?userCode=bcdf%20ghjk");
+
+		calls = respond(200, { ok: true });
+		await api().deviceApprove("BCDF-GHJK", false);
+		expect(JSON.parse(String(calls[0]?.body))).toEqual({ userCode: "BCDF-GHJK", approve: false });
+	});
+
+	it("rejects a device start response that does not match the schema", async () => {
+		respond(200, { deviceCode: "dc" });
+		await expect(api(null).deviceStart(device)).rejects.toBeInstanceOf(NetworkError);
+	});
+
+	it("logs out with the session", async () => {
+		const calls = respond(200, { ok: true });
+		await api().logout();
+		expect(calls[0]?.url).toBe("http://relay.test/api/auth/logout");
+		expect(calls[0]?.method).toBe("POST");
+		expect(calls[0]?.headers?.Authorization).toBe("Bearer session-token");
+	});
+
+	it("counts requests per pathname without the query string, not unsent ones", async () => {
+		respond(200, { device: { name: "phone", platform: "ios" }, expiresAt: 5 });
+		const client = api();
+		await client.deviceLookup("A");
+		await client.deviceLookup("B");
+		await api(null)
+			.workspaces()
+			.catch(() => {});
+		expect(client.requestCounts).toEqual({ "/auth/device/lookup": 2 });
 	});
 });

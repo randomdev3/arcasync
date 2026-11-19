@@ -1,7 +1,9 @@
 import {
 	API_PREFIX,
 	ApiError as ApiErrorSchema,
+	DeviceCodeResponse,
 	type DeviceInfo,
+	DeviceLookupResponse,
 	MeResponse,
 	type Role,
 	ServerInfo,
@@ -11,7 +13,7 @@ import {
 	WsTokenResponse,
 } from "@teamsync/shared";
 import { type RequestUrlResponse, requestUrl } from "obsidian";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** The server answered, but with an error status. */
 export class ApiRequestError extends Error {
@@ -38,6 +40,9 @@ export class NetworkError extends Error {
 export type MeResult = z.infer<typeof MeResponse>;
 export type WsTokenResult = z.infer<typeof WsTokenResponse>;
 
+/** The relay's body for a mutation without a result. */
+const OkResponse = z.object({ ok: z.literal(true) });
+
 export interface ApiClientOptions {
 	/** Read lazily so a settings change takes effect without rebuilding the client. */
 	getBaseUrl(): string;
@@ -52,6 +57,9 @@ interface RequestOptions<T> {
 }
 
 export class ApiClient {
+	/** Requests sent per API pathname (no query string); e2e reads the device-code poll count. */
+	readonly requestCounts: Record<string, number> = {};
+
 	constructor(private readonly options: ApiClientOptions) {}
 
 	get baseUrl(): string {
@@ -97,6 +105,67 @@ export class ApiClient {
 		return response.workspaces;
 	}
 
+	/** Revokes this device's session on the server. */
+	async logout(): Promise<void> {
+		await this.request("/auth/logout", { method: "POST", schema: OkResponse });
+	}
+
+	/** Signed out: joins through an invite as a new user named `name`. */
+	acceptInvite(token: string, name: string, device: DeviceInfo): Promise<SessionResponse> {
+		return this.request("/auth/invite/accept", {
+			method: "POST",
+			body: { token, name, device },
+			schema: SessionResponse,
+			auth: false,
+		});
+	}
+
+	/** Signed in: joins the invite's workspace; returns every workspace of this account. */
+	async redeemInvite(token: string): Promise<WorkspaceSummary[]> {
+		const response = await this.request("/invites/redeem", {
+			method: "POST",
+			body: { token },
+			schema: WorkspacesResponse,
+		});
+		return response.workspaces;
+	}
+
+	/** Signed out: asks for a code that a signed-in device approves. */
+	deviceStart(device: DeviceInfo): Promise<DeviceCodeResponse> {
+		return this.request("/auth/device/start", {
+			method: "POST",
+			body: { device },
+			schema: DeviceCodeResponse,
+			auth: false,
+		});
+	}
+
+	/** The session once approved; otherwise rejects with `authorization_pending`, `slow_down`, …. */
+	devicePoll(deviceCode: string): Promise<SessionResponse> {
+		return this.request("/auth/device/poll", {
+			method: "POST",
+			body: { deviceCode },
+			schema: SessionResponse,
+			auth: false,
+		});
+	}
+
+	/** Which device asks for `userCode` (rate-limited by the server to 5 per minute). */
+	deviceLookup(userCode: string): Promise<DeviceLookupResponse> {
+		return this.request(`/auth/device/lookup?userCode=${encodeURIComponent(userCode)}`, {
+			schema: DeviceLookupResponse,
+		});
+	}
+
+	/** Approves (the device signs in as this user) or denies `userCode`. */
+	async deviceApprove(userCode: string, approve: boolean): Promise<void> {
+		await this.request("/auth/device/approve", {
+			method: "POST",
+			body: { userCode, approve },
+			schema: OkResponse,
+		});
+	}
+
 	private async request<T>(pathname: string, options: RequestOptions<T>): Promise<T> {
 		const url = `${this.baseUrl}${API_PREFIX}${pathname}`;
 		const headers: Record<string, string> = { Accept: "application/json" };
@@ -107,6 +176,8 @@ export class ApiClient {
 			headers.Authorization = `Bearer ${token}`;
 		}
 
+		const counted = pathname.split("?")[0] ?? pathname;
+		this.requestCounts[counted] = (this.requestCounts[counted] ?? 0) + 1;
 		let response: RequestUrlResponse;
 		try {
 			response = await requestUrl({
