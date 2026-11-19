@@ -278,7 +278,7 @@ export function device(options: DeviceOptions) {
 		revs,
 		userId: name,
 		storage,
-		keyPrefix: `teamsync:${vaultId}:ws1`,
+		keyPrefix: `arcasync:${vaultId}:ws1`,
 		throttleMs: options.revThrottleMs,
 	});
 	const note: NoteDocDeps = {

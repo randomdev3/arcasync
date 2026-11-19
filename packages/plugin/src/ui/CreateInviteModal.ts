@@ -51,7 +51,7 @@ export class CreateInviteModal extends Modal {
 				.onChange((value) => {
 					this.role = value as Role;
 				});
-			dropdown.selectEl.addClass("teamsync-invite-role");
+			dropdown.selectEl.addClass("arcasync-invite-role");
 		});
 		new Setting(this.contentEl)
 			.setName("Uses")
@@ -76,10 +76,10 @@ export class CreateInviteModal extends Modal {
 				.setButtonText("Create invite link")
 				.setCta()
 				.onClick(() => void this.create());
-			button.buttonEl.addClass("teamsync-invite-create");
+			button.buttonEl.addClass("arcasync-invite-create");
 		});
-		this.resultEl = this.contentEl.createDiv({ cls: "teamsync-invite-result" });
-		this.openEl = this.contentEl.createDiv({ cls: "teamsync-invites-open" });
+		this.resultEl = this.contentEl.createDiv({ cls: "arcasync-invite-result" });
+		this.openEl = this.contentEl.createDiv({ cls: "arcasync-invites-open" });
 		void this.loadOpen();
 	}
 
@@ -87,7 +87,7 @@ export class CreateInviteModal extends Modal {
 		const maxUses = Math.round(this.maxUses);
 		const days = this.days;
 		if (!(maxUses >= 1 && maxUses <= 100) || !(days >= 1 && days <= 30)) {
-			new Notice("TeamSync: uses must be 1–100 and expiry 1–30 days");
+			new Notice("ArcaSync: uses must be 1–100 and expiry 1–30 days");
 			return;
 		}
 		try {
@@ -103,17 +103,17 @@ export class CreateInviteModal extends Modal {
 				.addText((text) => {
 					text.setValue(invite.url);
 					text.inputEl.readOnly = true;
-					text.inputEl.addClass("teamsync-invite-url");
+					text.inputEl.addClass("arcasync-invite-url");
 				})
 				.addButton((button) =>
 					button.setButtonText("Copy").onClick(async () => {
 						await navigator.clipboard.writeText(invite.url);
-						new Notice("TeamSync: invite link copied");
+						new Notice("ArcaSync: invite link copied");
 					}),
 				);
 			await this.loadOpen();
 		} catch (error) {
-			new Notice(`TeamSync: ${describeMemberError(error)}`);
+			new Notice(`ArcaSync: ${describeMemberError(error)}`);
 		}
 	}
 
@@ -145,7 +145,7 @@ export class CreateInviteModal extends Modal {
 							try {
 								await this.options.api.revokeInvite(workspaceId, invite.id);
 							} catch (error) {
-								new Notice(`TeamSync: ${describeMemberError(error)}`);
+								new Notice(`ArcaSync: ${describeMemberError(error)}`);
 							}
 							await this.loadOpen();
 						}),

@@ -1,8 +1,8 @@
 import { Role, type WorkspaceSummary } from "@arcasync/shared";
 import { foldersOverlap } from "./workspace/paths";
 
-export interface TeamSyncSettings {
-	/** Base URL of the TeamSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
+export interface ArcaSyncSettings {
+	/** Base URL of the ArcaSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
 	serverUrl: string;
 	/** Name used for `POST /api/auth/dev-login` while the server allows open login. */
 	devLoginName: string;
@@ -32,7 +32,7 @@ export interface SharedFolder {
 	workspaceId: string;
 }
 
-export const DEFAULT_SETTINGS: TeamSyncSettings = {
+export const DEFAULT_SETTINGS: ArcaSyncSettings = {
 	serverUrl: "http://localhost:8789",
 	devLoginName: "",
 	workspaceId: "",
@@ -49,8 +49,8 @@ export const DEFAULT_SETTINGS: TeamSyncSettings = {
  * `data.json` is dropped here rather than round-tripped. A P1 `sharedFolder` becomes a
  * one-element `sharedFolders`.
  */
-export function normalizeSettings(raw: unknown): TeamSyncSettings {
-	const data = (raw ?? {}) as Partial<TeamSyncSettings> & { sharedFolder?: unknown };
+export function normalizeSettings(raw: unknown): ArcaSyncSettings {
+	const data = (raw ?? {}) as Partial<ArcaSyncSettings> & { sharedFolder?: unknown };
 	return {
 		serverUrl: typeof data.serverUrl === "string" ? data.serverUrl : DEFAULT_SETTINGS.serverUrl,
 		devLoginName:

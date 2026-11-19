@@ -12,7 +12,7 @@ export interface ServerInfoEnv {
 /** Feature flags (D9): `chunks` only with an R2 binding, so `env.probe` reports false. */
 export function serverInfo(env: ServerInfoEnv, publicUrl: string): ServerInfo {
 	return {
-		name: "TeamSync",
+		name: "ArcaSync",
 		version: RELAY_VERSION,
 		publicUrl,
 		features: {

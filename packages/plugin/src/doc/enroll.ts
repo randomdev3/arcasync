@@ -5,11 +5,11 @@ import { diskText, textHash } from "./diskText";
 import { merge3 } from "./merge3";
 
 /** Transaction origin of the one-time insert of disk text into an empty note doc. */
-export const ENROLL_ORIGIN = "teamsync:enroll";
+export const ENROLL_ORIGIN = "arcasync:enroll";
 /** Transaction origin of a disk edit of a closed note applied to its doc. */
-export const DISK_ORIGIN = "teamsync:disk";
+export const DISK_ORIGIN = "arcasync:disk";
 /** Transaction origin of server state applied from a bulk clone (P2-12). */
-export const CLONE_ORIGIN = "teamsync:clone";
+export const CLONE_ORIGIN = "arcasync:clone";
 
 const META = "meta";
 const ENROLLED = "enrolled";
@@ -228,7 +228,7 @@ export async function reconcileNote(
 			if (result === "changed") return { action, copy, retry: true };
 			if (result !== "missing") await note.setLastSynced(docHash, doc);
 			deps.notify?.(
-				`TeamSync: ${path} changed here and on the server. The server version is kept; your version is saved as ${copy}.`,
+				`ArcaSync: ${path} changed here and on the server. The server version is kept; your version is saved as ${copy}.`,
 			);
 			return { action, copy };
 		}

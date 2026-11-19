@@ -1,13 +1,13 @@
 import type { Extension } from "@codemirror/state";
 import { MarkdownView } from "obsidian";
-import type TeamSyncPlugin from "../main";
+import type ArcaSyncPlugin from "../main";
 import { EditorBindings } from "./EditorBinding";
 
 /**
  * CodeMirror extensions registered once in `onload`. Obsidian keeps a reference to the returned
  * array, so later code may push into it and call `app.workspace.updateOptions()`.
  */
-export function editorExtensions(plugin: TeamSyncPlugin): Extension[] {
+export function editorExtensions(plugin: ArcaSyncPlugin): Extension[] {
 	const { workspace } = plugin.app;
 	const bindings = new EditorBindings({
 		get sessions() {

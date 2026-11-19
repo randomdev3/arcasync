@@ -187,8 +187,8 @@ describe("WorkspaceRelay", () => {
 			new SignJWT({ ws: claims.ws, role: claims.role, dev: "dev-x" })
 				.setProtectedHeader({ alg: "HS256" })
 				.setSubject("viewer-user")
-				.setIssuer("teamsync")
-				.setAudience("teamsync-ws")
+				.setIssuer("arcasync")
+				.setAudience("arcasync-ws")
 				.setIssuedAt()
 				.setExpirationTime("10m")
 				.sign(new TextEncoder().encode(SECRET));

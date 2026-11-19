@@ -1,16 +1,16 @@
 import { type App, PluginSettingTab } from "obsidian";
-import type TeamSyncPlugin from "../main";
+import type ArcaSyncPlugin from "../main";
 import Settings from "./components/Settings.svelte";
 import type { SettingsViewProps } from "./components/settingsProps";
 import { type MountedComponent, mountComponent } from "./svelteHost";
 
-export class TeamSyncSettingsTab extends PluginSettingTab {
+export class ArcaSyncSettingsTab extends PluginSettingTab {
 	private mounted: MountedComponent<SettingsViewProps> | null = null;
 	private unsubscribe: (() => void) | null = null;
 
 	constructor(
 		app: App,
-		private readonly plugin: TeamSyncPlugin,
+		private readonly plugin: ArcaSyncPlugin,
 	) {
 		super(app, plugin);
 	}

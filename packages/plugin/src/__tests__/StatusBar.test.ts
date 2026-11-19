@@ -20,9 +20,9 @@ describe("StatusBar", () => {
 		const el = fakeEl();
 		const bar = new StatusBar(el as unknown as HTMLElement);
 		bar.update({ status: "connected", userName: "alice", workspaceName: "Dev", online: 2 });
-		expect(el.text).toBe("TeamSync: alice · Dev · 2 online");
+		expect(el.text).toBe("ArcaSync: alice · Dev · 2 online");
 		bar.update({ online: 0, workspaceName: null });
-		expect(el.text).toBe("TeamSync: alice");
+		expect(el.text).toBe("ArcaSync: alice");
 	});
 
 	it("names the primary workspace and counts the others while several are connected", () => {
@@ -35,20 +35,20 @@ describe("StatusBar", () => {
 			extraWorkspaces: 1,
 			online: 3,
 		});
-		expect(el.text).toBe("TeamSync: alice · Dev +1 · 3 online");
+		expect(el.text).toBe("ArcaSync: alice · Dev +1 · 3 online");
 		bar.update({ extraWorkspaces: 2, online: 1 });
-		expect(el.text).toBe("TeamSync: alice · Dev +2 · 1 online");
+		expect(el.text).toBe("ArcaSync: alice · Dev +2 · 1 online");
 		bar.update({ extraWorkspaces: 0 });
-		expect(el.text).toBe("TeamSync: alice · Dev · 1 online");
+		expect(el.text).toBe("ArcaSync: alice · Dev · 1 online");
 	});
 
 	it("shows offline, connecting and error states", () => {
 		const el = fakeEl();
 		const bar = new StatusBar(el as unknown as HTMLElement);
-		expect(el.text).toBe("TeamSync: offline");
+		expect(el.text).toBe("ArcaSync: offline");
 		bar.update({ status: "connecting" });
-		expect(el.text).toBe("TeamSync: connecting…");
+		expect(el.text).toBe("ArcaSync: connecting…");
 		bar.update({ status: "error", message: "boom" });
-		expect(el.text).toBe("TeamSync: error — boom");
+		expect(el.text).toBe("ArcaSync: error — boom");
 	});
 });

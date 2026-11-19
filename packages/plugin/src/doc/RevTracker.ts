@@ -24,7 +24,7 @@ export interface RevTrackerOptions {
 	revs: Y.Map<unknown>;
 	userId: string;
 	storage: KeyValueStore;
-	/** Key prefix for this vault and workspace, e.g. `teamsync:<vaultId>:<ws>`. */
+	/** Key prefix for this vault and workspace, e.g. `arcasync:<vaultId>:<ws>`. */
 	keyPrefix: string;
 	throttleMs?: number;
 	now?: () => number;
@@ -191,7 +191,7 @@ export class RevTracker {
 		try {
 			this.storage.setItem(key, JSON.stringify(value));
 		} catch (error) {
-			console.error("[TeamSync] could not persist rev state", error);
+			console.error("[ArcaSync] could not persist rev state", error);
 		}
 	}
 }

@@ -117,7 +117,7 @@ export class FacepileMount {
 			}
 			if (current) unmount(current);
 			const host = header.ownerDocument.createElement("div");
-			host.className = "teamsync-facepile-host";
+			host.className = "arcasync-facepile-host";
 			host.style.display = "contents";
 			header.insertBefore(host, header.querySelector(".view-actions"));
 			const component = mountComponent<FacepileProps>(Facepile, {

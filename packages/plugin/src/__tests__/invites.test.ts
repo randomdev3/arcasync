@@ -4,15 +4,15 @@ import { inviteFromParams, parseInviteLink, sameServer } from "../auth/invites";
 const TOKEN = "Qm9vdHN0cmFwLWludml0ZS10b2tlbi0wMTIzNDU2Nzg5YWI";
 
 describe("parseInviteLink", () => {
-	it("parses the relay's obsidian://teamsync link", () => {
+	it("parses the relay's obsidian://arcasync link", () => {
 		const server = encodeURIComponent("https://relay.example.com/");
-		expect(parseInviteLink(`obsidian://teamsync?server=${server}&invite=${TOKEN}`)).toEqual({
+		expect(parseInviteLink(`obsidian://arcasync?server=${server}&invite=${TOKEN}`)).toEqual({
 			server: "https://relay.example.com",
 			token: TOKEN,
 		});
 		expect(
 			parseInviteLink(
-				`  obsidian://teamsync/?server=${encodeURIComponent("http://localhost:8787")}&invite=${TOKEN}\n`,
+				`  obsidian://arcasync/?server=${encodeURIComponent("http://localhost:8787")}&invite=${TOKEN}\n`,
 			),
 		).toEqual({ server: "http://localhost:8787", token: TOKEN });
 	});
@@ -23,18 +23,18 @@ describe("parseInviteLink", () => {
 
 	it("rejects a non-http server", () => {
 		for (const server of ["javascript:alert(1)", "file:///etc/passwd", "ftp://x", "relay"]) {
-			const link = `obsidian://teamsync?server=${encodeURIComponent(server)}&invite=${TOKEN}`;
+			const link = `obsidian://arcasync?server=${encodeURIComponent(server)}&invite=${TOKEN}`;
 			expect(parseInviteLink(link)).toBeNull();
 		}
 		const withCreds = encodeURIComponent("https://user:pw@relay.example.com");
-		expect(parseInviteLink(`obsidian://teamsync?server=${withCreds}&invite=${TOKEN}`)).toBeNull();
+		expect(parseInviteLink(`obsidian://arcasync?server=${withCreds}&invite=${TOKEN}`)).toBeNull();
 	});
 
 	it("rejects other links, approve links and malformed tokens", () => {
 		expect(parseInviteLink(`obsidian://open?vault=x&invite=${TOKEN}`)).toBeNull();
 		expect(parseInviteLink(`https://relay.example.com/?invite=${TOKEN}`)).toBeNull();
-		expect(parseInviteLink("obsidian://teamsync?approve=BCDF-GHJK")).toBeNull();
-		expect(parseInviteLink("obsidian://teamsync?invite=short")).toBeNull();
+		expect(parseInviteLink("obsidian://arcasync?approve=BCDF-GHJK")).toBeNull();
+		expect(parseInviteLink("obsidian://arcasync?invite=short")).toBeNull();
 		expect(parseInviteLink("not a token at all")).toBeNull();
 		expect(parseInviteLink("")).toBeNull();
 	});

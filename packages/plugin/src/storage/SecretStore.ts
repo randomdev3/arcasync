@@ -17,11 +17,11 @@ function secretId(vaultId: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
-	return `teamsync-session-${slug || "default"}`;
+	return `arcasync-session-${slug || "default"}`;
 }
 
 function localStorageKey(vaultId: string): string {
-	return `teamsync:${vaultId}:session`;
+	return `arcasync:${vaultId}:session`;
 }
 
 /**
@@ -48,7 +48,7 @@ export class SecretStore {
 			try {
 				return this.app.secretStorage?.getSecret(secretId(this.vaultId)) ?? null;
 			} catch (error) {
-				console.error("[TeamSync] secretStorage.getSecret failed", error);
+				console.error("[ArcaSync] secretStorage.getSecret failed", error);
 			}
 		}
 		try {
@@ -64,13 +64,13 @@ export class SecretStore {
 				this.app.secretStorage?.setSecret(secretId(this.vaultId), token);
 				return;
 			} catch (error) {
-				console.error("[TeamSync] secretStorage.setSecret failed", error);
+				console.error("[ArcaSync] secretStorage.setSecret failed", error);
 			}
 		}
 		try {
 			window.localStorage.setItem(localStorageKey(this.vaultId), token);
 		} catch (error) {
-			console.error("[TeamSync] localStorage write failed", error);
+			console.error("[ArcaSync] localStorage write failed", error);
 		}
 	}
 
@@ -79,7 +79,7 @@ export class SecretStore {
 			try {
 				this.app.secretStorage?.setSecret(secretId(this.vaultId), "");
 			} catch (error) {
-				console.error("[TeamSync] secretStorage clear failed", error);
+				console.error("[ArcaSync] secretStorage clear failed", error);
 			}
 		}
 		try {

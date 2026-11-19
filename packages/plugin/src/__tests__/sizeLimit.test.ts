@@ -73,7 +73,7 @@ describe("maxBytes (mobile maxMdBytes)", () => {
 		expect(d.docs.exceedsLimit(small, "Shared/small.md")).toBe(false);
 		expect(d.notices).toHaveLength(1);
 		expect(d.notices[0]).toMatch(
-			/^TeamSync: Shared\/big\.md is larger than .* not synced on this device/,
+			/^ArcaSync: Shared\/big\.md is larger than .* not synced on this device/,
 		);
 		expect(warn).toHaveBeenCalledTimes(1);
 		bg.dispose();

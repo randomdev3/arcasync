@@ -46,10 +46,10 @@ export class MembersModal extends Modal {
 					this.workspaceId = value;
 					void this.load();
 				});
-				dropdown.selectEl.addClass("teamsync-members-workspace");
+				dropdown.selectEl.addClass("arcasync-members-workspace");
 			});
 		}
-		this.listEl = this.contentEl.createDiv({ cls: "teamsync-members" });
+		this.listEl = this.contentEl.createDiv({ cls: "arcasync-members" });
 		void this.load();
 	}
 
@@ -80,25 +80,25 @@ export class MembersModal extends Modal {
 			.addDropdown((dropdown) => {
 				for (const [value, label] of Object.entries(ROLES)) dropdown.addOption(value, label);
 				dropdown.setValue(role).onChange((value) => void this.setRole(user.id, value as Role));
-				dropdown.selectEl.addClass("teamsync-member-role");
+				dropdown.selectEl.addClass("arcasync-member-role");
 			})
 			.addButton((button) => {
 				button
 					.setButtonText("Remove")
 					.setWarning()
 					.onClick(() => this.remove(user.id, user.name));
-				button.buttonEl.addClass("teamsync-member-remove");
+				button.buttonEl.addClass("arcasync-member-remove");
 			});
-		row.settingEl.addClass("teamsync-member");
+		row.settingEl.addClass("arcasync-member");
 		row.settingEl.dataset.userId = user.id;
 	}
 
 	private async setRole(userId: string, role: Role): Promise<void> {
 		try {
 			await this.options.api.setRole(this.workspaceId, userId, role);
-			new Notice(`TeamSync: role changed to ${ROLES[role].toLowerCase()}`);
+			new Notice(`ArcaSync: role changed to ${ROLES[role].toLowerCase()}`);
 		} catch (error) {
-			new Notice(`TeamSync: ${describeMemberError(error)}`);
+			new Notice(`ArcaSync: ${describeMemberError(error)}`);
 		}
 		await this.load();
 	}
@@ -113,9 +113,9 @@ export class MembersModal extends Modal {
 			onConfirm: async () => {
 				try {
 					await this.options.api.removeMember(workspaceId, userId);
-					new Notice(`TeamSync: removed ${name}`);
+					new Notice(`ArcaSync: removed ${name}`);
 				} catch (error) {
-					new Notice(`TeamSync: ${describeMemberError(error)}`);
+					new Notice(`ArcaSync: ${describeMemberError(error)}`);
 				}
 				if (workspaceId === this.workspaceId) await this.load();
 			},

@@ -1,5 +1,5 @@
 # Build from the repository root:
-#   docker build -f packages/server/Dockerfile -t teamsync-server .
+#   docker build -f packages/server/Dockerfile -t arcasync-server .
 # syntax=docker/dockerfile:1
 
 FROM node:22-alpine AS base

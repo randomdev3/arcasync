@@ -8,7 +8,7 @@ export const RECENT_LABEL_MS = 2000;
 /** On `.cm-ySelectionCaret` while its label shows without hover (styles.css). */
 export const RECENT_CLASS = "is-recent";
 /** On the editor until the note doc is ready; styles.css hides remote carets and selections. */
-export const PENDING_CLASS = "teamsync-carets-pending";
+export const PENDING_CLASS = "arcasync-carets-pending";
 
 /** A remote caret as y-codemirror.next draws it: its label text and its colour. */
 export interface CaretIdentity {

@@ -15,8 +15,8 @@ export const WsClaims = z.object({
 });
 export type WsClaims = z.infer<typeof WsClaims>;
 
-const ISSUER = "teamsync";
-const AUDIENCE = "teamsync-ws";
+const ISSUER = "arcasync";
+const AUDIENCE = "arcasync-ws";
 
 function key(secret: string): Uint8Array {
 	return new TextEncoder().encode(secret);

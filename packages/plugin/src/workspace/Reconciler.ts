@@ -164,7 +164,7 @@ export class Reconciler {
 			try {
 				await task();
 			} catch (error) {
-				console.error(`[TeamSync] ${label} failed`, error);
+				console.error(`[ArcaSync] ${label} failed`, error);
 			}
 		});
 		this.tail = next;
@@ -387,7 +387,7 @@ export class Reconciler {
 		try {
 			await op();
 		} catch (error) {
-			console.error("[TeamSync] vault operation failed", error);
+			console.error("[ArcaSync] vault operation failed", error);
 		}
 	}
 }

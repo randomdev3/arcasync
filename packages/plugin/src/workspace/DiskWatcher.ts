@@ -13,7 +13,7 @@ export interface DiskEvents {
 export const CREATE_DEBOUNCE_MS = 500;
 
 /**
- * Turns vault events under the shared folder into `DiskEvents`. Events TeamSync caused itself
+ * Turns vault events under the shared folder into `DiskEvents`. Events ArcaSync caused itself
  * are consumed from the `SelfWriteRegistry` at event time and dropped. A new path is announced
  * only after it has existed for `debounceMs`, so editors' temp files and the instant rename of
  * "Untitled.md" never reach the index. Renames across the folder boundary become a create or a

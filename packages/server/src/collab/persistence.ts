@@ -14,7 +14,7 @@ import type { Deps } from "../types.js";
 import type { CollabContext } from "./auth.js";
 
 /** Transaction origin used while replaying persisted history into a fresh doc. */
-export const LOAD_ORIGIN = "teamsync:load";
+export const LOAD_ORIGIN = "arcasync:load";
 
 /** Rows are fetched in pages so a long update log never buffers unboundedly. */
 const UPDATE_PAGE_SIZE = 500;
@@ -133,7 +133,7 @@ export async function writeCheckpoint(db: Db, documentName: string, doc: Y.Doc):
  */
 export function createPersistence(deps: Deps): Extension {
 	return {
-		extensionName: "teamsync-persistence",
+		extensionName: "arcasync-persistence",
 
 		async onLoadDocument({ document, documentName }: onLoadDocumentPayload) {
 			await ensureDocRow(deps.db, documentName);

@@ -10,14 +10,14 @@ const {
 
 {#if $vm.user}
 	<div
-		class="teamsync-follow-badge"
+		class="arcasync-follow-badge"
 		role="status"
-		style:--teamsync-follow-color={$vm.user.color}
+		style:--arcasync-follow-color={$vm.user.color}
 	>
-		<span class="teamsync-follow-dot"></span>
-		<span class="teamsync-follow-text">Following {$vm.user.name}</span>
+		<span class="arcasync-follow-dot"></span>
+		<span class="arcasync-follow-text">Following {$vm.user.name}</span>
 		<button
-			class="teamsync-follow-stop"
+			class="arcasync-follow-stop"
 			type="button"
 			aria-label="Stop following"
 			title="Stop following"
@@ -27,7 +27,7 @@ const {
 {/if}
 
 <style>
-	.teamsync-follow-badge {
+	.arcasync-follow-badge {
 		position: fixed;
 		/* Bottom centre: clear of view headers, notices (top right) and the status bar (right). */
 		bottom: calc(var(--size-4-12, 48px) + env(safe-area-inset-bottom, 0px));
@@ -38,7 +38,7 @@ const {
 		align-items: center;
 		gap: var(--size-4-2);
 		padding: var(--size-4-1) var(--size-4-1) var(--size-4-1) var(--size-4-3);
-		border: 2px solid var(--teamsync-follow-color);
+		border: 2px solid var(--arcasync-follow-color);
 		border-radius: var(--radius-l);
 		background-color: var(--background-primary);
 		box-shadow: var(--shadow-s);
@@ -46,14 +46,14 @@ const {
 		color: var(--text-normal);
 	}
 
-	.teamsync-follow-dot {
+	.arcasync-follow-dot {
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		background-color: var(--teamsync-follow-color);
+		background-color: var(--arcasync-follow-color);
 	}
 
-	.teamsync-follow-stop {
+	.arcasync-follow-stop {
 		font-size: var(--font-ui-smaller);
 		padding: 0 var(--size-4-2);
 		height: auto;

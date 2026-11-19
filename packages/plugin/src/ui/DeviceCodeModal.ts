@@ -30,7 +30,7 @@ export class DeviceCodeModal extends Modal {
 	onOpen(): void {
 		this.titleEl.setText("Sign in with another device");
 		const status = this.contentEl.createEl("p", {
-			cls: "teamsync-device-status",
+			cls: "arcasync-device-status",
 			text: "Requesting a code…",
 		});
 		this.options.login
@@ -61,13 +61,13 @@ export class DeviceCodeModal extends Modal {
 	}
 
 	private showCode(code: DeviceCodeResponse, status: HTMLElement): void {
-		const box = this.contentEl.createDiv({ cls: "teamsync-device-code" });
+		const box = this.contentEl.createDiv({ cls: "arcasync-device-code" });
 		this.contentEl.insertBefore(box, status);
 		box.createEl("p", {
-			text: 'On a device where you are signed in, run the command "TeamSync: Approve a device sign-in" and enter this code:',
+			text: 'On a device where you are signed in, run the command "ArcaSync: Approve a device sign-in" and enter this code:',
 		});
-		box.createEl("div", { cls: "teamsync-user-code", text: code.userCode });
-		const link = box.createEl("p", { cls: "teamsync-device-link" });
+		box.createEl("div", { cls: "arcasync-user-code", text: code.userCode });
+		const link = box.createEl("p", { cls: "arcasync-device-link" });
 		link.appendText("Or open ");
 		link.createEl("code", { text: code.verificationUri });
 		link.appendText(" there.");

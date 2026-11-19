@@ -51,11 +51,11 @@ function addMapping(path: string) {
 }
 </script>
 
-<div class="teamsync-settings">
-	<div class="teamsync-row">
-		<div class="teamsync-row-info">
-			<div class="teamsync-row-name">Server URL</div>
-			<div class="teamsync-row-desc">Base URL of your TeamSync server.</div>
+<div class="arcasync-settings">
+	<div class="arcasync-row">
+		<div class="arcasync-row-info">
+			<div class="arcasync-row-name">Server URL</div>
+			<div class="arcasync-row-desc">Base URL of your ArcaSync server.</div>
 		</div>
 		<input
 			type="text"
@@ -67,10 +67,10 @@ function addMapping(path: string) {
 	</div>
 
 	{#if $vm.devOpenLogin}
-		<div class="teamsync-row">
-			<div class="teamsync-row-info">
-				<div class="teamsync-row-name">Display name</div>
-				<div class="teamsync-row-desc">
+		<div class="arcasync-row">
+			<div class="arcasync-row-info">
+				<div class="arcasync-row-name">Display name</div>
+				<div class="arcasync-row-desc">
 					This server allows open development login. Pick any name.
 				</div>
 			</div>
@@ -85,75 +85,75 @@ function addMapping(path: string) {
 	{/if}
 
 	{#if $vm.accounts}
-		<div class="teamsync-row">
-			<div class="teamsync-row-info">
-				<div class="teamsync-row-name">
+		<div class="arcasync-row">
+			<div class="arcasync-row-info">
+				<div class="arcasync-row-name">
 					{$vm.signedIn ? "Join another workspace" : "Join with an invite"}
 				</div>
-				<div class="teamsync-row-desc">Paste the invite link or code you were sent.</div>
+				<div class="arcasync-row-desc">Paste the invite link or code you were sent.</div>
 			</div>
-			<div class="teamsync-invite">
+			<div class="arcasync-invite">
 				<input
 					type="text"
-					class="teamsync-invite-input"
+					class="arcasync-invite-input"
 					spellcheck="false"
-					placeholder="obsidian://teamsync?…"
+					placeholder="obsidian://arcasync?…"
 					bind:value={inviteLink}
 				/>
 				{#if !$vm.signedIn}
 					<input
 						type="text"
-						class="teamsync-invite-name"
+						class="arcasync-invite-name"
 						spellcheck="false"
 						placeholder="Your name"
 						bind:value={inviteName}
 					/>
 				{/if}
-				<button class="mod-cta teamsync-invite-join" disabled={$vm.busy} onclick={join}>
+				<button class="mod-cta arcasync-invite-join" disabled={$vm.busy} onclick={join}>
 					Join
 				</button>
 			</div>
 		</div>
 
-		<div class="teamsync-row">
-			<div class="teamsync-row-info">
+		<div class="arcasync-row">
+			<div class="arcasync-row-info">
 				{#if $vm.signedIn}
-					<div class="teamsync-row-name">Approve a device</div>
-					<div class="teamsync-row-desc">
+					<div class="arcasync-row-name">Approve a device</div>
+					<div class="arcasync-row-desc">
 						Let another device sign in as you with the code it shows.
 					</div>
 				{:else}
-					<div class="teamsync-row-name">Sign in with another device</div>
-					<div class="teamsync-row-desc">
+					<div class="arcasync-row-name">Sign in with another device</div>
+					<div class="arcasync-row-desc">
 						Get a code here and approve it on a device where you are signed in.
 					</div>
 				{/if}
 			</div>
 			{#if $vm.signedIn}
-				<button class="teamsync-approve-device-open" onclick={() => $vm.onApproveDevice()}>
+				<button class="arcasync-approve-device-open" onclick={() => $vm.onApproveDevice()}>
 					Approve a device sign-in…
 				</button>
 			{:else}
-				<button class="teamsync-device-signin" onclick={() => $vm.onDeviceSignIn()}>
+				<button class="arcasync-device-signin" onclick={() => $vm.onDeviceSignIn()}>
 					Sign in with another device
 				</button>
 			{/if}
 		</div>
 	{/if}
 
-	<div class="teamsync-row">
-		<div class="teamsync-row-info">
-			<div class="teamsync-row-name">Shared folders</div>
-			<div class="teamsync-row-desc">
+	<div class="arcasync-row">
+		<div class="arcasync-row-info">
+			<div class="arcasync-row-name">Shared folders</div>
+			<div class="arcasync-row-desc">
 				Each vault folder syncs with one workspace. Folders cannot be inside each other.
 			</div>
 		</div>
-		<div class="teamsync-mappings">
+		<div class="arcasync-mappings">
 			{#each $vm.sharedFolders as folder, index (folder.path)}
-				<div class="teamsync-mapping">
+				<div class="arcasync-mapping">
 					<input
 						type="text"
-						class="teamsync-shared-folder"
+						class="arcasync-shared-folder"
 						spellcheck="false"
 						value={folder.path}
 						use:folderSuggest={(path) => $vm.onMappingChange(index, { path })}
@@ -161,7 +161,7 @@ function addMapping(path: string) {
 					/>
 					{#if $vm.workspaces.length > 0}
 						<select
-							class="dropdown teamsync-workspace"
+							class="dropdown arcasync-workspace"
 							disabled={$vm.busy}
 							value={folder.workspaceId}
 							onchange={(event) =>
@@ -172,16 +172,16 @@ function addMapping(path: string) {
 							{/each}
 						</select>
 					{/if}
-					<button class="teamsync-mapping-remove" onclick={() => $vm.onMappingRemove(folder.path)}>
+					<button class="arcasync-mapping-remove" onclick={() => $vm.onMappingRemove(folder.path)}>
 						Remove
 					</button>
 				</div>
 			{/each}
 			{#if adding || $vm.sharedFolders.length === 0}
-				<div class="teamsync-mapping">
+				<div class="arcasync-mapping">
 					<input
 						type="text"
-						class="teamsync-shared-folder teamsync-new-folder"
+						class="arcasync-shared-folder arcasync-new-folder"
 						spellcheck="false"
 						placeholder="Shared"
 						use:folderSuggest={addMapping}
@@ -189,7 +189,7 @@ function addMapping(path: string) {
 					/>
 					{#if unmapped.length > 0}
 						<select
-							class="dropdown teamsync-workspace"
+							class="dropdown arcasync-workspace"
 							disabled={$vm.busy}
 							value={newWorkspace}
 							onchange={(event) => {
@@ -203,21 +203,21 @@ function addMapping(path: string) {
 					{/if}
 				</div>
 			{:else if unmapped.length > 0}
-				<button class="teamsync-mapping-add" onclick={() => (adding = true)}>Add folder</button>
+				<button class="arcasync-mapping-add" onclick={() => (adding = true)}>Add folder</button>
 			{/if}
 		</div>
 	</div>
 
 	{#if $vm.workspaces.length > 1}
-		<div class="teamsync-row">
-			<div class="teamsync-row-info">
-				<div class="teamsync-row-name">Primary workspace</div>
-				<div class="teamsync-row-desc">
+		<div class="arcasync-row">
+			<div class="arcasync-row-info">
+				<div class="arcasync-row-name">Primary workspace</div>
+				<div class="arcasync-row-desc">
 					Named first in the status bar, and connected when no folder is mapped.
 				</div>
 			</div>
 			<select
-				class="dropdown teamsync-primary-workspace"
+				class="dropdown arcasync-primary-workspace"
 				disabled={$vm.busy}
 				value={$vm.workspaceId}
 				onchange={(event) => $vm.onWorkspaceChange(event.currentTarget.value)}
@@ -229,10 +229,10 @@ function addMapping(path: string) {
 		</div>
 	{/if}
 
-	<div class="teamsync-row">
-		<div class="teamsync-row-info">
-			<div class="teamsync-row-name">Connection</div>
-			<div class="teamsync-status" data-state={$vm.status}>
+	<div class="arcasync-row">
+		<div class="arcasync-row-info">
+			<div class="arcasync-row-name">Connection</div>
+			<div class="arcasync-status" data-state={$vm.status}>
 				{#if $vm.serverError}
 					{$vm.serverError}
 				{:else if $vm.statusMessage}

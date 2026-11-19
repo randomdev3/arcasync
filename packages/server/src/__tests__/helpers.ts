@@ -8,7 +8,7 @@ import { FsBlobStore } from "../storage/FsBlobStore.js";
 import type { Deps } from "../types.js";
 
 export function testConfig(): Config {
-	const dataDir = mkdtempSync(path.join(tmpdir(), "teamsync-test-"));
+	const dataDir = mkdtempSync(path.join(tmpdir(), "arcasync-test-"));
 	return loadConfig(
 		{ NODE_ENV: "test", LOG_FORMAT: "json", LOG_LEVEL: "silent" },
 		{ dataDir, secret: "test-secret-0123456789", devOpenLogin: true, pgliteDir: "memory://" },

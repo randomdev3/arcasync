@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 			blobs: blobs.backend,
 			devOpenLogin: config.devOpenLogin,
 		},
-		`TeamSync server listening on ${config.publicUrl}`,
+		`ArcaSync server listening on ${config.publicUrl}`,
 	);
 
 	let shuttingDown = false;

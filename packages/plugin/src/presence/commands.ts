@@ -1,10 +1,10 @@
-import type TeamSyncPlugin from "../main";
+import type ArcaSyncPlugin from "../main";
 import { UserSuggestModal } from "../ui/userPicker";
 import type { INavigator } from "../workspace/types";
 import { avatarsFor } from "./avatars";
 
 /** "Jump to user…" and "Follow user…": pick an online user, then jump to or follow them. */
-export function registerNavigatorCommands(plugin: TeamSyncPlugin): void {
+export function registerNavigatorCommands(plugin: ArcaSyncPlugin): void {
 	const pick = (
 		checking: boolean,
 		placeholder: string,

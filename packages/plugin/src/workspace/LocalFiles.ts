@@ -125,7 +125,7 @@ export class ObsidianLocalFiles implements LocalFiles, BinaryFiles {
 }
 
 /**
- * `KnownStore` in localStorage under `teamsync:<vaultId>:<workspaceId>:known`. The record names
+ * `KnownStore` in localStorage under `arcasync:<vaultId>:<workspaceId>:known`. The record names
  * the folder it describes: after the user maps a different folder, the old record would make
  * every indexed note look deleted offline, so a record for another root loads as empty.
  */
@@ -148,7 +148,7 @@ export class LocalStorageKnown implements KnownStore {
 				);
 			}
 		} catch (error) {
-			console.warn("[TeamSync] unreadable known-paths record; starting empty", error);
+			console.warn("[ArcaSync] unreadable known-paths record; starting empty", error);
 		}
 		return {};
 	}
@@ -160,7 +160,7 @@ export class LocalStorageKnown implements KnownStore {
 			window.localStorage.setItem(this.key, raw);
 			this.last = raw;
 		} catch (error) {
-			console.error("[TeamSync] could not persist known paths", error);
+			console.error("[ArcaSync] could not persist known paths", error);
 		}
 	}
 }

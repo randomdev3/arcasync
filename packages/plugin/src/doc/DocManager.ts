@@ -335,7 +335,7 @@ export class DocManager implements IDocManager {
 			if (note.state !== "ready" || note.editorBound) return;
 			// An editor may bind while this waits for the note's lock; it owns the disk then.
 			this.reconcile(note, { unlessBound: true }).catch((error) =>
-				console.error(`[TeamSync] writing ${note.path} failed`, error),
+				console.error(`[ArcaSync] writing ${note.path} failed`, error),
 			);
 		}, this.options.flushDelayMs ?? 1000);
 	}
@@ -429,9 +429,9 @@ export class DocManager implements IDocManager {
 		if (this.warned.has(fileId)) return;
 		this.warned.add(fileId);
 		const limit = `${Math.round((max / 1048576) * 10) / 10} MiB`;
-		console.warn(`[TeamSync] ${path} is over ${limit}; it is not synced on this device`);
+		console.warn(`[ArcaSync] ${path} is over ${limit}; it is not synced on this device`);
 		this.options.reconcile.notify?.(
-			`TeamSync: ${path} is larger than ${limit} and is not synced on this device.`,
+			`ArcaSync: ${path} is larger than ${limit} and is not synced on this device.`,
 		);
 	}
 

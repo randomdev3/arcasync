@@ -118,7 +118,7 @@ export class BackgroundSync {
 	}
 
 	/**
-	 * A user (not TeamSync) changed a note's file. An open editor owns the buffer and its saves,
+	 * A user (not ArcaSync) changed a note's file. An open editor owns the buffer and its saves,
 	 * so only a closed note is reconciled. Not gated on the socket: reconcile is safe offline.
 	 */
 	async onDiskModify(fileId: string): Promise<void> {
@@ -200,7 +200,7 @@ export class BackgroundSync {
 		}
 		void this.runClone(clone, picked)
 			.catch((error: unknown) => {
-				if (!this.disposed) console.error("[TeamSync] bulk clone failed", error);
+				if (!this.disposed) console.error("[ArcaSync] bulk clone failed", error);
 				for (const fileId of picked) this.attachOnly.add(fileId);
 				return picked;
 			})
@@ -243,7 +243,7 @@ export class BackgroundSync {
 			result = await clone.clone(items);
 		} catch (error) {
 			// Retrying would spend another rate-limit token; the attach path needs none.
-			console.warn("[TeamSync] bulk clone request failed; catching up note by note", error);
+			console.warn("[ArcaSync] bulk clone request failed; catching up note by note", error);
 			for (const { fileId } of items) this.attachOnly.add(fileId);
 			return items.map((i) => i.fileId);
 		}
@@ -260,7 +260,7 @@ export class BackgroundSync {
 			const path = index.pathOf(fileId);
 			if (this.disposed || !path || !revs.has(fileId)) continue;
 			const outcome = await docs.hydrate(fileId, path, update).catch((error: unknown) => {
-				console.error(`[TeamSync] hydrating ${path} failed`, error);
+				console.error(`[ArcaSync] hydrating ${path} failed`, error);
 				return null;
 			});
 			if (!outcome || outcome.retry || outcome.action === "defer" || outcome.action === "missing") {
@@ -301,7 +301,7 @@ export class BackgroundSync {
 				docs.release(note);
 			}
 		} catch (error) {
-			if (!this.disposed) console.error(`[TeamSync] background sync of ${path} failed`, error);
+			if (!this.disposed) console.error(`[ArcaSync] background sync of ${path} failed`, error);
 			return;
 		}
 		const now = revTracker.rev(fileId);

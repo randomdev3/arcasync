@@ -25,7 +25,7 @@ export interface NoteDocDeps {
 }
 
 export function noteDbName(vaultId: string, fileId: string): string {
-	return `teamsync-${vaultId}-${fileId}`;
+	return `arcasync-${vaultId}-${fileId}`;
 }
 
 /** Opens a note's IndexedDB copy into a fresh doc; returns the doc, its persistence and hash. */

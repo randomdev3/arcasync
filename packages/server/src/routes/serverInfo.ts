@@ -7,7 +7,7 @@ export function serverInfoRoutes(deps: Deps) {
 
 	app.get("/server-info", (c) =>
 		c.json({
-			name: "TeamSync",
+			name: "ArcaSync",
 			version: deps.config.version,
 			publicUrl: deps.config.publicUrl,
 			features: {

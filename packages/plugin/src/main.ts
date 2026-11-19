@@ -21,11 +21,11 @@ import { TokenStore } from "./net/TokenStore";
 import { limits, type PlatformLimits } from "./platform";
 import { registerNavigatorCommands } from "./presence/commands";
 import {
+	type ArcaSyncSettings,
 	DEFAULT_SETTINGS,
 	normalizeSettings,
 	normalizeSharedFolders,
 	type SharedFolder,
-	type TeamSyncSettings,
 	websocketUrl,
 } from "./settings";
 import { SecretStore } from "./storage/SecretStore";
@@ -37,7 +37,7 @@ import { DeviceCodeModal } from "./ui/DeviceCodeModal";
 import { FolderSuggest } from "./ui/FolderSuggest";
 import { InviteModal } from "./ui/InviteModal";
 import { MembersModal } from "./ui/MembersModal";
-import { TeamSyncSettingsTab } from "./ui/SettingsTab";
+import { ArcaSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { containingRoot, foldersOverlap } from "./workspace/paths";
 import {
@@ -51,7 +51,7 @@ import {
  * that fails to tear down keeps its socket and timers alive, so this set turns
  * a silent leak into a console warning on the next load.
  */
-const liveInstances = new Set<TeamSyncPlugin>();
+const liveInstances = new Set<ArcaSyncPlugin>();
 
 function platformName(): DeviceInfo["platform"] {
 	if (Platform.isIosApp) return "ios";
@@ -105,8 +105,8 @@ function toEpochMs(expiresAt: number): number {
 	return expiresAt < 1e12 ? expiresAt * 1000 : expiresAt;
 }
 
-export default class TeamSyncPlugin extends Plugin {
-	settings: TeamSyncSettings = { ...DEFAULT_SETTINGS };
+export default class ArcaSyncPlugin extends Plugin {
+	settings: ArcaSyncSettings = { ...DEFAULT_SETTINGS };
 
 	private secrets!: SecretStore;
 	/** Public so e2e can read `api.requestCounts`. */
@@ -133,7 +133,7 @@ export default class TeamSyncPlugin extends Plugin {
 	async onload(): Promise<void> {
 		if (liveInstances.size > 0) {
 			console.warn(
-				`[TeamSync] ${liveInstances.size} previous plugin instance(s) were never unloaded`,
+				`[ArcaSync] ${liveInstances.size} previous plugin instance(s) were never unloaded`,
 			);
 		}
 		liveInstances.add(this);
@@ -148,7 +148,7 @@ export default class TeamSyncPlugin extends Plugin {
 		});
 
 		this.statusBar = new StatusBar(this.addStatusBarItem());
-		this.addSettingTab(new TeamSyncSettingsTab(this.app, this));
+		this.addSettingTab(new ArcaSyncSettingsTab(this.app, this));
 		this.registerEditorExtension(editorExtensions(this));
 
 		this.addCommand({
@@ -193,14 +193,14 @@ export default class TeamSyncPlugin extends Plugin {
 				return true;
 			},
 		});
-		this.registerObsidianProtocolHandler("teamsync", (params) => this.handleLink(params));
+		this.registerObsidianProtocolHandler("arcasync", (params) => this.handleLink(params));
 		registerNavigatorCommands(this);
 		this.addCommand({
 			id: "debug-counter-increment",
 			name: "Debug counter +1",
 			callback: () => {
 				const value = this.counter?.increment();
-				new Notice(value === undefined ? "TeamSync: not connected" : `TeamSync counter: ${value}`);
+				new Notice(value === undefined ? "ArcaSync: not connected" : `ArcaSync counter: ${value}`);
 			},
 		});
 
@@ -219,7 +219,7 @@ export default class TeamSyncPlugin extends Plugin {
 			} catch (error) {
 				const e = error as { message?: string; stack?: string };
 				console.error(
-					`[TeamSync] onunload failed at step: ${name}: ${e?.message ?? String(error)}\n${e?.stack ?? ""}`,
+					`[ArcaSync] onunload failed at step: ${name}: ${e?.message ?? String(error)}\n${e?.stack ?? ""}`,
 				);
 				// Never rethrow: each later step frees a different resource
 				// (doc observers, the shared socket, the status bar element,
@@ -263,7 +263,7 @@ export default class TeamSyncPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	async updateSettings(patch: Partial<TeamSyncSettings>): Promise<void> {
+	async updateSettings(patch: Partial<ArcaSyncSettings>): Promise<void> {
 		this.settings = { ...this.settings, ...patch };
 		await this.saveSettings();
 		this.notifyView();
@@ -315,12 +315,12 @@ export default class TeamSyncPlugin extends Plugin {
 	private mappingAllowed(folders: SharedFolder[], path: string, workspaceId: string): boolean {
 		const clash = folders.find((f) => foldersOverlap(f.path, path));
 		if (clash) {
-			new Notice(`TeamSync: ${path} overlaps the shared folder ${clash.path}.`);
+			new Notice(`ArcaSync: ${path} overlaps the shared folder ${clash.path}.`);
 			return false;
 		}
 		if (folders.some((f) => f.workspaceId === workspaceId)) {
 			const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId;
-			new Notice(`TeamSync: workspace ${name} is already mapped to a folder.`);
+			new Notice(`ArcaSync: workspace ${name} is already mapped to a folder.`);
 			return false;
 		}
 		return true;
@@ -345,7 +345,7 @@ export default class TeamSyncPlugin extends Plugin {
 			const workspaces = await this.api.workspaces();
 			await this.updateSettings({ workspaces });
 		} catch (error) {
-			console.warn("[TeamSync] could not list workspaces", error);
+			console.warn("[ArcaSync] could not list workspaces", error);
 		}
 	}
 
@@ -399,7 +399,7 @@ export default class TeamSyncPlugin extends Plugin {
 			try {
 				listener();
 			} catch (error) {
-				console.error("[TeamSync] settings listener failed", error);
+				console.error("[ArcaSync] settings listener failed", error);
 			}
 		}
 	}
@@ -460,7 +460,7 @@ export default class TeamSyncPlugin extends Plugin {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.setConnectionState({ status: "error", message });
-			new Notice(`TeamSync: ${message}`);
+			new Notice(`ArcaSync: ${message}`);
 		} finally {
 			this.busy = false;
 			this.notifyView();
@@ -477,7 +477,7 @@ export default class TeamSyncPlugin extends Plugin {
 			if (!info.features.devOpenLogin) {
 				throw new Error("Not signed in, and this server does not allow open login");
 			}
-			throw new Error("Enter a display name in TeamSync settings first");
+			throw new Error("Enter a display name in ArcaSync settings first");
 		}
 		const session = await this.api.devLogin(
 			name,
@@ -522,7 +522,7 @@ export default class TeamSyncPlugin extends Plugin {
 	async joinWithInvite(input: string, name = ""): Promise<boolean> {
 		const invite = parseInviteLink(input);
 		if (!invite) {
-			new Notice("TeamSync: that is not a TeamSync invite link or code");
+			new Notice("ArcaSync: that is not a ArcaSync invite link or code");
 			return false;
 		}
 		const sameRelay = !invite.server || sameServer(invite.server, this.settings.serverUrl);
@@ -530,7 +530,7 @@ export default class TeamSyncPlugin extends Plugin {
 			if (this.signedIn) {
 				if (!sameRelay) {
 					new Notice(
-						`TeamSync: this invite is for ${invite.server}. Sign out first to switch servers.`,
+						`ArcaSync: this invite is for ${invite.server}. Sign out first to switch servers.`,
 					);
 					return false;
 				}
@@ -539,13 +539,13 @@ export default class TeamSyncPlugin extends Plugin {
 				await this.updateSettings({ workspaces });
 				const joined = workspaces.filter((w) => !before.has(w.id)).map((w) => w.name);
 				new Notice(
-					joined.length > 0 ? `TeamSync: joined ${joined.join(", ")}` : "TeamSync: invite redeemed",
+					joined.length > 0 ? `ArcaSync: joined ${joined.join(", ")}` : "ArcaSync: invite redeemed",
 				);
 				return true;
 			}
 			const displayName = name.trim();
 			if (!displayName) {
-				new Notice("TeamSync: enter your name to join");
+				new Notice("ArcaSync: enter your name to join");
 				return false;
 			}
 			if (!sameRelay && invite.server) await this.setServerUrl(invite.server);
@@ -553,7 +553,7 @@ export default class TeamSyncPlugin extends Plugin {
 			await this.completeSignIn(session);
 			return true;
 		} catch (error) {
-			new Notice(`TeamSync: ${inviteErrorMessage(error)}`);
+			new Notice(`ArcaSync: ${inviteErrorMessage(error)}`);
 			return false;
 		}
 	}
@@ -561,7 +561,7 @@ export default class TeamSyncPlugin extends Plugin {
 	/** Opens the device-code sign-in ("Sign in with another device"). */
 	signInWithDevice(): void {
 		if (this.signedIn) {
-			new Notice("TeamSync: already signed in");
+			new Notice("ArcaSync: already signed in");
 			return;
 		}
 		const login = new DeviceLogin({ api: this.api, device: this.deviceInfo() });
@@ -576,13 +576,13 @@ export default class TeamSyncPlugin extends Plugin {
 	/** Opens "Approve a device sign-in", optionally pre-filled with a code. */
 	approveDevice(code = ""): void {
 		if (!this.signedIn) {
-			new Notice("TeamSync: sign in first to approve another device");
+			new Notice("ArcaSync: sign in first to approve another device");
 			return;
 		}
 		this.openModal(new ApproveDeviceModal(this.app, this.api, code));
 	}
 
-	/** `obsidian://teamsync?server=…&invite=…` or `obsidian://teamsync?approve=<code>`. */
+	/** `obsidian://arcasync?server=…&invite=…` or `obsidian://arcasync?approve=<code>`. */
 	private handleLink(params: ObsidianProtocolData): void {
 		if (params.approve) {
 			this.approveDevice(params.approve);
@@ -590,7 +590,7 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 		const invite = inviteFromParams({ server: params.server, invite: params.invite });
 		if (!invite) {
-			new Notice("TeamSync: this link is not a valid TeamSync invite");
+			new Notice("ArcaSync: this link is not a valid ArcaSync invite");
 			return;
 		}
 		const server = invite.server ?? this.settings.serverUrl;
@@ -599,7 +599,7 @@ export default class TeamSyncPlugin extends Plugin {
 		// Never act on a link without asking: it may come from anyone.
 		this.openModal(
 			new ConfirmModal(this.app, {
-				title: "Join a TeamSync server",
+				title: "Join a ArcaSync server",
 				message: signOutFirst
 					? `Join ${server}? You will be signed out of ${this.settings.serverUrl}.`
 					: `Join ${server}?`,
@@ -615,7 +615,7 @@ export default class TeamSyncPlugin extends Plugin {
 			if (this.signedIn) await this.signOut();
 			await this.setServerUrl(server);
 		}
-		const link = `obsidian://teamsync?server=${encodeURIComponent(server)}&invite=${token}`;
+		const link = `obsidian://arcasync?server=${encodeURIComponent(server)}&invite=${token}`;
 		this.openModal(
 			new InviteModal(this.app, {
 				link,
@@ -842,7 +842,7 @@ export default class TeamSyncPlugin extends Plugin {
 		const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? entry.name;
 		this.live.delete(workspaceId);
 		entry.stop();
-		new Notice(`TeamSync: you were removed from ${name}`);
+		new Notice(`ArcaSync: you were removed from ${name}`);
 		// Drop it locally first: if the uncached refresh fails, it still must not reconnect.
 		await this.updateSettings({
 			workspaces: this.settings.workspaces.filter((w) => w.id !== workspaceId),
@@ -883,7 +883,7 @@ export default class TeamSyncPlugin extends Plugin {
 				await this.api.logout();
 			} catch (error) {
 				// Offline or already revoked: the local session is dropped either way.
-				console.warn("[TeamSync] logout request failed", error);
+				console.warn("[ArcaSync] logout request failed", error);
 			}
 		}
 		this.secrets.clear();

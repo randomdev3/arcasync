@@ -17,7 +17,7 @@ interface Entry {
 const DEFAULT_TTL_MS = 60_000;
 
 /**
- * Remembers the vault writes TeamSync makes itself, so the vault event they trigger is not
+ * Remembers the vault writes ArcaSync makes itself, so the vault event they trigger is not
  * mistaken for a user edit and echoed back. Register right before writing; the watcher calls
  * `consume` for each event. Keys are vault paths; for a rename, the new path.
  */

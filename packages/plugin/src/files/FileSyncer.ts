@@ -41,7 +41,7 @@ export interface FileSyncerOptions {
 	files: BinaryFiles;
 	chunks: ChunkTransfer;
 	storage: KeyValueStore;
-	/** localStorage key of the synced-hash record, `teamsync:<vaultId>:<workspaceId>:binhash`. */
+	/** localStorage key of the synced-hash record, `arcasync:<vaultId>:<workspaceId>:binhash`. */
 	storageKey: string;
 	userId: string;
 	/** Device label used in conflict-copy names. */
@@ -138,7 +138,7 @@ export class FileSyncer {
 				}
 			})
 			.catch((error: unknown) => {
-				console.error(`[TeamSync] syncing ${path} failed`, error);
+				console.error(`[ArcaSync] syncing ${path} failed`, error);
 				return {};
 			});
 		this.queued.set(key, job);
@@ -173,7 +173,7 @@ export class FileSyncer {
 		void Promise.race([this.options.whenIndexAcked(), this.stopped]).then(() =>
 			this.track(
 				recheck().catch((error: unknown) =>
-					console.error(`[TeamSync] re-checking the chunks of ${path} failed`, error),
+					console.error(`[ArcaSync] re-checking the chunks of ${path} failed`, error),
 				),
 			),
 		);
@@ -244,7 +244,7 @@ export class FileSyncer {
 		if (this.options.isReadonly()) {
 			this.warnOnce(
 				`readonly:${path}`,
-				`TeamSync: you can only view this workspace; ${path} is not uploaded.`,
+				`ArcaSync: you can only view this workspace; ${path} is not uploaded.`,
 			);
 			return null;
 		}
@@ -283,7 +283,7 @@ export class FileSyncer {
 		if (meta.kind !== "binary" || !meta.hash || !shas) return {};
 		if (this.tooLarge(path, meta.size ?? 0)) return {};
 		if ((await fileHash(shas)) !== meta.hash) {
-			console.warn(`[TeamSync] ${path}: index entry does not match its chunks; skipped`);
+			console.warn(`[ArcaSync] ${path}: index entry does not match its chunks; skipped`);
 			return {};
 		}
 		let parts: Uint8Array[];
@@ -292,13 +292,13 @@ export class FileSyncer {
 		} catch (error) {
 			if (!(error instanceof ChunkNotFoundError)) throw error;
 			this.waitingPaths.add(path);
-			this.warnOnce(`waiting:${path}:${meta.hash}`, `TeamSync: ${path}: waiting for upload`);
+			this.warnOnce(`waiting:${path}:${meta.hash}`, `ArcaSync: ${path}: waiting for upload`);
 			return {};
 		}
 		this.waitingPaths.delete(path);
 		const bytes = concat(parts);
 		if (meta.size !== undefined && bytes.byteLength !== meta.size) {
-			console.warn(`[TeamSync] ${path}: downloaded size does not match its index entry`);
+			console.warn(`[ArcaSync] ${path}: downloaded size does not match its index entry`);
 			return {};
 		}
 		// The entry may have moved on during the download; the next sync fetches the new one.
@@ -350,7 +350,7 @@ export class FileSyncer {
 		const limit = `${Math.round((max / 1048576) * 10) / 10} MiB`;
 		this.warnOnce(
 			`large:${path}`,
-			`TeamSync: ${path} is larger than ${limit} and is not synced on this device.`,
+			`ArcaSync: ${path} is larger than ${limit} and is not synced on this device.`,
 		);
 		return true;
 	}
@@ -407,7 +407,7 @@ export class FileSyncer {
 				JSON.stringify(Object.fromEntries(this.synced)),
 			);
 		} catch (error) {
-			console.error("[TeamSync] could not persist binary sync state", error);
+			console.error("[ArcaSync] could not persist binary sync state", error);
 		}
 	}
 

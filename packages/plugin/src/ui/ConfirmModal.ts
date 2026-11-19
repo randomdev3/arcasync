@@ -33,7 +33,7 @@ export class ConfirmModal extends Modal {
 					this.close();
 					this.options.onConfirm();
 				});
-				button.buttonEl.addClass("teamsync-confirm");
+				button.buttonEl.addClass("arcasync-confirm");
 				if (warning) button.setWarning();
 				else button.setCta();
 			});

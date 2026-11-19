@@ -51,7 +51,7 @@ export class UserSuggestModal extends SuggestModal<AvatarModel> {
 		const where = user.title.slice(user.name.length).replace(/^ — /, "");
 		el.createEl("small", {
 			text: user.state === "idle" ? `${where || "No note"} (idle)` : where || "No note",
-			cls: "teamsync-user-where",
+			cls: "arcasync-user-where",
 		});
 	}
 

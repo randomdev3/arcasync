@@ -16,7 +16,7 @@ const {
 } = $props();
 </script>
 
-<div class="teamsync-facepile" class:is-empty={$vm.avatars.length === 0}>
+<div class="arcasync-facepile" class:is-empty={$vm.avatars.length === 0}>
 	{#each $vm.avatars as avatar (avatar.userId)}
 		<Avatar
 			{avatar}
@@ -28,14 +28,14 @@ const {
 </div>
 
 <style>
-	.teamsync-facepile {
+	.arcasync-facepile {
 		display: flex;
 		align-items: center;
 		flex-shrink: 0;
 		padding: 0 var(--size-4-1);
 	}
 
-	.teamsync-facepile.is-empty {
+	.arcasync-facepile.is-empty {
 		display: none;
 	}
 </style>

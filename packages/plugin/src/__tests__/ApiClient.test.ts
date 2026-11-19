@@ -146,7 +146,7 @@ describe("ApiClient", () => {
 		const start = {
 			deviceCode: "dc",
 			userCode: "BCDF-GHJK",
-			verificationUri: "obsidian://teamsync?approve=BCDF-GHJK",
+			verificationUri: "obsidian://arcasync?approve=BCDF-GHJK",
 			interval: 5,
 			expiresIn: 600,
 		};
@@ -217,7 +217,7 @@ describe("ApiClient", () => {
 		const created = {
 			id: "i1",
 			token: "tok",
-			url: "obsidian://teamsync?server=x&invite=tok",
+			url: "obsidian://arcasync?server=x&invite=tok",
 			role: "editor",
 			admin: false,
 			maxUses: 3,

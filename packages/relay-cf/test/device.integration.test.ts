@@ -80,7 +80,7 @@ describe("device-code sign-in", () => {
 	it("starts with a user code, an approve link and the server's interval", async () => {
 		const code = await start("phone");
 		expect(code.userCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
-		expect(code.verificationUri).toBe(`obsidian://teamsync?approve=${code.userCode}`);
+		expect(code.verificationUri).toBe(`obsidian://arcasync?approve=${code.userCode}`);
 		expect(code.interval).toBe(DEVICE_CODE_INTERVAL_S);
 		expect(code.expiresIn).toBe(TTL_S);
 		const bad = await request(relay.url, "POST", "/api/auth/device/start", { body: {} });

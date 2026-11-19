@@ -71,7 +71,7 @@ describe("DiskWatcher", () => {
 		expect(log).toEqual(["create Named.md"]);
 	});
 
-	it("drops events TeamSync caused itself, at event time", () => {
+	it("drops events ArcaSync caused itself, at event time", () => {
 		const { vault, selfWrites, log } = setup();
 		selfWrites.expect("Shared/r.md", { kind: "create" });
 		selfWrites.expect("Shared/r.md", { kind: "modify" });
@@ -98,7 +98,7 @@ describe("DiskWatcher", () => {
 		const { vault, selfWrites, log } = setup();
 		vault.emit("rename", file("Elsewhere/out.md"), "Shared/out.md");
 		vault.emit("rename", file("Shared/in.md"), "Elsewhere/in.md");
-		// Obsidian's local trash: a rename into `.trash` that TeamSync asked for.
+		// Obsidian's local trash: a rename into `.trash` that ArcaSync asked for.
 		selfWrites.expect("Shared/t.md", { kind: "delete" });
 		vault.emit("rename", file(".trash/t.md"), "Shared/t.md");
 		vi.advanceTimersByTime(500);
@@ -140,7 +140,7 @@ describe("DiskWatcher", () => {
 			"create img.png",
 		]);
 
-		// TeamSync's own binary writes are dropped like note writes.
+		// ArcaSync's own binary writes are dropped like note writes.
 		on.selfWrites.expect("Shared/old.png", { kind: "modify" });
 		on.vault.emit("modify", file("Shared/old.png"));
 		expect(on.log).toHaveLength(4);

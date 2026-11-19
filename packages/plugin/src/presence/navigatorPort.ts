@@ -198,7 +198,7 @@ export class ObsidianNavigatorPort implements NavigatorPort {
 		const fragment = window.document.createDocumentFragment();
 		fragment.append(`${message} `);
 		const button = window.document.createElement("button");
-		button.className = "teamsync-notice-action";
+		button.className = "arcasync-notice-action";
 		button.textContent = action.label;
 		fragment.append(button);
 		const notice = new Notice(fragment, RETURN_NOTICE_MS);

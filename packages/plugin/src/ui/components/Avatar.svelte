@@ -22,7 +22,7 @@ function onkeydown(event: KeyboardEvent) {
 </script>
 
 <span
-	class="teamsync-avatar"
+	class="arcasync-avatar"
 	class:is-followed={following}
 	role="button"
 	tabindex="0"
@@ -30,7 +30,7 @@ function onkeydown(event: KeyboardEvent) {
 	data-state={avatar.state}
 	title={avatar.title}
 	aria-label={avatar.title}
-	style:--teamsync-avatar-color={avatar.color}
+	style:--arcasync-avatar-color={avatar.color}
 	onclick={(event) => onselect(event.shiftKey)}
 	oncontextmenu={(event) => {
 		event.preventDefault();
@@ -42,7 +42,7 @@ function onkeydown(event: KeyboardEvent) {
 >{avatar.initials}</span>
 
 <style>
-	.teamsync-avatar {
+	.arcasync-avatar {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -51,7 +51,7 @@ function onkeydown(event: KeyboardEvent) {
 		border-radius: 50%;
 		margin-left: -6px;
 		border: 2px solid var(--background-primary);
-		background-color: var(--teamsync-avatar-color);
+		background-color: var(--arcasync-avatar-color);
 		color: #fff;
 		font-size: 10px;
 		font-weight: var(--font-bold);
@@ -61,19 +61,19 @@ function onkeydown(event: KeyboardEvent) {
 		transition: opacity 150ms ease;
 	}
 
-	.teamsync-avatar.is-followed {
-		box-shadow: 0 0 0 2px var(--teamsync-avatar-color);
+	.arcasync-avatar.is-followed {
+		box-shadow: 0 0 0 2px var(--arcasync-avatar-color);
 	}
 
-	.teamsync-avatar:first-child {
+	.arcasync-avatar:first-child {
 		margin-left: 0;
 	}
 
-	.teamsync-avatar[data-state="elsewhere"] {
+	.arcasync-avatar[data-state="elsewhere"] {
 		opacity: 0.45;
 	}
 
-	.teamsync-avatar[data-state="idle"] {
+	.arcasync-avatar[data-state="idle"] {
 		opacity: 0.3;
 		filter: grayscale(1);
 	}

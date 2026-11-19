@@ -78,7 +78,7 @@ async function userColor(seed: string): Promise<string> {
 
 /** `obsidian://` link the plugin's protocol handler turns into a prefilled join. */
 export function inviteUrl(publicUrl: string, token: string): string {
-	return `obsidian://teamsync?server=${encodeURIComponent(publicUrl)}&invite=${token}`;
+	return `obsidian://arcasync?server=${encodeURIComponent(publicUrl)}&invite=${token}`;
 }
 
 /** Lowercase `a-z0-9-`, at most 40 characters (the `DevLoginRequest.workspace` slug shape). */
@@ -969,7 +969,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({
 			deviceCode,
 			userCode,
-			verificationUri: `obsidian://teamsync?approve=${userCode}`,
+			verificationUri: `obsidian://arcasync?approve=${userCode}`,
 			interval: DEVICE_CODE_INTERVAL_S,
 			expiresIn: ttl,
 		});

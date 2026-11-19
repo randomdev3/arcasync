@@ -1,10 +1,10 @@
-.teamsync-settings {
+.arcasync-settings {
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-4);
 }
 
-.teamsync-settings .teamsync-row {
+.arcasync-settings .arcasync-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -13,37 +13,37 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
-.teamsync-settings .teamsync-row:first-child {
+.arcasync-settings .arcasync-row:first-child {
 	border-top: none;
 }
 
-.teamsync-settings .teamsync-row-info {
+.arcasync-settings .arcasync-row-info {
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-2-1);
 }
 
-.teamsync-settings .teamsync-row-name {
+.arcasync-settings .arcasync-row-name {
 	font-weight: var(--font-medium);
 }
 
-.teamsync-settings .teamsync-row-desc {
+.arcasync-settings .arcasync-row-desc {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
 
-.teamsync-settings input[type="text"] {
+.arcasync-settings input[type="text"] {
 	min-width: 18em;
 }
 
-.teamsync-settings .teamsync-invite {
+.arcasync-settings .arcasync-invite {
 	display: flex;
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: var(--size-4-2);
 }
 
-.teamsync-user-code {
+.arcasync-user-code {
 	font-family: var(--font-monospace);
 	font-size: 2em;
 	letter-spacing: 0.1em;
@@ -52,40 +52,40 @@
 	padding: var(--size-4-2) 0;
 }
 
-.teamsync-settings .teamsync-mappings {
+.arcasync-settings .arcasync-mappings {
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
 	gap: var(--size-4-2);
 }
 
-.teamsync-settings .teamsync-mapping {
+.arcasync-settings .arcasync-mapping {
 	display: flex;
 	align-items: center;
 	gap: var(--size-4-2);
 }
 
-.teamsync-status {
+.arcasync-status {
 	font-size: var(--font-ui-smaller);
 }
 
-.teamsync-status[data-state="connected"] {
+.arcasync-status[data-state="connected"] {
 	color: var(--text-success);
 }
 
-.teamsync-status[data-state="connecting"] {
+.arcasync-status[data-state="connecting"] {
 	color: var(--text-warning);
 }
 
-.teamsync-status[data-state="error"] {
+.arcasync-status[data-state="error"] {
 	color: var(--text-error);
 }
 
-.teamsync-status[data-state="disconnected"] {
+.arcasync-status[data-state="disconnected"] {
 	color: var(--text-muted);
 }
 
-.status-bar-item.teamsync-status-bar {
+.status-bar-item.arcasync-status-bar {
 	cursor: default;
 }
 
@@ -111,12 +111,12 @@
 }
 
 /* Until the note doc is ready its awareness may describe text the editor does not show yet. */
-.cm-editor.teamsync-carets-pending .cm-content .cm-ySelectionCaret {
+.cm-editor.arcasync-carets-pending .cm-content .cm-ySelectionCaret {
 	display: none;
 }
 
-.cm-editor.teamsync-carets-pending .cm-content .cm-ySelection,
-.cm-editor.teamsync-carets-pending .cm-content .cm-yLineSelection {
+.cm-editor.arcasync-carets-pending .cm-content .cm-ySelection,
+.cm-editor.arcasync-carets-pending .cm-content .cm-yLineSelection {
 	/* biome-ignore lint/complexity/noImportantStyles: the selection colour is an inline style. */
 	background-color: transparent !important;
 }

@@ -5,7 +5,7 @@ import { createPersistence } from "./persistence.js";
 
 export function createHocuspocus(deps: Deps): Hocuspocus {
 	return new Hocuspocus({
-		name: "teamsync",
+		name: "arcasync",
 		quiet: true,
 		debounce: 2000,
 		maxDebounce: 10000,

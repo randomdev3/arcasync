@@ -142,7 +142,7 @@ export class WorkspaceSession {
 		return () => this.indexListeners.delete(listener);
 	}
 
-	/** User edits (not TeamSync's own writes) to synced notes, by vault path. */
+	/** User edits (not ArcaSync's own writes) to synced notes, by vault path. */
 	onDiskModify(listener: (vaultPath: string) => void): () => void {
 		this.modifyListeners.add(listener);
 		return () => this.modifyListeners.delete(listener);
@@ -196,7 +196,7 @@ export class WorkspaceSession {
 					files,
 					chunks: binaries.chunks,
 					storage: window.localStorage,
-					storageKey: `teamsync:${this.vaultId}:${this.workspaceId}:binhash`,
+					storageKey: `arcasync:${this.vaultId}:${this.workspaceId}:binhash`,
 					userId: this.user.id,
 					device: this.app.vault.getName(),
 					maxBytes: binaries.maxBytes,
@@ -210,7 +210,7 @@ export class WorkspaceSession {
 		const reconciler = new Reconciler({
 			index,
 			files,
-			known: new LocalStorageKnown(`teamsync:${this.vaultId}:${this.workspaceId}:known`, root),
+			known: new LocalStorageKnown(`arcasync:${this.vaultId}:${this.workspaceId}:known`, root),
 			userId: this.user.id,
 			isSynced: () => provider.synced,
 			isAcked: () => !provider.hasUnsyncedChanges,

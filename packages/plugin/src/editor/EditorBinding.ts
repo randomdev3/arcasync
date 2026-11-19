@@ -22,11 +22,11 @@ import type { WorkspaceSession } from "../workspace/WorkspaceSession";
 import { caretLabels } from "./caretLabels";
 
 /** Marks an editor whose buffer is bound to its note's CRDT. */
-export const LIVE_CLASS = "teamsync-live";
+export const LIVE_CLASS = "arcasync-live";
 /** Embeds, table cells and hover popovers edit through their own editors; never bind those. */
 const SUB_EDITOR = ".markdown-embed, .table-cell-wrapper, .popover";
 
-/** What the bindings need from the plugin; `TeamSyncPlugin` provides it. */
+/** What the bindings need from the plugin; `ArcaSyncPlugin` provides it. */
 export interface BindingHost {
 	/** Every connected workspace session. */
 	readonly sessions: readonly WorkspaceSession[];
@@ -315,7 +315,7 @@ export class EditorBinding implements PluginValue {
 		try {
 			note = await docs.acquire(fileId, file.path);
 		} catch (error) {
-			if (!stale()) console.error(`[TeamSync] ${file.path}: opening the note failed`, error);
+			if (!stale()) console.error(`[ArcaSync] ${file.path}: opening the note failed`, error);
 			return;
 		}
 		let attached = false;
@@ -335,7 +335,7 @@ export class EditorBinding implements PluginValue {
 				return true;
 			});
 		} catch (error) {
-			if (!stale()) console.error(`[TeamSync] ${file.path}: binding the editor failed`, error);
+			if (!stale()) console.error(`[ArcaSync] ${file.path}: binding the editor failed`, error);
 		} finally {
 			if (this.pending?.cancel === cancel) this.pending = null;
 			if (!attached) {

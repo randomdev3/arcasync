@@ -13,7 +13,7 @@ function setup(options: { userId?: string; storage?: MemoryStorage; now?: () => 
 		revs,
 		userId: options.userId ?? "alice",
 		storage,
-		keyPrefix: "teamsync:v:ws",
+		keyPrefix: "arcasync:v:ws",
 		now: options.now ?? (() => Date.now()),
 	});
 	return { index, revs, storage, tracker };
@@ -135,13 +135,13 @@ describe("RevTracker", () => {
 			revs: shared.getMap("docRevs"),
 			userId: "bob",
 			storage: new MemoryStorage(),
-			keyPrefix: "teamsync:b:ws",
+			keyPrefix: "arcasync:b:ws",
 		});
 		const writer = new RevTracker({
 			revs: shared.getMap("docRevs"),
 			userId: "alice",
 			storage: new MemoryStorage(),
-			keyPrefix: "teamsync:a:ws",
+			keyPrefix: "arcasync:a:ws",
 			now: peerNow,
 		});
 		const n = note();

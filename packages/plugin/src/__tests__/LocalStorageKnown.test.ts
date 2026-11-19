@@ -5,7 +5,7 @@ import { LocalStorageKnown } from "../workspace/LocalFiles";
 import { Reconciler } from "../workspace/Reconciler";
 import { FakeFiles } from "./indexHarness";
 
-const KEY = "teamsync:vault:ws:known";
+const KEY = "arcasync:vault:ws:known";
 
 beforeEach(() => {
 	const data = new Map<string, string>();

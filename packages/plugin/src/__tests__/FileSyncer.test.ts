@@ -183,7 +183,7 @@ describe("FileSyncer download", () => {
 		chunks.store.delete(sha);
 		await settle([a, b]);
 		expect(b.files.exists("w.png")).toBe(false);
-		expect(b.notices).toEqual(["TeamSync: w.png: waiting for upload"]);
+		expect(b.notices).toEqual(["ArcaSync: w.png: waiting for upload"]);
 
 		if (saved) chunks.store.set(sha, saved);
 		a.files.edit("other.md", new Uint8Array());

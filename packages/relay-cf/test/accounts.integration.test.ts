@@ -75,7 +75,7 @@ describe("accounts", () => {
 			expect(team).toMatchObject({ name: "Team", slug: "team", role: "owner" });
 			expect(boot.invite).toMatchObject({ role: "owner", admin: true, maxUses: 1 });
 			expect(boot.invite.url).toBe(
-				`obsidian://teamsync?server=${encodeURIComponent(relay.url)}&invite=${boot.invite.token}`,
+				`obsidian://arcasync?server=${encodeURIComponent(relay.url)}&invite=${boot.invite.token}`,
 			);
 			expect(boot.invite.expiresAt - Date.now()).toBeGreaterThan(23 * 3600_000);
 
@@ -113,7 +113,7 @@ describe("accounts", () => {
 	describe("invites", () => {
 		it("lets only owners and admins create, list and revoke", async () => {
 			const editorInvite = await invite({ role: "editor" });
-			expect(editorInvite.url).toMatch(/^obsidian:\/\/teamsync\?server=/);
+			expect(editorInvite.url).toMatch(/^obsidian:\/\/arcasync\?server=/);
 			const erin = SessionResponse.parse((await accept(editorInvite.token, "erin")).body);
 			expect(erin.user.isAdmin).toBe(false);
 			expect(erin.workspaces).toEqual([{ ...team, role: "editor" }]);
@@ -271,7 +271,7 @@ describe("accounts", () => {
 			);
 			expect(reentry).toMatchObject({ maxUses: 1, admin: false });
 			expect(reentry.url).toBe(
-				`obsidian://teamsync?server=${encodeURIComponent(relay.url)}&invite=${reentry.token}`,
+				`obsidian://arcasync?server=${encodeURIComponent(relay.url)}&invite=${reentry.token}`,
 			);
 			expect(reentry.expiresAt - Date.now()).toBeGreaterThan(6.9 * 24 * 3600_000);
 			// It is not a workspace invite: an existing user cannot redeem it.

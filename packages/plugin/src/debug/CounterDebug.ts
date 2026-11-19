@@ -13,7 +13,7 @@ export class CounterDebug {
 	private readonly map: Y.Map<number>;
 	private readonly observer = (_event: Y.YMapEvent<number>, transaction: Y.Transaction) => {
 		if (transaction.local) return;
-		new Notice(`TeamSync counter: ${this.map.get(KEY) ?? 0}`);
+		new Notice(`ArcaSync counter: ${this.map.get(KEY) ?? 0}`);
 	};
 
 	constructor(indexDoc: Y.Doc) {

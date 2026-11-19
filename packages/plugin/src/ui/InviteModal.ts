@@ -21,12 +21,12 @@ export class InviteModal extends Modal {
 		const { askName } = this.options;
 		let link = this.options.link;
 		let name = "";
-		this.titleEl.setText(askName ? "Join TeamSync" : "Join a workspace");
+		this.titleEl.setText(askName ? "Join ArcaSync" : "Join a workspace");
 		new Setting(this.contentEl).setName("Invite link or code").addText((text) => {
 			text.setValue(link).onChange((value) => {
 				link = value;
 			});
-			text.inputEl.addClass("teamsync-invite-input");
+			text.inputEl.addClass("arcasync-invite-input");
 		});
 		if (askName) {
 			new Setting(this.contentEl)
@@ -36,7 +36,7 @@ export class InviteModal extends Modal {
 					text.setPlaceholder("Name").onChange((value) => {
 						name = value;
 					});
-					text.inputEl.addClass("teamsync-invite-name");
+					text.inputEl.addClass("arcasync-invite-name");
 				});
 		}
 		new Setting(this.contentEl).addButton((button) => {
@@ -51,7 +51,7 @@ export class InviteModal extends Modal {
 						button.setDisabled(false);
 					}
 				});
-			button.buttonEl.addClass("teamsync-invite-join");
+			button.buttonEl.addClass("arcasync-invite-join");
 		});
 	}
 

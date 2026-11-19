@@ -51,7 +51,7 @@ export class FakeFiles implements LocalFiles, BinaryFiles {
 		this.bytes.delete(path);
 	}
 
-	/** A user (not TeamSync) writes `data` at `path`. */
+	/** A user (not ArcaSync) writes `data` at `path`. */
 	edit(path: string, data: Uint8Array): void {
 		this.files.add(path);
 		this.bytes.set(path, data);

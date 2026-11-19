@@ -202,7 +202,7 @@ export class ConnectionManager {
 			try {
 				listener(change);
 			} catch (error) {
-				console.error("[TeamSync] membership listener failed", error);
+				console.error("[ArcaSync] membership listener failed", error);
 			}
 		}
 	}
@@ -217,7 +217,7 @@ export class ConnectionManager {
 		if (existing) return existing;
 
 		const ref = parseDocName(name);
-		if (!ref) throw new Error(`not a TeamSync document name: ${name}`);
+		if (!ref) throw new Error(`not a ArcaSync document name: ${name}`);
 		if (!this.socket) this.connect();
 		const socket = this.socket;
 		if (!socket) throw new Error("connection manager is not connected");
@@ -293,7 +293,7 @@ export class ConnectionManager {
 			try {
 				listener(state);
 			} catch (error) {
-				console.error("[TeamSync] connection listener failed", error);
+				console.error("[ArcaSync] connection listener failed", error);
 			}
 		}
 	}

@@ -30,7 +30,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		revs,
 		userId: session.user.id,
 		storage: window.localStorage,
-		keyPrefix: `teamsync:${session.vaultId}:${session.workspaceId}`,
+		keyPrefix: `arcasync:${session.vaultId}:${session.workspaceId}`,
 	});
 	const { warmDocs, bgConcurrency, maxMdBytes, maxBaseBytes } = limits();
 	const docs = new DocManager({
@@ -78,7 +78,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		if (!fileId) return;
 		background
 			.onDiskModify(fileId)
-			.catch((error) => console.error(`[TeamSync] ${vaultPath}: applying the edit failed`, error));
+			.catch((error) => console.error(`[ArcaSync] ${vaultPath}: applying the edit failed`, error));
 	});
 
 	return () => {

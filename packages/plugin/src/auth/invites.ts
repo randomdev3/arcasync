@@ -26,7 +26,7 @@ export function sameServer(a: string, b: string): boolean {
 	return x !== null && x === normalizeServerUrl(b);
 }
 
-/** The `server` and `invite` parameters of an `obsidian://teamsync` link, validated. */
+/** The `server` and `invite` parameters of an `obsidian://arcasync` link, validated. */
 export function inviteFromParams(params: {
 	server?: string | null;
 	invite?: string | null;
@@ -39,7 +39,7 @@ export function inviteFromParams(params: {
 }
 
 /**
- * Parses what a user pastes as an invite: the `obsidian://teamsync?server=…&invite=…` link the
+ * Parses what a user pastes as an invite: the `obsidian://arcasync?server=…&invite=…` link the
  * relay hands out, or the bare token. A link whose server is not http(s) is rejected.
  */
 export function parseInviteLink(input: string): InviteLink | null {
@@ -53,7 +53,7 @@ export function parseInviteLink(input: string): InviteLink | null {
 	}
 	if (url.protocol !== "obsidian:") return null;
 	const action = `${url.host}${url.pathname}`.replace(/^\/+|\/+$/g, "");
-	if (action !== "teamsync") return null;
+	if (action !== "arcasync") return null;
 	return inviteFromParams({
 		server: url.searchParams.get("server"),
 		invite: url.searchParams.get("invite"),

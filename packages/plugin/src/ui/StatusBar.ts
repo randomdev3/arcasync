@@ -12,11 +12,11 @@ export interface StatusBarModel {
 	online: number;
 }
 
-const PREFIX = "TeamSync";
+const PREFIX = "ArcaSync";
 
 /**
- * Renders `TeamSync: alice · Dev · 2 online` in the Obsidian status bar, or
- * `TeamSync: alice · Dev +1 · 3 online` with two workspaces connected.
+ * Renders `ArcaSync: alice · Dev · 2 online` in the Obsidian status bar, or
+ * `ArcaSync: alice · Dev +1 · 3 online` with two workspaces connected.
  */
 export class StatusBar {
 	private model: StatusBarModel = {
@@ -29,7 +29,7 @@ export class StatusBar {
 	};
 
 	constructor(private readonly el: HTMLElement) {
-		this.el.addClass("teamsync-status-bar");
+		this.el.addClass("arcasync-status-bar");
 		this.render();
 	}
 
@@ -57,7 +57,7 @@ export class StatusBar {
 	}
 
 	destroy(): void {
-		this.el.removeClass("teamsync-status-bar");
+		this.el.removeClass("arcasync-status-bar");
 		this.el.setText("");
 	}
 }

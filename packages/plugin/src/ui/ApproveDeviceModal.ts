@@ -43,16 +43,16 @@ export class ApproveDeviceModal extends Modal {
 					.onChange((value) => {
 						this.code = value;
 					});
-				text.inputEl.addClass("teamsync-approve-code");
+				text.inputEl.addClass("arcasync-approve-code");
 				text.inputEl.addEventListener("keydown", (event) => {
 					if (event.key === "Enter") void this.lookup();
 				});
 			})
 			.addButton((button) => {
 				button.setButtonText("Look up").onClick(() => void this.lookup());
-				button.buttonEl.addClass("teamsync-approve-lookup");
+				button.buttonEl.addClass("arcasync-approve-lookup");
 			});
-		this.resultEl = this.contentEl.createDiv({ cls: "teamsync-approve-result" });
+		this.resultEl = this.contentEl.createDiv({ cls: "arcasync-approve-result" });
 		if (this.code.trim()) void this.lookup();
 	}
 
@@ -74,9 +74,9 @@ export class ApproveDeviceModal extends Modal {
 
 	private renderDevice({ device }: DeviceLookupResponse): void {
 		this.resultEl.empty();
-		const line = this.resultEl.createEl("p", { cls: "teamsync-approve-device" });
+		const line = this.resultEl.createEl("p", { cls: "arcasync-approve-device" });
 		line.appendText("Sign in ");
-		line.createEl("strong", { cls: "teamsync-approve-device-name", text: device.name });
+		line.createEl("strong", { cls: "arcasync-approve-device-name", text: device.name });
 		line.appendText(` (${device.platform}) as you?`);
 		new Setting(this.resultEl)
 			.addButton((button) => {
@@ -84,14 +84,14 @@ export class ApproveDeviceModal extends Modal {
 					.setButtonText("Deny")
 					.setWarning()
 					.onClick(() => void this.answer(false));
-				button.buttonEl.addClass("teamsync-approve-deny");
+				button.buttonEl.addClass("arcasync-approve-deny");
 			})
 			.addButton((button) => {
 				button
 					.setButtonText("Approve")
 					.setCta()
 					.onClick(() => void this.answer(true));
-				button.buttonEl.addClass("teamsync-approve-accept");
+				button.buttonEl.addClass("arcasync-approve-accept");
 			});
 	}
 
@@ -102,12 +102,12 @@ export class ApproveDeviceModal extends Modal {
 			await this.api.deviceApprove(looked.code, approve);
 			new Notice(
 				approve
-					? `TeamSync: ${looked.result.device.name} is signing in`
-					: `TeamSync: denied ${looked.result.device.name}`,
+					? `ArcaSync: ${looked.result.device.name} is signing in`
+					: `ArcaSync: denied ${looked.result.device.name}`,
 			);
 			this.close();
 		} catch (error) {
-			new Notice(`TeamSync: ${describeError(error)}`);
+			new Notice(`ArcaSync: ${describeError(error)}`);
 		}
 	}
 
