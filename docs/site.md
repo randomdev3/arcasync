@@ -8,15 +8,34 @@ invites and sign-in. It is hosted on **Cloudflare Pages** at **https://arca-sync
 |---|---|---|
 | `/` | Landing page with the display (a 2D canvas, lazy) | none |
 | `/guide` | Install, connect, sign in, share, troubleshooting | none |
-| `/join?invite=…` | Create an account from an invite, or add its workspace to the signed-in account; "Open in Obsidian" as the alternative | `accept`, or `me` + `redeem` |
-| `/signin` | Sign this browser in with a device code approved in Obsidian | `device/start`, `device/poll` |
+| `/join?invite=…` | Create an account from an invite, or add its workspace to the signed-in account; "Open in Obsidian" as the alternative. "Join with a PIN": 4 digits + name + password (new account), or the PIN alone when signed in | `accept`, or `me` + `redeem`; `pin/accept` or `redeem-pin` |
+| `/signin` | Name + password first; below it, a device code approved in Obsidian | `auth/login`; `device/start`, `device/poll` |
 | `/approve?code=…` | Approve the code an Obsidian shows under "Sign in with another device" | `me`, `device/lookup`, `device/approve` |
-| `/account` | Who am I, my workspaces, sign out | `me`, `logout` |
+| `/account` | Who am I, my workspaces, set or change the password, invite PINs (owners/admins: create, list, revoke; admins: unlock PIN entry), sign out | `me`, `auth/password`, `workspaces/:id/pins`, `admin/pins/unlock`, `logout` |
 | (anything else) | `404.html` | none |
 
 Static files cost no Worker requests: Pages serves them. Only the relay calls above count, a few per
 human action (sign-in polls about every 5 s while waiting, at most about 120 per sign-in). Preflights
 are cached for 2 hours.
+
+### PIN and password endpoints
+
+All JSON; errors are `{error: {code, message, details?}}`. 429 and 423 carry `details.retryAfter`
+(seconds) and a `Retry-After` header (CORS-exposed). Deploy the relay before a site that uses them.
+
+| Call | Auth | Success | Errors |
+|---|---|---|---|
+| `POST /api/auth/login {name, password, device}` | none | 200 `SessionResponse` | 400 `bad_request`; 401 `invalid_credentials` (unknown name, no password, wrong password, disabled: all the same); 429 `rate_limited` |
+| `POST /api/auth/password {current?, new}` | bearer | 200 `{ok}`; other sessions revoked | 400 `bad_request`/`weak_password`; 401 session; 403 `invalid_credentials` (missing or wrong `current`; not 401, so clients keep the session); 409 `conflict`; 429 `rate_limited` |
+| `GET /api/auth/me` | bearer | `MeResponse` + `hasPassword` | 401 |
+| `POST /api/auth/pin/accept {pin, name, password, device}` | none | 200 `SessionResponse` | 400 `bad_request`/`weak_password`; 404 `invalid_pin` (wrong, used, revoked, expired: all the same); 409 `name_taken`; 423 `pins_locked`; 429 `rate_limited` |
+| `POST /api/invites/redeem-pin {pin}` | bearer | 200 `WorkspacesResponse` | 401; 404 `invalid_pin`; 423; 429 |
+| `GET /api/workspaces/:id/pins` | owner/admin | 200 `{pins: PinSummary[], locked, lockedUntil}` | 401; 403 |
+| `POST /api/workspaces/:id/pins {role, admin?, expiresInSec?}` | owner/admin (`admin` only for server admins) | 200 `PinSummary` | 400; 401; 403; 409 `too_many_pins` |
+| `DELETE /api/workspaces/:id/pins/:pinId` | owner/admin | 200 `{ok}` | 401; 403; 404 |
+| `POST /api/admin/pins/unlock` | server admin | 200 `{ok}` | 401; 403 |
+
+`/server-info` advertises `features.passwords` and `features.pins`.
 
 ## Look
 

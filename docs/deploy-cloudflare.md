@@ -62,7 +62,7 @@ are in [site.md](site.md). Deploy the site before (or together with) a relay dep
 
 ## Accounts: bootstrap, invites and sign-in
 
-Production has dev login off. Every user signs in through an invite or a device code.
+Production has dev login off. Every user signs in through an invite (link or PIN), a device code or name + password.
 
 **Bootstrap (once).** The first call creates the first workspace and a single-use invite that
 makes whoever accepts it the workspace owner **and** server admin. The invite is valid for 24 hours.
@@ -96,6 +96,43 @@ sign-in", or open the code's link (`https://arca-sync.pages.dev/approve?code=<co
 website, `obsidian://arcasync?approve=<code>` without it), check the device name and
 platform it shows, and approve. The new device polls every 5 s at most (faster polls get
 `slow_down`) and signs in as the approver; the code expires after 10 minutes.
+
+**PIN invites.** An owner or admin creates a 4-digit PIN (Obsidian: "Create an invite link" →
+PINs; website: `/account`) with a role; server admins may also make an admin PIN. PINs are random
+(crypto RNG), unique among usable PINs, single-use, valid 72 h by default (30 days at most), and at
+most 10 are usable server-wide (`409 too_many_pins`). They are stored in plaintext so owners can
+list them; the audit log names PINs by id only. Whoever has a PIN joins with it plus a name and a
+password (`/api/auth/pin/accept`), or, already signed in, adds its workspace (`redeem-pin`).
+Every wrong, used, revoked or expired PIN is the same `404 invalid_pin`.
+
+**PIN brute-force limits.** Per client IP (`CF-Connecting-IP`), 5 wrong PINs per 15 min, then
+`429 rate_limited` with `Retry-After`. Server-wide, 20 wrong PINs in a rolling 24 h lock all PIN
+entry (`423 pins_locked`) for 24 h; the lock is audited (`pin.lock`). An admin lifts it early with
+`POST /api/admin/pins/unlock` (Obsidian: the PINs section of the invite modal; website:
+`/account`), which also resets the count. Successful PINs never count.
+
+**Passwords.** Accounts made with a PIN have a password; anyone signed in can set one (Settings →
+ArcaSync → Password, or `/account`). 10–256 characters after NFC, no composition rules, 20 very
+common ones refused. Hashing is PBKDF2-HMAC-SHA256 in AccountsDO (never the Worker, whose free-plan
+CPU limit is 10 ms): 16-byte salt, `ARCASYNC_SECRET` as pepper, 7 chained rounds of 100 000
+iterations, since production Workers refuse a single PBKDF2 call above 100 000. That is about 45 ms
+of CPU per hash in local workerd on an Apple M-series machine (measured 2026-11-19, 100 hashes);
+rounds and iterations are stored per row, so they can be raised later. Sign-in is
+`POST /api/auth/login` with the name (case-insensitive) and password; unknown names, accounts
+without a password, wrong passwords and disabled accounts all get the same `401
+invalid_credentials` after the same hashing work. Limits: 5 failures per name and 20 per IP per
+15 min (`429` with `Retry-After`); failures are audited once per limit reached
+(`auth.login.limited`), not per attempt. Changing a password needs the current one (`403` when
+wrong) and revokes the account's other sessions; their sockets keep working until their
+workspace token expires (≤ 15 min). `GET /api/auth/me` reports `hasPassword`; it is cached per
+isolate for 60 s, and a change drops that isolate's entries for the user. **Forgotten password:** an
+admin disables and re-enables the user; accepting the re-entry invite signs them in and clears the
+password, so they set a new one without the old.
+
+**Migration.** The new tables (`user_passwords`, `invite_pins`, `pin_failures`,
+`login_failures`) are created with `CREATE TABLE IF NOT EXISTS` when AccountsDO wakes; no existing
+table or row changes, so a deploy needs no manual step and a rollback leaves them unused.
+Accounts created by invite link have no password until they set one.
 
 **Revocation.** A role change or removal closes that user's sockets with `4401
 membership-changed`, and the relay refuses any workspace JWT issued up to that second. The
