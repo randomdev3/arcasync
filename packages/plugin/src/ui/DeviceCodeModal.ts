@@ -64,13 +64,16 @@ export class DeviceCodeModal extends Modal {
 		const box = this.contentEl.createDiv({ cls: "arcasync-device-code" });
 		this.contentEl.insertBefore(box, status);
 		box.createEl("p", {
-			text: 'On a device where you are signed in, run the command "ArcaSync: Approve a device sign-in" and enter this code:',
+			text: 'Approve this code from somewhere you\'re already signed in: in Obsidian run "ArcaSync: Approve a device sign-in", or open the link below in the browser where you made your account.',
 		});
 		box.createEl("div", { cls: "arcasync-user-code", text: code.userCode });
 		const link = box.createEl("p", { cls: "arcasync-device-link" });
-		link.appendText("Or open ");
-		link.createEl("code", { text: code.verificationUri });
-		link.appendText(" there.");
+		// Obsidian opens https links in the browser; anything else is shown, not linked.
+		if (/^https?:\/\//.test(code.verificationUri)) {
+			link.createEl("a", { text: code.verificationUri, href: code.verificationUri });
+		} else {
+			link.createEl("code", { text: code.verificationUri });
+		}
 		const expiresAt = Date.now() + code.expiresIn * 1000;
 		const tick = () =>
 			status.setText(`Waiting for approval… expires in ${formatRemaining(expiresAt - Date.now())}`);

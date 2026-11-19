@@ -39,8 +39,10 @@ export function inviteFromParams(params: {
 }
 
 /**
- * Parses what a user pastes as an invite: the `obsidian://arcasync?server=…&invite=…` link the
- * relay hands out, or the bare token. A link whose server is not http(s) is rejected.
+ * Parses what a user pastes as an invite: the website's `https://<host>[/<prefix>]/join?invite=…`
+ * link (the token may also sit in the fragment, `#invite=…`), the older
+ * `obsidian://arcasync?server=…&invite=…` link, or the bare token. The relay of a join link is its
+ * origin plus prefix. A link whose server is not http(s), or any other https path, is rejected.
  */
 export function parseInviteLink(input: string): InviteLink | null {
 	const text = input.trim();
@@ -51,6 +53,7 @@ export function parseInviteLink(input: string): InviteLink | null {
 	} catch {
 		return null;
 	}
+	if (url.protocol === "http:" || url.protocol === "https:") return joinPageInvite(url);
 	if (url.protocol !== "obsidian:") return null;
 	const action = `${url.host}${url.pathname}`.replace(/^\/+|\/+$/g, "");
 	if (action !== "arcasync") return null;
@@ -58,4 +61,15 @@ export function parseInviteLink(input: string): InviteLink | null {
 		server: url.searchParams.get("server"),
 		invite: url.searchParams.get("invite"),
 	});
+}
+
+/** `…/join?invite=<token>` or `…/join#invite=<token>` on the relay's own site. */
+function joinPageInvite(url: URL): InviteLink | null {
+	if (url.username || url.password) return null;
+	const match = /^(.*)\/join\/?$/.exec(url.pathname);
+	if (!match) return null;
+	const invite =
+		url.searchParams.get("invite") ?? new URLSearchParams(url.hash.slice(1)).get("invite");
+	const server = normalizeServerUrl(`${url.origin}${match[1]}`);
+	return server ? inviteFromParams({ server, invite }) : null;
 }

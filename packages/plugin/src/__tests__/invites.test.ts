@@ -17,6 +17,33 @@ describe("parseInviteLink", () => {
 		).toEqual({ server: "http://localhost:8787", token: TOKEN });
 	});
 
+	it("parses the website's https join link (query or fragment, optional path prefix)", () => {
+		const cases: [string, string][] = [
+			[`https://relay.example.com/join?invite=${TOKEN}`, "https://relay.example.com"],
+			[`https://relay.example.com/join/?invite=${TOKEN}`, "https://relay.example.com"],
+			[`https://relay.example.com/join#invite=${TOKEN}`, "https://relay.example.com"],
+			[`http://localhost:8789/join?invite=${TOKEN}`, "http://localhost:8789"],
+			[` https://Example.com/team/join?invite=${TOKEN}\n`, "https://example.com/team"],
+		];
+		for (const [link, server] of cases) {
+			expect(parseInviteLink(link), link).toEqual({ server, token: TOKEN });
+		}
+	});
+
+	it("rejects other https paths, missing tokens and credentials in a join link", () => {
+		for (const link of [
+			`https://relay.example.com/joinx?invite=${TOKEN}`,
+			`https://relay.example.com/join/more?invite=${TOKEN}`,
+			`https://relay.example.com/approve?invite=${TOKEN}`,
+			"https://relay.example.com/join",
+			"https://relay.example.com/join?invite=short",
+			`https://user:pw@relay.example.com/join?invite=${TOKEN}`,
+			`ftp://relay.example.com/join?invite=${TOKEN}`,
+		]) {
+			expect(parseInviteLink(link), link).toBeNull();
+		}
+	});
+
 	it("parses a bare token as an invite for the current server", () => {
 		expect(parseInviteLink(` ${TOKEN} `)).toEqual({ server: null, token: TOKEN });
 	});

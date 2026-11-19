@@ -27,7 +27,7 @@ function relay({ interval = 5, expiresIn = 600 } = {}) {
 	const start: DeviceCodeResponse = {
 		deviceCode: "dc",
 		userCode: "BCDF-GHJK",
-		verificationUri: "obsidian://arcasync?approve=BCDF-GHJK",
+		verificationUri: "https://relay.example.com/approve?code=BCDF-GHJK",
 		interval,
 		expiresIn,
 	};

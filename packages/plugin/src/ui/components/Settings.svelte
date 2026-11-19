@@ -97,7 +97,7 @@ function addMapping(path: string) {
 					type="text"
 					class="arcasync-invite-input"
 					spellcheck="false"
-					placeholder="obsidian://arcasync?…"
+					placeholder="https://…/join?invite=…"
 					bind:value={inviteLink}
 				/>
 				{#if !$vm.signedIn}

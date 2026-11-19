@@ -1,7 +1,7 @@
 // P2-10: owner tools and membership changes on live sockets. alice (owner of `dev`) demotes bob
 // to viewer in the members modal: the relay closes bob's socket with 4401 and his editor turns
 // read-only. Promoting him back makes it writable; removing him stops his session for `dev`
-// (Notice, files kept). The invite modal shows an `obsidian://arcasync` link.
+// (Notice, files kept). The invite modal shows the website's `<relay>/join?invite=` link.
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -52,7 +52,7 @@ export default {
 	needs: ["alice", "bob"],
 	backends: ["cf"],
 	seed: { alice: { [NOTE]: SEED } },
-	async run({ vaults, step }) {
+	async run({ vaults, server, step }) {
 		const { alice, bob } = vaults;
 		const devId = await alice.eval(
 			`return app.plugins.plugins.arcasync.settings.workspaces.find((w) => w.slug === "dev")?.id ?? null;`,
@@ -224,7 +224,7 @@ export default {
 					inModal(alice, ".arcasync-invite-url", "return root.querySelector(args.selector).value;"),
 				{ timeout: 5000, label: "alice's invite modal shows a link" },
 			);
-			assert.ok(url.startsWith("obsidian://arcasync?server="), `invite link: ${url}`);
+			assert.ok(url.startsWith(`${server.url}/join?invite=`), `invite link: ${url}`);
 			step(`invite modal shows ${url.slice(0, 40)}…`);
 		} finally {
 			await alice.eval(
