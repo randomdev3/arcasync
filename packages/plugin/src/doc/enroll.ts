@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { applyText } from "./applyText";
 import type { DiskWriter } from "./DiskWriter";
 import { diskText, textHash } from "./diskText";
+import { merge3 } from "./merge3";
 
 /** Transaction origin of the one-time insert of disk text into an empty note doc. */
 export const ENROLL_ORIGIN = "teamsync:enroll";
@@ -57,6 +58,8 @@ export interface ReconcileInput {
 	canEnroll: boolean;
 	/** This user may change the doc (not a viewer). */
 	writable: boolean;
+	/** This device kept the text of `lastSyncedHash` (the base of a 3-way merge). */
+	hasBase: boolean;
 }
 
 /**
@@ -68,6 +71,8 @@ export interface ReconcileInput {
  * - `write-doc`: the disk holds nothing this device has not synced; the doc replaces it.
  * - `apply-disk`: the disk was edited while the doc stayed at the last synced text; the edit
  *   goes into the doc (a three-way merge whose base is the doc itself).
+ * - `merged`: both moved since they last agreed and this device kept the text they agreed on.
+ *   A clean 3-way merge of disk and doc goes into both; an unclean one falls back to `conflict`.
  * - `conflict`: both moved since they last agreed. The doc wins on disk and the disk text is
  *   kept in a local copy. Nothing is dropped.
  * - `too-large`: the file or the doc is over this device's `maxMdBytes`; neither is touched
@@ -81,6 +86,7 @@ export type ReconcileAction =
 	| "in-sync"
 	| "write-doc"
 	| "apply-disk"
+	| "merged"
 	| "conflict";
 
 export function decide(input: ReconcileInput): ReconcileAction {
@@ -95,6 +101,7 @@ export function decide(input: ReconcileInput): ReconcileAction {
 	if (!diskTouched) return "write-doc";
 	const docMoved = lastSyncedHash === undefined || input.docHash !== lastSyncedHash;
 	if (!docMoved && input.writable) return "apply-disk";
+	if (input.writable && input.hasBase && lastSyncedHash !== undefined) return "merged";
 	return "conflict";
 }
 
@@ -105,7 +112,10 @@ export interface ReconcileNote {
 	readonly synced: boolean;
 	readonly readonly: boolean;
 	getLastSyncedHash(): Promise<string | undefined>;
-	setLastSyncedHash(hash: string): Promise<void>;
+	/** The text of `getLastSyncedHash`, if this device kept it (may be stale: check its hash). */
+	getLastSyncedText(): Promise<string | undefined>;
+	/** Records the text disk and doc now agree on, and its hash. */
+	setLastSynced(hash: string, text: string): Promise<void>;
 }
 
 export interface ReconcileDeps {
@@ -143,7 +153,7 @@ export async function reconcileNote(
 		textHash(doc),
 		note.getLastSyncedHash(),
 	]);
-	const action = decide({
+	const input: ReconcileInput = {
 		disk,
 		doc,
 		enrolled: isEnrolled(note.ydoc),
@@ -152,7 +162,24 @@ export async function reconcileNote(
 		lastSyncedHash,
 		canEnroll: note.synced && !note.readonly,
 		writable: !note.readonly,
-	});
+		hasBase: false,
+	};
+	let action = decide(input);
+	// The base is read (and hashed) only when a merge could use it.
+	let base: string | undefined;
+	if (action === "conflict" && input.writable && lastSyncedHash !== undefined) {
+		const stored = await note.getLastSyncedText();
+		if (stored !== undefined && (await textHash(stored)) === lastSyncedHash) {
+			base = stored;
+			action = decide({ ...input, hasBase: true });
+		}
+	}
+
+	if (action === "merged") {
+		const merged = await mergeNote(note, path, deps, raw as string, disk as string, doc, base);
+		if (merged) return merged;
+		action = "conflict";
+	}
 
 	switch (action) {
 		case "too-large":
@@ -163,20 +190,20 @@ export async function reconcileNote(
 			Y.applyUpdate(note.ydoc, enrollmentUpdate(disk as string), ENROLL_ORIGIN);
 			// Another device may have enrolled different text first; the doc then holds both, and
 			// the next reconcile writes that to disk (the disk text is inside it, nothing lost).
-			await note.setLastSyncedHash(diskHash as string);
+			await note.setLastSynced(diskHash as string, disk as string);
 			return { action };
 		case "in-sync":
-			if (diskHash !== lastSyncedHash) await note.setLastSyncedHash(diskHash as string);
+			if (diskHash !== lastSyncedHash) await note.setLastSynced(diskHash as string, disk as string);
 			return { action };
 		case "apply-disk":
 			applyText(note.ytext, disk as string, DISK_ORIGIN);
-			await note.setLastSyncedHash(diskHash as string);
+			await note.setLastSynced(diskHash as string, disk as string);
 			return { action };
 		case "write-doc": {
 			const result = await deps.writer.write(path, doc, raw as string);
 			if (result === "changed") return { action, retry: true };
 			if (result === "missing") return { action: "missing" };
-			await note.setLastSyncedHash(docHash);
+			await note.setLastSynced(docHash, doc);
 			return { action };
 		}
 		case "conflict": {
@@ -189,11 +216,41 @@ export async function reconcileNote(
 			);
 			const result = await deps.writer.write(path, doc, raw as string);
 			if (result === "changed") return { action, copy, retry: true };
-			if (result !== "missing") await note.setLastSyncedHash(docHash);
+			if (result !== "missing") await note.setLastSynced(docHash, doc);
 			deps.notify?.(
 				`TeamSync: ${path} changed here and on the server. The server version is kept; your version is saved as ${copy}.`,
 			);
 			return { action, copy };
 		}
 	}
+}
+
+/**
+ * The `merged` action: a clean 3-way merge of the disk text (ours) and the doc (theirs) against
+ * the text they last agreed on goes into the doc, then onto the disk. Returns null when the merge
+ * is not clean, so the caller keeps the disk text in a local copy instead.
+ */
+async function mergeNote(
+	note: ReconcileNote,
+	path: string,
+	deps: ReconcileDeps,
+	raw: string,
+	disk: string,
+	doc: string,
+	base: string | undefined,
+): Promise<ReconcileResult | null> {
+	if (base === undefined) return null;
+	const merge = merge3(base, disk, doc);
+	if (!merge.ok) return null;
+	// A remote update that arrived since `doc` was read would be reverted by `applyText`.
+	if (note.ytext.toString() !== doc) return { action: "merged", retry: true };
+	applyText(note.ytext, merge.text, DISK_ORIGIN);
+	// The doc now holds the disk text's edits: the disk text is the last text both agree on, so a
+	// disk edit racing the write below is merged against it next time, not against the old base.
+	await note.setLastSynced(await textHash(disk), disk);
+	const result = await deps.writer.write(path, merge.text, raw);
+	if (result === "changed") return { action: "merged", retry: true };
+	if (result === "missing") return { action: "missing" };
+	await note.setLastSynced(await textHash(merge.text), merge.text);
+	return { action: "merged" };
 }

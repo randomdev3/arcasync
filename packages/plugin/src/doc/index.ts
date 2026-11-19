@@ -32,7 +32,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 		storage: window.localStorage,
 		keyPrefix: `teamsync:${session.vaultId}:${session.workspaceId}`,
 	});
-	const { warmDocs, bgConcurrency, maxMdBytes } = limits();
+	const { warmDocs, bgConcurrency, maxMdBytes, maxBaseBytes } = limits();
 	const docs = new DocManager({
 		note: {
 			vaultId: session.vaultId,
@@ -40,6 +40,7 @@ export function startNoteDocs(session: WorkspaceSession): () => void {
 			open: (name, ydoc, awareness) => connections.openDoc(name, ydoc, awareness),
 			isOffline,
 			onConnectionChange: (listener) => connections.onStateChange(() => listener()),
+			maxBaseBytes,
 		},
 		reconcile: {
 			writer,
