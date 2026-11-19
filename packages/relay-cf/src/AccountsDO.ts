@@ -8,7 +8,9 @@ import { DurableObject } from "cloudflare:workers";
 import type {
 	AuditResponse,
 	BootstrapResponse,
+	DeviceCodeResponse,
 	DeviceInfo,
+	DeviceLookupResponse,
 	InviteAcceptRequest,
 	InviteCreated,
 	InviteCreateRequest,
@@ -21,9 +23,16 @@ import type {
 	WorkspaceSummary,
 	WorkspacesResponse,
 } from "@teamsync/shared";
-import { WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
+import { DEVICE_CODE_INTERVAL_S, DEVICE_CODE_TTL_S, WS_TOKEN_TTL_SECONDS } from "@teamsync/shared";
 import type { z } from "zod";
-import { constantTimeEqual, hashSecret, newOpaqueToken, sha256 } from "./accounts/tokens";
+import {
+	constantTimeEqual,
+	hashSecret,
+	newOpaqueToken,
+	newUserCode,
+	normalizeUserCode,
+	sha256,
+} from "./accounts/tokens";
 import type { Env } from "./env";
 import { signWsToken } from "./jwt";
 
@@ -32,6 +41,7 @@ const DEV_WORKSPACE_SLUG = "dev";
 const BOOTSTRAP_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 const MIN_BOOTSTRAP_TOKEN_LENGTH = 32;
 const ROLE_RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
+const DEVICE_LOOKUPS_PER_MINUTE = 5;
 
 export interface ApiError {
 	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 429 | 503;
@@ -104,6 +114,15 @@ interface InviteRow extends Record<string, SqlStorageValue> {
 	created_by: string | null;
 }
 
+interface DeviceCodeRow extends Record<string, SqlStorageValue> {
+	id: string;
+	user_code: string;
+	device: string;
+	status: string;
+	user_id: string | null;
+	expires_at: number;
+}
+
 interface SessionRow extends Record<string, SqlStorageValue> {
 	session_id: string;
 	user_id: string;
@@ -127,6 +146,12 @@ function toApiUser(row: UserRow): User {
 
 export class AccountsDO extends DurableObject<Env> {
 	private readonly sql: SqlStorage;
+	/** RPC calls since this wake (dev readout for the `me` cache; `debug*` calls not counted). */
+	private calls = 0;
+	/** Device-code id → last accepted poll (ms). Memory only: polls never write rows. */
+	private readonly lastPoll = new Map<string, number>();
+	/** Session id → recent device lookups (ms), for the per-minute limit. */
+	private readonly lookups = new Map<string, number[]>();
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -353,6 +378,7 @@ export class AccountsDO extends DurableObject<Env> {
 		role?: Role,
 		workspace?: string,
 	): Promise<Result<SessionResponse>> {
+		this.calls += 1;
 		if (this.env.TEAMSYNC_DEV_OPEN_LOGIN !== "1") {
 			return fail(403, "forbidden", "Dev login is disabled");
 		}
@@ -409,6 +435,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	async me(token: string | null): Promise<Result<z.infer<typeof MeResponse>>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user, row } = s.value;
@@ -423,6 +450,7 @@ export class AccountsDO extends DurableObject<Env> {
 		token: string | null,
 		workspaceId: string,
 	): Promise<Result<{ token: string; expiresAt: number }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user, row } = s.value;
@@ -444,6 +472,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	async logout(token: string | null): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		this.sql.exec(
@@ -455,6 +484,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	async workspaces(token: string | null): Promise<Result<{ workspaces: WorkspaceSummary[] }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		return ok({ workspaces: this.workspacesFor(s.value.user.id) });
@@ -468,6 +498,7 @@ export class AccountsDO extends DurableObject<Env> {
 		workspaceName: string,
 		publicUrl: string,
 	): Promise<Result<BootstrapResponse>> {
+		this.calls += 1;
 		const expected = this.env.TEAMSYNC_BOOTSTRAP_TOKEN ?? "";
 		if (!expected) return fail(404, "not_found", "Bootstrap is not enabled");
 		if (
@@ -515,6 +546,7 @@ export class AccountsDO extends DurableObject<Env> {
 		req: InviteCreateRequest,
 		publicUrl: string,
 	): Promise<Result<InviteCreated>> {
+		this.calls += 1;
 		const inviteToken = newOpaqueToken();
 		const inviteHash = await this.hashToken(inviteToken);
 		const s = await this.session(token);
@@ -549,6 +581,7 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/** Never returns tokens (only their hashes are stored). */
 	async listInvites(token: string | null, workspaceId: string): Promise<Result<InvitesResponse>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		if (!this.canManage(s.value.user, workspaceId)) {
@@ -579,6 +612,7 @@ export class AccountsDO extends DurableObject<Env> {
 		workspaceId: string,
 		inviteId: string,
 	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -600,6 +634,7 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/** Unauthenticated: a new user joins through an invite and gets a session. */
 	async acceptInvite(req: InviteAcceptRequest): Promise<Result<SessionResponse>> {
+		this.calls += 1;
 		const inviteHash = await this.hashToken(req.token);
 		const sessionToken = newOpaqueToken();
 		const sessionHash = await this.hashToken(sessionToken);
@@ -643,6 +678,7 @@ export class AccountsDO extends DurableObject<Env> {
 		token: string | null,
 		inviteToken: string,
 	): Promise<Result<WorkspacesResponse>> {
+		this.calls += 1;
 		const inviteHash = await this.hashToken(inviteToken);
 		const s = await this.session(token);
 		if (!s.ok) return s;
@@ -675,6 +711,7 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/** Admin only; the creator owns the new workspace. */
 	async createWorkspace(token: string | null, name: string): Promise<Result<WorkspaceSummary>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -692,6 +729,7 @@ export class AccountsDO extends DurableObject<Env> {
 	// --- P2 members, admin, audit ---
 
 	async members(token: string | null, workspaceId: string): Promise<Result<MembersResponse>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -715,6 +753,7 @@ export class AccountsDO extends DurableObject<Env> {
 		userId: string,
 		role: Role,
 	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -742,6 +781,7 @@ export class AccountsDO extends DurableObject<Env> {
 		workspaceId: string,
 		userId: string,
 	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -765,6 +805,7 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/** Admin only: blocks sign-in, revokes every session and closes the user's sockets. */
 	async disableUser(token: string | null, userId: string): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -792,6 +833,7 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/** Admin only. Sessions revoked by the disable stay revoked; the user signs in again. */
 	async enableUser(token: string | null, userId: string): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
@@ -807,6 +849,7 @@ export class AccountsDO extends DurableObject<Env> {
 		token: string | null,
 		{ before, limit }: { before?: number; limit: number },
 	): Promise<Result<AuditResponse>> {
+		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		if (s.value.user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
@@ -836,7 +879,145 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ entries, next: entries.length === limit && last ? last.id : null });
 	}
 
+	// --- P2 device-code sign-in (D2) ---
+
+	private deviceCodeTtlS(): number {
+		const override = Number(this.env.TEAMSYNC_DEVICE_CODE_TTL_S);
+		return Number.isInteger(override) && override > 0 ? override : DEVICE_CODE_TTL_S;
+	}
+
+	/** Unauthenticated: a new device asks for a code that a signed-in device approves. */
+	async deviceStart(device: DeviceInfo): Promise<Result<DeviceCodeResponse>> {
+		this.calls += 1;
+		const deviceCode = newOpaqueToken();
+		const codeHash = await this.hashToken(deviceCode);
+		const now = Date.now();
+		const ttl = this.deviceCodeTtlS();
+		this.sql.exec("DELETE FROM device_codes WHERE expires_at <= ?", now);
+		let userCode = newUserCode();
+		while (this.sql.exec("SELECT 1 FROM device_codes WHERE user_code = ?", userCode).toArray()[0]) {
+			userCode = newUserCode();
+		}
+		this.sql.exec(
+			`INSERT INTO device_codes (id, code_hash, user_code, device, expires_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			crypto.randomUUID(),
+			codeHash,
+			userCode,
+			JSON.stringify(device),
+			now + ttl * 1000,
+			now,
+		);
+		return ok({
+			deviceCode,
+			userCode,
+			verificationUri: `obsidian://teamsync?approve=${userCode}`,
+			interval: DEVICE_CODE_INTERVAL_S,
+			expiresIn: ttl,
+		});
+	}
+
+	/**
+	 * RFC 8628-style poll: 400 `authorization_pending` / `slow_down` / `access_denied` /
+	 * `expired_token`, or the new device's session once approved (then the code is spent).
+	 */
+	async devicePoll(deviceCode: string): Promise<Result<SessionResponse>> {
+		this.calls += 1;
+		const codeHash = await this.hashToken(deviceCode);
+		const sessionToken = newOpaqueToken();
+		const sessionHash = await this.hashToken(sessionToken);
+		const now = Date.now();
+		const row = this.sql
+			.exec<DeviceCodeRow>("SELECT * FROM device_codes WHERE code_hash = ?", codeHash)
+			.toArray()[0];
+		if (!row || row.status === "used" || row.expires_at <= now) {
+			if (row) this.lastPoll.delete(row.id);
+			return fail(400, "expired_token", "The device code expired; start again");
+		}
+		const last = this.lastPoll.get(row.id);
+		if (last !== undefined && now - last < DEVICE_CODE_INTERVAL_S * 1000) {
+			return fail(400, "slow_down", `Poll at most every ${DEVICE_CODE_INTERVAL_S} s`);
+		}
+		this.lastPoll.set(row.id, now);
+		if (row.status === "denied") return fail(400, "access_denied", "The sign-in was denied");
+		if (row.status !== "approved" || !row.user_id) {
+			return fail(400, "authorization_pending", "Waiting for approval");
+		}
+		const user = this.userById(row.user_id);
+		if (!user || user.disabled_at) return fail(400, "access_denied", "The sign-in was denied");
+		const device = JSON.parse(row.device) as DeviceInfo;
+		this.insertSession(user.id, this.deviceFor(user.id, device), sessionHash);
+		this.sql.exec("UPDATE device_codes SET status = 'used' WHERE id = ?", row.id);
+		this.lastPoll.delete(row.id);
+		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(user.id) });
+	}
+
+	/** A pending, unexpired code by its user code, or null. */
+	private pendingCode(userCode: string): DeviceCodeRow | null {
+		const code = normalizeUserCode(userCode);
+		if (!code) return null;
+		const row = this.sql
+			.exec<DeviceCodeRow>("SELECT * FROM device_codes WHERE user_code = ?", code)
+			.toArray()[0];
+		return row && row.status === "pending" && row.expires_at > Date.now() ? row : null;
+	}
+
+	/** Shows the approver which device asks; ≤ 5 per minute per session. */
+	async deviceLookup(
+		token: string | null,
+		userCode: string,
+	): Promise<Result<DeviceLookupResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const sessionId = s.value.row.session_id;
+		const now = Date.now();
+		const recent = (this.lookups.get(sessionId) ?? []).filter((t) => now - t < 60_000);
+		if (recent.length >= DEVICE_LOOKUPS_PER_MINUTE) {
+			this.lookups.set(sessionId, recent);
+			return fail(429, "rate_limited", "Too many lookups; wait a minute");
+		}
+		recent.push(now);
+		this.lookups.set(sessionId, recent);
+		const row = this.pendingCode(userCode);
+		if (!row) return fail(404, "not_found", "Unknown or expired code");
+		const device = JSON.parse(row.device) as DeviceInfo;
+		return ok({
+			device: { name: device.name, platform: device.platform },
+			expiresAt: row.expires_at,
+		});
+	}
+
+	/** Approve (the device signs in as the caller) or deny a pending code. */
+	async deviceApprove(
+		token: string | null,
+		userCode: string,
+		approve: boolean,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const row = this.pendingCode(userCode);
+		if (!row) return fail(404, "not_found", "Unknown or expired code");
+		this.sql.exec(
+			"UPDATE device_codes SET status = ?, user_id = ? WHERE id = ?",
+			approve ? "approved" : "denied",
+			approve ? user.id : null,
+			row.id,
+		);
+		const device = JSON.parse(row.device) as DeviceInfo;
+		this.audit(user.id, approve ? "device.approve" : "device.deny", row.id, {
+			device: { name: device.name, platform: device.platform },
+		});
+		return ok({ ok: true });
+	}
+
 	// --- dev-only (worker gates these on TEAMSYNC_DEBUG_STATS) ---
+
+	async debugAccounts(): Promise<{ calls: number }> {
+		return { calls: this.calls };
+	}
 
 	async debugExpireInvite(id: string): Promise<{ ok: boolean }> {
 		const changed = this.sql

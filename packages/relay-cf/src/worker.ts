@@ -6,11 +6,16 @@ import {
 	API_PREFIX,
 	BootstrapRequest,
 	CHUNK_BYTES,
+	DeviceApproveRequest,
+	DeviceCodePollRequest,
+	DeviceCodeStartRequest,
 	DevLoginRequest,
 	InviteAcceptRequest,
 	InviteCreateRequest,
 	InviteRedeemRequest,
+	ME_CACHE_TTL_MS,
 	MemberUpdateRequest,
+	type MeResponse,
 	PRESENCE_RENEWAL_MS,
 	parseDocName,
 	type ServerInfo,
@@ -20,9 +25,11 @@ import {
 } from "@teamsync/shared";
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
+import type { z } from "zod";
 import type { ApiError, Result } from "./AccountsDO";
 import { configError } from "./config";
 import type { Env } from "./env";
+import { cachedResult, createMeCache } from "./meCache";
 
 export { AccountsDO } from "./AccountsDO";
 export { WorkspaceRelay } from "./WorkspaceRelay";
@@ -111,6 +118,8 @@ const bearer = (c: Ctx) => bearerToken(c.req.header("authorization"));
 const publicUrl = (c: Ctx) => c.env.TEAMSYNC_PUBLIC_URL || new URL(c.req.url).origin;
 
 const accounts = (env: Env) => env.ACCOUNTS.getByName(ACCOUNTS_NAME);
+/** Per isolate (D10); dropped for the caller on logout and invite redeem. */
+const meCache = createMeCache<z.infer<typeof MeResponse>>({ ttlMs: ME_CACHE_TTL_MS, max: 256 });
 const api = new Hono<{ Bindings: Env }>();
 
 api.get("/health", (c) => c.json({ ok: true, version: RELAY_VERSION }));
@@ -126,6 +135,7 @@ api.get("/server-info", (c) =>
 			excalidraw: false,
 			textKeepalive: true,
 			presenceRenewalMs: PRESENCE_RENEWAL_MS,
+			accounts: true,
 		},
 		limits: { maxFileBytes: Number(c.env.TEAMSYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
 	} satisfies ServerInfo),
@@ -138,9 +148,11 @@ api.post("/auth/dev-login", async (c) => {
 	return reply(c, await accounts(c.env).devLogin(name, device, role, workspace));
 });
 
-api.get("/auth/me", async (c) =>
-	reply(c, await accounts(c.env).me(bearerToken(c.req.header("authorization")))),
-);
+api.get("/auth/me", async (c) => {
+	const token = bearer(c);
+	if (!token) return reply(c, await accounts(c.env).me(null));
+	return reply(c, await cachedResult(meCache, token, () => accounts(c.env).me(token)));
+});
 
 api.post("/auth/ws-token", async (c) => {
 	const token = bearerToken(c.req.header("authorization"));
@@ -150,9 +162,11 @@ api.post("/auth/ws-token", async (c) => {
 	return reply(c, await accounts(c.env).wsToken(token, body.data.workspaceId));
 });
 
-api.post("/auth/logout", async (c) =>
-	reply(c, await accounts(c.env).logout(bearerToken(c.req.header("authorization")))),
-);
+api.post("/auth/logout", async (c) => {
+	const token = bearer(c);
+	if (token) meCache.drop(token);
+	return reply(c, await accounts(c.env).logout(token));
+});
 
 api.get("/workspaces", async (c) =>
 	reply(c, await accounts(c.env).workspaces(bearerToken(c.req.header("authorization")))),
@@ -173,7 +187,9 @@ api.post("/auth/invite/accept", async (c) => {
 api.post("/invites/redeem", async (c) => {
 	const body = await parseBody(c, InviteRedeemRequest);
 	if (!body) return badRequest(c);
-	return reply(c, await accounts(c.env).redeemInvite(bearer(c), body.token));
+	const token = bearer(c);
+	if (token) meCache.drop(token);
+	return reply(c, await accounts(c.env).redeemInvite(token, body.token));
 });
 
 api.post("/workspaces", async (c) => {
@@ -242,6 +258,34 @@ api.get("/admin/audit", async (c) => {
 		return badRequest(c);
 	}
 	return reply(c, await accounts(c.env).auditLog(bearer(c), { before: beforeN, limit: limitN }));
+});
+
+api.post("/auth/device/start", async (c) => {
+	const body = await parseBody(c, DeviceCodeStartRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).deviceStart(body.device));
+});
+
+api.post("/auth/device/poll", async (c) => {
+	const body = await parseBody(c, DeviceCodePollRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).devicePoll(body.deviceCode));
+});
+
+api.get("/auth/device/lookup", async (c) =>
+	reply(c, await accounts(c.env).deviceLookup(bearer(c), c.req.query("userCode") ?? "")),
+);
+
+api.post("/auth/device/approve", async (c) => {
+	const body = await parseBody(c, DeviceApproveRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).deviceApprove(bearer(c), body.userCode, body.approve));
+});
+
+/** Dev-only: AccountsDO RPC calls since its last wake (the `me` cache test reads it). */
+api.get("/debug/accounts", async (c) => {
+	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	return c.json(await accounts(c.env).debugAccounts());
 });
 
 /** Dev-only: expire an invite now, so tests reach 410 `invite_expired` without waiting. */
