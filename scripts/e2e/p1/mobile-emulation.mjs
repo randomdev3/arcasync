@@ -23,6 +23,7 @@ const MOBILE_LIMITS = {
 	bgConcurrency: 1,
 	maxMdBytes: 2 * 1024 * 1024,
 	maxBaseBytes: 256 * 1024,
+	maxBinaryBytes: 50 * 1024 * 1024,
 };
 /** Over the 2 MiB mobile limit. */
 const BIG_BYTES = 2.5 * 1024 * 1024;

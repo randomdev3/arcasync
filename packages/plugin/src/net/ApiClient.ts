@@ -42,6 +42,26 @@ export class NetworkError extends Error {
 	}
 }
 
+/** An error response as `ApiRequestError`, with the relay's `{error: {code, message}}` when present. */
+export function toApiError(response: RequestUrlResponse): ApiRequestError {
+	let body: unknown;
+	try {
+		body = response.json;
+	} catch {
+		body = undefined;
+	}
+	const parsed = ApiErrorSchema.safeParse(body);
+	if (parsed.success) {
+		return new ApiRequestError(
+			response.status,
+			parsed.data.error.code,
+			parsed.data.error.message,
+			parsed.data.error.details,
+		);
+	}
+	return new ApiRequestError(response.status, "http_error", `HTTP ${response.status}`);
+}
+
 /** `@teamsync/shared` exports these as schemas only; derive the types here. */
 export type MeResult = z.infer<typeof MeResponse>;
 export type WsTokenResult = z.infer<typeof WsTokenResponse>;
@@ -248,7 +268,7 @@ export class ApiClient {
 			throw new NetworkError(`Cannot reach ${url}`, { cause: error });
 		}
 
-		if (response.status >= 400) throw this.toApiError(response);
+		if (response.status >= 400) throw toApiError(response);
 
 		const parsed = options.schema.safeParse(this.readJson(response, url));
 		if (!parsed.success) {
@@ -263,24 +283,5 @@ export class ApiClient {
 		} catch (error) {
 			throw new NetworkError(`Non-JSON response from ${url}`, { cause: error });
 		}
-	}
-
-	private toApiError(response: RequestUrlResponse): ApiRequestError {
-		let body: unknown;
-		try {
-			body = response.json;
-		} catch {
-			body = undefined;
-		}
-		const parsed = ApiErrorSchema.safeParse(body);
-		if (parsed.success) {
-			return new ApiRequestError(
-				response.status,
-				parsed.data.error.code,
-				parsed.data.error.message,
-				parsed.data.error.details,
-			);
-		}
-		return new ApiRequestError(response.status, "http_error", `HTTP ${response.status}`);
 	}
 }

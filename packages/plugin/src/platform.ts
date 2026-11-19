@@ -9,15 +9,24 @@ export interface PlatformLimits {
 	maxMdBytes: number;
 	/** Larger synced texts are not kept as the base of a 3-way merge. */
 	maxBaseBytes: number;
+	/** Larger attachments are not synced (the server's `maxFileBytes` caps it as well). */
+	maxBinaryBytes: number;
 }
 
 export function limits(): PlatformLimits {
 	return Platform.isMobile
-		? { warmDocs: 5, bgConcurrency: 1, maxMdBytes: 2 * 1024 * 1024, maxBaseBytes: 256 * 1024 }
+		? {
+				warmDocs: 5,
+				bgConcurrency: 1,
+				maxMdBytes: 2 * 1024 * 1024,
+				maxBaseBytes: 256 * 1024,
+				maxBinaryBytes: 50 * 1024 * 1024,
+			}
 		: {
 				warmDocs: 20,
 				bgConcurrency: 3,
 				maxMdBytes: Number.POSITIVE_INFINITY,
 				maxBaseBytes: 1024 * 1024,
+				maxBinaryBytes: Number.POSITIVE_INFINITY,
 			};
 }

@@ -4,6 +4,7 @@ import {
 	foldersOverlap,
 	isSyncedNote,
 	isUnder,
+	syncKind,
 	toVault,
 	toWs,
 } from "../workspace/paths";
@@ -76,5 +77,15 @@ describe("paths", () => {
 		expect(isSyncedNote("a.excalidraw.md")).toBe(false);
 		expect(isSyncedNote("a.canvas")).toBe(false);
 		expect(isSyncedNote("a.png")).toBe(false);
+	});
+
+	it("syncKind: notes, binaries, and null for kinds synced later (P4/P5)", () => {
+		expect(syncKind("a.md")).toBe("md");
+		expect(syncKind("img/a.PNG")).toBe("binary");
+		expect(syncKind("doc.pdf")).toBe("binary");
+		expect(syncKind("no-extension")).toBe("binary");
+		expect(syncKind("a.excalidraw.md")).toBeNull();
+		expect(syncKind("a.canvas")).toBeNull();
+		expect(syncKind("a.base")).toBeNull();
 	});
 });

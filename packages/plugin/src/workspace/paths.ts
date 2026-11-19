@@ -48,7 +48,16 @@ export function toVault(root: string, wsPath: string): string | null {
 	return `${root}/${wsPath}`;
 }
 
-/** Workspace paths synced in P1: markdown notes only (`.excalidraw.md` is its own kind). */
+/**
+ * How a workspace path syncs: `md` through a note doc, `binary` through R2 chunks (P2-11), or
+ * null for kinds not synced yet (canvas, base, config, `.excalidraw.md`).
+ */
+export function syncKind(wsPath: string): "md" | "binary" | null {
+	const kind = kindForPath(wsPath);
+	return kind === "md" || kind === "binary" ? kind : null;
+}
+
+/** Workspace paths synced as notes: markdown only (`.excalidraw.md` is its own kind). */
 export function isSyncedNote(wsPath: string): boolean {
-	return kindForPath(wsPath) === "md";
+	return syncKind(wsPath) === "md";
 }
