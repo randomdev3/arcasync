@@ -144,7 +144,13 @@ export class VaultHandle {
 		const env = { ...process.env, ...prepareProfile(this.profile, OBSIDIAN_BIN) };
 		const child = spawn(
 			OBSIDIAN_BIN,
-			[`--user-data-dir=${this.profile}`, `--remote-debugging-port=${this.port}`],
+			[
+				`--user-data-dir=${this.profile}`,
+				`--remote-debugging-port=${this.port}`,
+				// Screenshots otherwise come back in the display's colour space (P3 on Macs), which
+				// moves saturated colours like #1be7ff past the pixel checks' tolerance.
+				"--force-color-profile=srgb",
+			],
 			{ stdio: "ignore", detached: false, env },
 		);
 		this.child = child;
