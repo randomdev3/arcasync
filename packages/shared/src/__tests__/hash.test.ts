@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isIgnoredPath, kindForPath } from "../fileKinds.js";
-import { chunkFile, sha256Hex } from "../hash.js";
+import { chunkFile, fileHash, sha256Hex } from "../hash.js";
 
 describe("hash", () => {
 	it("sha256 of empty string", async () => {
@@ -13,6 +13,14 @@ describe("hash", () => {
 		const chunks = await chunkFile(data, 4);
 		expect(chunks.map((c) => c.size)).toEqual([4, 4, 2]);
 		expect(await chunkFile(new Uint8Array(0))).toHaveLength(1);
+	});
+	it("fileHash is stable and order-sensitive", async () => {
+		const a = "a".repeat(64);
+		const b = "b".repeat(64);
+		expect(await fileHash([a, b])).toBe(await fileHash([a, b]));
+		expect(await fileHash([a, b])).toBe(await sha256Hex(`${a},${b}`));
+		expect(await fileHash([a, b])).not.toBe(await fileHash([b, a]));
+		expect(await fileHash([a])).not.toBe(await fileHash([a, a]));
 	});
 });
 

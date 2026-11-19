@@ -35,3 +35,8 @@ export async function chunkFile(data: Uint8Array, chunkBytes = CHUNK_BYTES): Pro
 	}
 	return chunks;
 }
+
+/** Content hash of a binary file: sha256 of its chunk hashes joined by "," (no second full-file pass). */
+export function fileHash(chunkShas: string[]): Promise<string> {
+	return sha256Hex(chunkShas.join(","));
+}

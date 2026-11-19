@@ -1,4 +1,5 @@
 export * from "./awareness.js";
+export * from "./clone.js";
 export * from "./constants.js";
 export * from "./docNames.js";
 export * from "./fileKinds.js";
