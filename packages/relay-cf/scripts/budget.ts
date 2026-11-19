@@ -7,7 +7,8 @@
  * Measures the unit costs with real providers and the plugin's v2 options (flushDelay, text
  * keepalive, presence policy, cursor awareness) from `/api/debug/stats` deltas, against a fresh
  * `wrangler dev --env dev` or `--url`. Multiplies them by the activity in `budget-model.ts`, prints
- * scenarios A and B, and exits 1 when any free cap exceeds 50%. `--baseline` also fails when a
+ * scenarios A, B and C, and exits 1 when any free cap exceeds 50% in any of them. Units without a
+ * measurement yet (the P2 ones until P2-13) use the analytic `PLAN_UNITS`. `--baseline` also fails when a
  * unit differs by more than 25% from a saved run (R-9: deployment vs local). `--live` then runs
  * simulated clients against the relay and compares the measured deltas with the model.
  */
@@ -37,12 +38,11 @@ import {
 	BILLING,
 	BUDGET_FRACTION,
 	type Cap,
-	components,
 	doRequests,
 	FREE_CAPS,
+	gate,
 	PLAN_UNITS,
 	TEAM,
-	totals,
 	type Units,
 } from "./budget-model.ts";
 import { startRelayDev } from "./dev-server.mjs";
@@ -229,6 +229,9 @@ async function compaction(updates: number): Promise<RelayStats> {
 	});
 }
 
+/** Units `measureUnits` measures; the rest come from `PLAN_UNITS`. */
+const MEASURED = new Set<keyof Units>();
+
 async function measureUnits(): Promise<Units> {
 	const plain = await typing(false);
 	const withCursor = await typing(true);
@@ -241,7 +244,7 @@ async function measureUnits(): Promise<Units> {
 	if (connect.connects !== 1) throw new Error(`reconnect phase saw ${connect.connects} connects`);
 	const updates = 1200;
 	const compact = await compaction(updates);
-	return {
+	const measured = {
 		updateMsgsPerKey: plain.msgs_in / KEYS,
 		awarenessMsgsPerKey: Math.max(0, withCursor.msgs_in - plain.msgs_in) / KEYS,
 		rowsPerKey: withCursor.app_rows_written / KEYS,
@@ -254,7 +257,9 @@ async function measureUnits(): Promise<Units> {
 		framesPerConnect: connect.msgs_in,
 		compactionRowsPerLogRow: (compact.app_rows_written - updates) / updates,
 		compactionInsertsPerLogRow: compact.compactions / updates,
-	};
+	} satisfies Partial<Units>;
+	for (const key of Object.keys(measured) as Array<keyof Units>) MEASURED.add(key);
+	return { ...PLAN_UNITS, ...measured };
 }
 
 /** Simulated team against the relay: compares measured deltas with the model's prediction. */
@@ -312,37 +317,51 @@ const pct = (value: number, cap: Cap) => (100 * value) / FREE_CAPS[cap];
 const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
 
 function report(units: Units): boolean {
-	console.log("## Free-tier budget gate (R-8)\n");
+	console.log("## Free-tier budget gate (R-8, P2)\n");
 	console.log(
 		`Billing: MSG_RATIO=${BILLING.MSG_RATIO}, PINGS_BILLED=${BILLING.PINGS_BILLED}, ` +
-			`CLOSES_BILLED=${BILLING.CLOSES_BILLED}, DELETE_ROWS_BILLED=${BILLING.DELETE_ROWS_BILLED}. ` +
+			`CLOSES_BILLED=${BILLING.CLOSES_BILLED}, DELETE_ROWS_BILLED=${BILLING.DELETE_ROWS_BILLED}, ` +
+			`GB_S_MODEL=${BILLING.GB_S_MODEL} (${BILLING.ACTIVE_SEC_PER_REQUEST * 1000} ms per request). ` +
 			`Team: ${TEAM.users} users, ${fmt(TEAM.keysPerUserDay)} keys/user/day.\n`,
 	);
-	console.log("| Unit (measured) | Measured | Plan §2.B |\n|---|---|---|");
+	console.log("| Unit | This run | Plan |\n|---|---|---|");
 	for (const key of Object.keys(units) as Array<keyof Units>) {
-		console.log(`| ${key} | ${units[key].toFixed(3)} | ${PLAN_UNITS[key]} |`);
+		const value = MEASURED.has(key) ? units[key].toFixed(3) : "(analytic)";
+		console.log(`| ${key} | ${value} | ${PLAN_UNITS[key]} |`);
 	}
 
-	const list = components(units);
-	console.log("\n| Component (per day) | DO requests | Rows written |\n|---|---|---|");
+	const results = gate(units);
+	// C's list is B's plus the extra-workspace rows.
+	const list = results.find((r) => r.name === "C")?.list ?? [];
+	console.log(
+		"\n| Component (per day) | DO requests | Rows written | Rows read | Worker req | R2 A | R2 B |",
+	);
+	console.log("|---|---|---|---|---|---|---|");
 	for (const c of list) {
-		console.log(`| ${c.name} | ${fmt(doRequests(c))} | ${fmt(c.rowsWritten ?? 0)} |`);
-	}
-
-	const a = totals(list, "A");
-	const b = totals(list, "B");
-	let ok = true;
-	console.log(`\n| Cap | Free cap | Scenario A | Scenario B | ≤ ${BUDGET_FRACTION * 100}% |`);
-	console.log("|---|---|---|---|---|");
-	for (const cap of Object.keys(FREE_CAPS) as Cap[]) {
-		const pass = Math.max(pct(a[cap], cap), pct(b[cap], cap)) <= BUDGET_FRACTION * 100;
-		ok &&= pass;
 		console.log(
-			`| ${cap} | ${fmt(FREE_CAPS[cap])} | ${fmt(a[cap])} (${pct(a[cap], cap).toFixed(1)}%) | ` +
-				`${fmt(b[cap])} (${pct(b[cap], cap).toFixed(1)}%) | ${pass ? "PASS" : "FAIL"} |`,
+			`| ${c.name} | ${fmt(doRequests(c))} | ${fmt(c.rowsWritten ?? 0)} | ${fmt(c.rowsRead ?? 0)} | ` +
+				`${fmt(c.workerRequests ?? 0)} | ${fmt(c.r2ClassA ?? 0)} | ${fmt(c.r2ClassB ?? 0)} |`,
 		);
 	}
-	return ok;
+
+	const cell = (value: number, cap: Cap) => `${fmt(value)} (${pct(value, cap).toFixed(1)}%)`;
+	console.log(
+		`\n| Cap | Free cap | ${results.map((r) => `Scenario ${r.name}`).join(" | ")} | ≤ ${BUDGET_FRACTION * 100}% |`,
+	);
+	console.log(`|---|---|${results.map(() => "---|").join("")}---|`);
+	for (const cap of Object.keys(FREE_CAPS) as Cap[]) {
+		const pass = results.every((r) => !r.over.includes(cap));
+		console.log(
+			`| ${cap} | ${fmt(FREE_CAPS[cap])} | ${results.map((r) => cell(r.usage[cap], cap)).join(" | ")} | ` +
+				`${pass ? "PASS" : "FAIL"} |`,
+		);
+	}
+	console.log(
+		`\nAwake bound (gbSeconds under the awake-window model, informational, not gated): ${results
+			.map((r) => `${r.name} ${cell(r.awakeGbSeconds, "gbSeconds")}`)
+			.join(", ")}`,
+	);
+	return results.every((r) => r.over.length === 0);
 }
 
 function compareBaseline(units: Units, file: string): boolean {
@@ -351,6 +370,8 @@ function compareBaseline(units: Units, file: string): boolean {
 	console.log(`\n| Unit | Baseline (${file}) | This run | Δ |\n|---|---|---|---|`);
 	for (const key of Object.keys(units) as Array<keyof Units>) {
 		const ref = baseline[key];
+		// Older baselines lack the P2 units, and analytic units are not measured.
+		if (typeof ref !== "number" || !MEASURED.has(key)) continue;
 		const delta = ref === 0 ? (units[key] === 0 ? 0 : 1) : (units[key] - ref) / ref;
 		// Near-zero units (compaction inserts) are noise; compare them absolutely.
 		const pass = Math.abs(delta) <= 0.25 || Math.abs(units[key] - ref) < 0.01;

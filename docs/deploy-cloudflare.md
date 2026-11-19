@@ -93,8 +93,8 @@ These are the counts the analytics report; the free-tier limits are assumed to u
 | Rows written per update | 1 | 301 updates → 605 rows, of which 301 are debug-stats rows |
 | Duration | ≈1.8 ms active per request | 10 clients × 10 min → 0.25 GB-s (the model would say ≈75) |
 
-`budget-model.ts` uses these (`PINGS_BILLED: false`). Its duration model stays far looser than the
-measurement. The whole probe (functional smoke, `budget --live`, load probe) used under 4% of the
+`budget-model.ts` uses these (`PINGS_BILLED: false`). Its gbSeconds gate uses the measured duration
+with a 10× margin (18 ms per billed request); the awake-window model is printed only as a bound. The whole probe (functional smoke, `budget --live`, load probe) used under 4% of the
 daily DO request cap and 7% of rows written. No CPU or memory limit was hit.
 
 ## Rollback

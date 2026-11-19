@@ -45,7 +45,10 @@ pnpm -F @teamsync/relay-cf budget
 It measures the unit costs (messages and rows per typed key, frames per note open, renewals,
 pings, compaction rows) against a local relay, multiplies them by the team model in
 `packages/relay-cf/scripts/budget-model.ts`, and exits non-zero if any free-plan cap goes above
-50% in either scenario. `--port` picks the relay port (default 22500).
+50% in any scenario: A (work hours), B (A plus idle hours) or C (B with two workspaces per user).
+`gbSeconds` uses the R-9 calibrated duration (billed DO requests × 18 ms × 128 MB); the older
+awake-window model is printed as an informational bound. `--port` picks the relay port (default
+22500).
 
 ## End-to-end tests in real Obsidian (macOS only)
 
