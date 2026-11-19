@@ -202,12 +202,38 @@ export default {
 		assert.equal((await leaves(bob, X)).texts[0], bobEditor, "bob's editor unchanged");
 		step("bob unmapped Second/: one session, files kept, alice's later edit does not reach him");
 
-		// Cleanup: alice unmaps too, and both close their editors.
-		await alice.eval(`await app.plugins.plugins.teamsync.removeMapping("Second"); return true;`);
-		await waitFor(async () => (await sessions(alice)).ids.length === 1, {
-			timeout: 5000,
-			label: "alice: one session after removeMapping",
-		});
+		// alice unmaps Second/ from the settings tab: one row per mapping, each with Remove.
+		await alice.eval('app.setting.open(); app.setting.openTabById("teamsync"); return true;');
+		try {
+			const rows = await waitFor(
+				() =>
+					alice.eval(`// The settings tab may live in its own window: query its container.
+						const el = app.setting.activeTab?.id === "teamsync" ? app.setting.activeTab.containerEl : null;
+						const rows = [...(el?.querySelectorAll(".teamsync-mapping") ?? [])].map((row) => ({
+							folder: row.querySelector(".teamsync-shared-folder")?.value ?? null,
+							remove: !!row.querySelector(".teamsync-mapping-remove"),
+						}));
+						return rows.length === 2 ? rows : null;`),
+				{ timeout: 5000, label: "alice settings tab shows two mapping rows" },
+			);
+			assert.deepEqual(rows, [
+				{ folder: "Shared", remove: true },
+				{ folder: "Second", remove: true },
+			]);
+			await alice.eval(`const el = app.setting.activeTab.containerEl;
+				el.querySelectorAll(".teamsync-mapping")[1].querySelector(".teamsync-mapping-remove").click();
+				return true;`);
+			await waitFor(async () => (await sessions(alice)).ids.length === 1, {
+				timeout: 5000,
+				label: "alice: one session after Remove",
+			});
+		} finally {
+			await alice.eval("app.setting.close(); return true;");
+		}
+		assert.equal(diskText(alice.path, X)?.startsWith("after hello second A"), true);
+		step("alice removes the Second/ row in settings: one session, her files kept");
+
+		// Cleanup: both close their editors.
 		for (const v of [alice, bob]) {
 			await v.eval(
 				`for (const l of app.workspace.getLeavesOfType("markdown")) l.detach(); return true;`,
