@@ -47,6 +47,10 @@
 	margin-top: var(--s5);
 }
 
+.flow .callout {
+	max-width: none;
+}
+
 .flow .lede {
 	font-size: 1.0625rem;
 	color: var(--fg-2);

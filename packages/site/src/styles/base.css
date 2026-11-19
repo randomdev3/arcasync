@@ -325,6 +325,11 @@ strong {
 	transition: color var(--t-fast) var(--ease);
 }
 
+.site-nav a:focus-visible,
+.theme-toggle:focus-visible {
+	outline-offset: 0;
+}
+
 .site-nav a:hover,
 .theme-toggle:hover,
 .site-nav a[aria-current="page"] {

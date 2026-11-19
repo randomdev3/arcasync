@@ -36,7 +36,9 @@
 	color: var(--fg-2);
 }
 
+/* The invite field opens in its own row, so the headline does not move. */
 .hero__invite {
+	grid-column: 1 / -1;
 	padding-top: var(--s4);
 	border-top: 1px solid var(--rule);
 }
@@ -50,6 +52,10 @@
 	.hero__side {
 		grid-column: 9 / -1;
 		padding-bottom: 0.5rem;
+	}
+
+	.hero__invite {
+		grid-column: 9 / -1;
 	}
 }
 
