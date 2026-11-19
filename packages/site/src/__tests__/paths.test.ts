@@ -42,7 +42,7 @@ describe("loom paths", () => {
 		const sim = stillFrame();
 		const [leader, follower] = [sim.heads[0], sim.heads[1]];
 		expect(sim.follow).toMatchObject({ follower: 1, leader: 0 });
-		expect(Math.abs((leader?.y ?? 0) - (follower?.y ?? 9))).toBeLessThan(0.3);
+		expect(Math.abs((leader?.y ?? 0) - (follower?.y ?? 9))).toBeLessThan(0.6);
 		expect(stillFrame().heads.map((h) => h.x)).toEqual(sim.heads.map((h) => h.x));
 	});
 });

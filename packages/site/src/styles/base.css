@@ -361,3 +361,10 @@ strong {
 		flex-basis: 100%;
 	}
 }
+
+/* Headings get focus programmatically (state changes) so screen readers land on them; they are
+   not controls, so no ring. Every interactive element keeps its focus outline. */
+h1[tabindex="-1"]:focus,
+h2[tabindex="-1"]:focus {
+	outline: none;
+}

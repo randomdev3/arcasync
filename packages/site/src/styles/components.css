@@ -200,8 +200,8 @@
 		to bottom,
 		transparent 0,
 		transparent 27px,
-		color-mix(in srgb, var(--rule) 70%, transparent) 27px,
-		color-mix(in srgb, var(--rule) 70%, transparent) 28px
+		color-mix(in srgb, var(--rule) 45%, transparent) 27px,
+		color-mix(in srgb, var(--rule) 45%, transparent) 28px
 	);
 	background-position: 0 var(--s4);
 }
@@ -363,6 +363,7 @@
 }
 
 .workspace-list li {
+	max-width: none;
 	display: flex;
 	justify-content: space-between;
 	gap: var(--s4);

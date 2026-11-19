@@ -26,6 +26,7 @@ import {
 import {
 	advance,
 	createSim,
+	edgeFade,
 	type Head,
 	PAGE,
 	type Sim,
@@ -38,9 +39,10 @@ import {
 } from "./paths";
 
 const THREADS = ["--t1", "--t2", "--t3", "--t4"];
-const RIBBON_WIDTH = 0.026;
-const FOG_NEAR = 5.2;
-const FOG_FAR = 9.5;
+const RIBBON_WIDTH = 0.034;
+const DISTANCE = 7.2;
+const FOG_NEAR = 6;
+const FOG_FAR = 10.5;
 
 export interface LoomOptions {
 	reducedMotion: boolean;
@@ -177,10 +179,11 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 	const scene = new Scene();
 	scene.fog = new Fog(0xffffff, FOG_NEAR, FOG_FAR);
 	const camera = new PerspectiveCamera(35, 1, 0.1, 30);
-	camera.position.set(0, 0, 6.4);
+	camera.position.set(0, 0, DISTANCE);
 
 	const page = new Group();
 	page.rotation.set(-0.62, -0.42, 0.16);
+	page.position.set(0.45, 0.05, 0);
 	scene.add(page);
 
 	const surface = surfaceMaterial(0);
@@ -205,17 +208,21 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 	const caretGeometry = new BufferGeometry();
 	const caretPositions = new BufferAttribute(new Float32Array(4 * 4 * 3), 3);
 	caretPositions.setUsage(DynamicDrawUsage);
-	const caretColors = new Float32Array(4 * 4 * 3);
+	const caretColors = new BufferAttribute(new Float32Array(4 * 4 * 4), 4);
+	caretColors.setUsage(DynamicDrawUsage);
 	threadColors.forEach((c, i) => {
-		for (let v = 0; v < 4; v++) caretColors.set([c.r, c.g, c.b], (i * 4 + v) * 3);
+		for (let v = 0; v < 4; v++) caretColors.set([c.r, c.g, c.b, 1], (i * 4 + v) * 4);
 	});
 	const caretIndex: number[] = [];
 	for (let i = 0; i < 4; i++)
 		caretIndex.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 2, i * 4 + 1, i * 4 + 3);
 	caretGeometry.setAttribute("position", caretPositions);
-	caretGeometry.setAttribute("color", new BufferAttribute(caretColors, 3));
+	caretGeometry.setAttribute("color", caretColors);
 	caretGeometry.setIndex(caretIndex);
-	const carets = new Mesh(caretGeometry, new MeshBasicMaterial({ vertexColors: true }));
+	const carets = new Mesh(
+		caretGeometry,
+		new MeshBasicMaterial({ vertexColors: true, transparent: true }),
+	);
 	carets.frustumCulled = false;
 	page.add(carets);
 
@@ -243,7 +250,7 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		});
 		const sprite = new Sprite(material);
 		sprite.center.set(0, 0);
-		sprite.scale.set(0.42, 0.14, 1);
+		sprite.scale.set(0.57, 0.19, 1);
 		sprite.renderOrder = 10;
 		page.add(sprite);
 		return sprite;
@@ -289,9 +296,17 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		surface.u.uTime.value = t;
 		ruleMaterial.u.uTime.value = t;
 		const caretArray = caretPositions.array as Float32Array;
+		const caretRgba = caretColors.array as Float32Array;
 		sim.heads.forEach((head, i) => {
+			const fade = edgeFade(head.x);
 			const ribbon = ribbons[i];
-			if (ribbon) writeRibbon(ribbon, head, head.phase, t);
+			if (ribbon) {
+				writeRibbon(ribbon, head, head.phase, t);
+				(ribbon.material as MeshBasicMaterial).opacity = fade;
+			}
+			const flag = flags[i];
+			if (flag) flag.material.opacity = fade;
+			for (let v = 0; v < 4; v++) caretRgba[(i * 4 + v) * 4 + 3] = fade;
 			const z = swell(head.x, head.y, t) + 0.07;
 			const corners = [
 				[head.x - 0.011, head.y - 0.1],
@@ -305,6 +320,7 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 			flags[i]?.position.set(head.x - 0.011, head.y + 0.11, z);
 		});
 		caretPositions.needsUpdate = true;
+		caretColors.needsUpdate = true;
 	}
 
 	// --- colours ---------------------------------------------------------------------------
@@ -336,7 +352,9 @@ export async function createLoom(canvas: HTMLCanvasElement, options: LoomOptions
 		renderer.setSize(width, height, false);
 		camera.aspect = width / height;
 		// Keep the whole page in view on tall, narrow canvases.
-		camera.position.z = camera.aspect < 1 ? 6.4 / Math.max(0.55, camera.aspect) : 6.4;
+		camera.position.z = camera.aspect < 1 ? DISTANCE / Math.max(0.55, camera.aspect) : DISTANCE;
+		// Desktop: the canvas is the hero's right side, so the page leans right; phones: centred band.
+		page.position.x = window.innerWidth < 760 ? 0 : 0.45;
 		camera.updateProjectionMatrix();
 	}
 
