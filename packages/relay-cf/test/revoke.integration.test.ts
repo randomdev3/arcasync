@@ -260,11 +260,19 @@ describe("revocation", () => {
 	});
 
 	it("refuses a token minted in the revocation second, accepts one a second later", async () => {
-		while (Date.now() % 1000 > 300) await sleep(10);
-		const second = Math.floor(Date.now() / 1000);
-		await patch(relay.url, memberPath(dan), { role: "viewer" }, alice.sessionToken);
-		const sameSecond = await tokenOf(dan)();
-		expect(decodeJwt(sameSecond).iat).toBe(second);
+		// Toggle dan's role until the change and the mint land in one second (a loaded machine
+		// can push the mint into the next one).
+		let sameSecond: string | null = null;
+		for (let attempt = 0; attempt < 5 && !sameSecond; attempt++) {
+			while (Date.now() % 1000 > 300) await sleep(10);
+			const second = Math.floor(Date.now() / 1000);
+			const role = attempt % 2 === 0 ? "viewer" : "editor";
+			await patch(relay.url, memberPath(dan), { role }, alice.sessionToken);
+			const token = await tokenOf(dan)();
+			if (decodeJwt(token).iat === second) sameSecond = token;
+			else await sleep(1100);
+		}
+		if (!sameSecond) throw new Error("could not mint within the revocation second");
 		expect(await rawAuth(doc(), sameSecond)).toBe("permission-denied");
 		await sleep(1100);
 		expect(await rawAuth(doc(), await tokenOf(dan)())).toBe("authenticated");
