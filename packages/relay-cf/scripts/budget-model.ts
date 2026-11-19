@@ -36,6 +36,12 @@ export const BILLING = {
 	GB_S_MODEL: "calibrated" as "calibrated" | "awake",
 	/** Active DO seconds per billed request: R-9 measured ≈1.8 ms, × 10 safety margin. */
 	ACTIVE_SEC_PER_REQUEST: 0.018,
+	/**
+	 * Active AccountsDO seconds per password hash (7 × 100k PBKDF2 rounds): ≈45 ms measured in
+	 * local workerd on Apple M-series, × 2 for slower production CPUs. Added on top of
+	 * `ACTIVE_SEC_PER_REQUEST` for every sign-in, password set or change and PIN accept.
+	 */
+	PASSWORD_HASH_SEC: 0.09,
 };
 export type Billing = typeof BILLING;
 
@@ -129,6 +135,10 @@ export const TEAM = {
 	/** Membership changes per day that revoke a user's sockets. */
 	revocationsPerDay: 5,
 	inviteAcceptsPerDay: 1,
+	/** Name + password sign-ins (failed ones included), password sets and PIN accepts per day. */
+	passwordHashesPerDay: 20,
+	/** Wrong PINs per day, worst case: the server-wide lock stops PIN entry at 20 in 24 h. */
+	pinGuessesPerDay: 20,
 	/** `files` projections per day (files listings; the GC alarm's two are counted there). */
 	projectionsPerDay: 2,
 	/** Rows the projections upsert or delete per day (changed entries only, D11). */
@@ -167,6 +177,11 @@ export interface Units {
 	rowsPerAccountOp: number;
 	/** AccountsDO rows written per invite accept (user, device, session, membership, invite, audit). */
 	rowsPerInviteAccept: number;
+	/**
+	 * AccountsDO rows written per password sign-in: the attempt row and its delete, device,
+	 * session and audit row.
+	 */
+	rowsPerPasswordLogin: number;
 	/** WorkspaceRelay rows written per revocation (`revocations`). */
 	rowsPerRevocation: number;
 	/**
@@ -210,6 +225,7 @@ export const PLAN_UNITS: Units = {
 	rowsPerDeviceLogin: 4,
 	rowsPerAccountOp: 2,
 	rowsPerInviteAccept: 6,
+	rowsPerPasswordLogin: 5,
 	rowsPerRevocation: 1,
 	restCallsPerRevocation: 1,
 	accountsCallsPerDeviceLogin: 4,
@@ -242,6 +258,8 @@ export const ESTIMATED_UNITS: Partial<Units> = {
 	 * Worst case 2 + 1 + 1.
 	 */
 	restCallsPerRevocation: 4,
+	/** Code audit of `AccountsDO.login`: attempt insert + delete, device, session, audit. */
+	rowsPerPasswordLogin: 5,
 };
 
 export interface Component {
@@ -264,6 +282,8 @@ export interface Component {
 	accountsEvents?: number;
 	/** The relay events land on the user's extra workspaces (other WorkspaceRelay objects). */
 	extraWorkspaces?: boolean;
+	/** Active DO seconds beyond `ACTIVE_SEC_PER_REQUEST` (CPU-heavy work: password hashing). */
+	activeSec?: number;
 	/** R2 Class A operations (PUT, LIST). */
 	r2ClassA?: number;
 	/** R2 Class B operations (GET, HEAD). */
@@ -437,6 +457,18 @@ export function components(u: Units, t: Team = TEAM, billing: Billing = BILLING)
 			rowsRead: t.inviteAcceptsPerDay * 5,
 			workerRequests: t.inviteAcceptsPerDay,
 			accountsEvents: t.inviteAcceptsPerDay,
+		},
+		{
+			// Every hash also scans the users table (case-insensitive names); a wrong PIN writes
+			// its failure row and prunes old ones.
+			name: "Password sign-ins and PIN entry",
+			scenario: "A",
+			requests: t.passwordHashesPerDay + t.pinGuessesPerDay,
+			rowsWritten: t.passwordHashesPerDay * u.rowsPerPasswordLogin + t.pinGuessesPerDay * 2,
+			rowsRead: (t.passwordHashesPerDay + t.pinGuessesPerDay) * (t.users + 5),
+			workerRequests: t.passwordHashesPerDay + t.pinGuessesPerDay,
+			accountsEvents: t.passwordHashesPerDay + t.pinGuessesPerDay,
+			activeSec: t.passwordHashesPerDay * billing.PASSWORD_HASH_SEC,
 		},
 		{
 			// `missing` (one R2 head per sha) before the PUT and again after the meta ack; one PUT
@@ -631,7 +663,7 @@ export function totals(
 		gbSeconds:
 			billing.GB_S_MODEL === "awake"
 				? awakeGbSeconds(list, scenario, t)
-				: requests * billing.ACTIVE_SEC_PER_REQUEST * t.doGb,
+				: (requests * billing.ACTIVE_SEC_PER_REQUEST + sum((c) => c.activeSec ?? 0)) * t.doGb,
 		rowsRead: sum((c) => c.rowsRead ?? 0),
 		workerRequests: sum((c) => c.workerRequests ?? 0),
 		storageBytes: t.notes * t.avgNoteBytes * t.stateGrowthFactor,

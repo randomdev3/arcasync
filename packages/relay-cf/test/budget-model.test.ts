@@ -77,6 +77,14 @@ const P2_FIELDS: Record<string, Array<keyof Component>> = {
 		"wakeEvents",
 	],
 	"B extra: chunk GC alarm": ["requests", "rowsWritten", "rowsRead", "r2ClassA", "wakeEvents"],
+	"Password sign-ins and PIN entry": [
+		"requests",
+		"rowsWritten",
+		"rowsRead",
+		"workerRequests",
+		"accountsEvents",
+		"activeSec",
+	],
 };
 
 /** The P1 components only, which the plan's §2.B totals describe. */
@@ -182,8 +190,10 @@ describe("budget model, P2", () => {
 		}
 	});
 
-	it("calibrated gbSeconds = billed DO requests × 0.018 s × 0.125 GB", () => {
+	it("calibrated gbSeconds = (billed DO requests × 0.018 s + password hashing) × 0.125 GB", () => {
 		expect(BILLING.ACTIVE_SEC_PER_REQUEST).toBe(0.018);
+		expect(BILLING.PASSWORD_HASH_SEC).toBe(0.09);
+		const hashing = TEAM.passwordHashesPerDay * 0.09;
 		expect(TEAM.doGb).toBe(0.125);
 		for (const billing of [BILLING, WORST]) {
 			for (const r of gate(PLAN_UNITS, billing)) {
@@ -191,7 +201,7 @@ describe("budget model, P2", () => {
 					.filter((c) => c.scenario === "A" || r.name !== "A")
 					.reduce((n, c) => n + doRequests(c, billing), 0);
 				expect(r.usage.doRequests).toBeCloseTo(requests, 6);
-				expect(r.usage.gbSeconds).toBeCloseTo(requests * 0.018 * 0.125, 6);
+				expect(r.usage.gbSeconds).toBeCloseTo((requests * 0.018 + hashing) * 0.125, 6);
 			}
 		}
 	});
@@ -226,6 +236,7 @@ describe("budget model, P2", () => {
 			rowsPerDeviceLogin: 7,
 			rowsPerAccountOp: 3,
 			restCallsPerRevocation: 4,
+			rowsPerPasswordLogin: 5,
 		});
 		const units = { ...PLAN_UNITS, ...ESTIMATED_UNITS };
 		const byName = (name: string) => {
