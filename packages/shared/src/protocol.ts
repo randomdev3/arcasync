@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { CHUNKS_MISSING_MAX, CLONE_MAX_DOCS, INVITE_DEFAULT_TTL_S } from "./constants.js";
+import {
+	CHUNKS_MISSING_MAX,
+	CLONE_MAX_DOCS,
+	INVITE_DEFAULT_TTL_S,
+	PIN_DEFAULT_TTL_S,
+	PIN_MAX_TTL_S,
+} from "./constants.js";
 import { FileKind } from "./fileKinds.js";
 
 export const Role = z.enum(["owner", "editor", "viewer"]);
@@ -107,7 +113,78 @@ export const MeResponse = z.object({
 	user: User,
 	device: z.object({ id: z.string(), name: z.string(), platform: z.string() }),
 	workspaces: z.array(WorkspaceSummary),
+	/** The account can sign in with name + password. relay-cf always sends it; absent elsewhere. */
+	hasPassword: z.boolean().optional(),
 });
+
+/**
+ * A password field in a request. Only bounded here: the length and common-password rules
+ * (`passwordProblem`) apply where a password is set, never at sign-in.
+ */
+const PasswordField = z.string().min(1).max(1024);
+
+/** Unauthenticated: sign in with name (case-insensitive) and password → `SessionResponse`. */
+export const LoginRequest = z.object({
+	name: z.string().min(1).max(60),
+	password: PasswordField,
+	device: DeviceInfo,
+});
+export type LoginRequest = z.infer<typeof LoginRequest>;
+
+/** Authenticated: set a password (`current` omitted) or change it (`current` required). */
+export const PasswordChangeRequest = z.object({
+	current: PasswordField.optional(),
+	new: PasswordField,
+});
+export type PasswordChangeRequest = z.infer<typeof PasswordChangeRequest>;
+
+/** Four decimal digits. */
+export const Pin = z.string().regex(/^[0-9]{4}$/);
+
+export const PinCreateRequest = z.object({
+	role: Role,
+	/** Server admins only: whoever uses the PIN becomes a server admin too. */
+	admin: z.boolean().default(false),
+	expiresInSec: z.number().int().min(300).max(PIN_MAX_TTL_S).default(PIN_DEFAULT_TTL_S),
+});
+export type PinCreateRequest = z.infer<typeof PinCreateRequest>;
+
+export const PinSummary = z.object({
+	id: z.string(),
+	pin: Pin,
+	workspaceId: z.string(),
+	role: Role,
+	admin: z.boolean(),
+	createdAt: z.number(),
+	createdBy: z.string(),
+	expiresAt: z.number(),
+	/** When it was used, and by whom (user name); a PIN is single-use. */
+	usedAt: z.number().nullable(),
+	usedBy: z.string().nullable(),
+	revoked: z.boolean(),
+});
+export type PinSummary = z.infer<typeof PinSummary>;
+
+export const PinsResponse = z.object({
+	pins: z.array(PinSummary),
+	/** PIN entry is locked server-wide after too many wrong PINs, until `lockedUntil` or an admin unlock. */
+	locked: z.boolean(),
+	lockedUntil: z.number().nullable(),
+});
+export type PinsResponse = z.infer<typeof PinsResponse>;
+
+/** Unauthenticated: a new user joins with a PIN and sets a password → `SessionResponse`. */
+export const PinAcceptRequest = z.object({
+	pin: Pin,
+	name: z.string().min(1).max(60),
+	password: PasswordField,
+	device: DeviceInfo,
+});
+export type PinAcceptRequest = z.infer<typeof PinAcceptRequest>;
+
+/** Authenticated: join the PIN's workspace → `WorkspacesResponse`. */
+export const PinRedeemRequest = z.object({ pin: Pin });
+export type PinRedeemRequest = z.infer<typeof PinRedeemRequest>;
 
 export const WsTokenRequest = z.object({ workspaceId: z.string() });
 export const WsTokenResponse = z.object({ token: z.string(), expiresAt: z.number() });
@@ -203,6 +280,10 @@ export const ServerInfo = z.object({
 		accounts: z.boolean().optional(),
 		chunks: z.boolean().optional(),
 		bulkClone: z.boolean().optional(),
+		/** `POST /api/auth/login` and `POST /api/auth/password`. */
+		passwords: z.boolean().optional(),
+		/** PIN invites (`/api/workspaces/:id/pins`, `/api/auth/pin/accept`). */
+		pins: z.boolean().optional(),
 	}),
 	limits: z.object({ maxFileBytes: z.number(), chunkBytes: z.number() }),
 });

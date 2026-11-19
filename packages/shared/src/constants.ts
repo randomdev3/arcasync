@@ -31,3 +31,9 @@ export const CLONE_MAX_BYTES = 8 * 1024 * 1024;
 export const BULK_CLONE_MIN_DOCS = 8;
 export const CHUNK_GC_DELAY_MS = 86_400_000;
 export const CHUNK_GC_GRACE_MS = 86_400_000;
+/** PIN invites: default and longest lifetime (72 h, 30 days). */
+export const PIN_DEFAULT_TTL_S = 259_200;
+export const PIN_MAX_TTL_S = 2_592_000;
+/** Passwords, counted in Unicode code points after NFC normalisation. */
+export const PASSWORD_MIN_LENGTH = 10;
+export const PASSWORD_MAX_LENGTH = 256;
