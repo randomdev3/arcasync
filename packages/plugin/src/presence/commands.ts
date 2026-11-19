@@ -10,7 +10,10 @@ export function registerNavigatorCommands(plugin: TeamSyncPlugin): void {
 		placeholder: string,
 		act: (navigator: INavigator, userId: string) => void,
 	): boolean => {
-		const session = plugin.session;
+		// The session of the active note's folder; with no active file (or one outside every
+		// mapped folder), the primary workspace's.
+		const file = plugin.app.workspace.getActiveFile();
+		const session = (file && plugin.sessionFor(file.path)) ?? plugin.session;
 		const navigator = session?.navigator;
 		const presence = session?.presence;
 		if (!session || !navigator || !presence) return false;

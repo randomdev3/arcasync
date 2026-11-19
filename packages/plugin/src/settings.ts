@@ -1,11 +1,15 @@
 import { Role, type WorkspaceSummary } from "@teamsync/shared";
+import { foldersOverlap } from "./workspace/paths";
 
 export interface TeamSyncSettings {
 	/** Base URL of the TeamSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
 	serverUrl: string;
 	/** Name used for `POST /api/auth/dev-login` while the server allows open login. */
 	devLoginName: string;
-	/** Workspace whose index doc the plugin opens. Empty = first workspace returned by the server. */
+	/**
+	 * The primary workspace: the one a connect opens when no folder is mapped, and the one the
+	 * status bar names first. Empty = first workspace returned by the server.
+	 */
 	workspaceId: string;
 	/** Cached, non-secret identity for rendering before the first `/api/auth/me`. */
 	user: { id: string; name: string; color: string } | null;
@@ -14,10 +18,10 @@ export interface TeamSyncSettings {
 	/** Connect on plugin load. */
 	autoConnect: boolean;
 	/**
-	 * Vault folder synced with a workspace. An empty `workspaceId` is bound to the workspace the
-	 * next successful connect resolves.
+	 * Vault folders synced with workspaces, at most one folder per workspace and none inside
+	 * another. An empty `workspaceId` is bound to the primary workspace on the next connect.
 	 */
-	sharedFolder: SharedFolder | null;
+	sharedFolders: SharedFolder[];
 	/** Role asked for when dev-login creates a new membership; `""` = server default. */
 	devLoginRole: "" | Role;
 }
@@ -35,17 +39,18 @@ export const DEFAULT_SETTINGS: TeamSyncSettings = {
 	user: null,
 	workspaces: [],
 	autoConnect: false,
-	sharedFolder: null,
+	sharedFolders: [],
 	devLoginRole: "",
 };
 
 /**
  * Merge persisted `data.json` over the defaults. The session token is never part
  * of settings — it lives in `SecretStore` — so a stray token in an old
- * `data.json` is dropped here rather than round-tripped.
+ * `data.json` is dropped here rather than round-tripped. A P1 `sharedFolder` becomes a
+ * one-element `sharedFolders`.
  */
 export function normalizeSettings(raw: unknown): TeamSyncSettings {
-	const data = (raw ?? {}) as Partial<TeamSyncSettings>;
+	const data = (raw ?? {}) as Partial<TeamSyncSettings> & { sharedFolder?: unknown };
 	return {
 		serverUrl: typeof data.serverUrl === "string" ? data.serverUrl : DEFAULT_SETTINGS.serverUrl,
 		devLoginName:
@@ -55,9 +60,29 @@ export function normalizeSettings(raw: unknown): TeamSyncSettings {
 		user: data.user ?? null,
 		workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
 		autoConnect: data.autoConnect === true,
-		sharedFolder: normalizeSharedFolder(data.sharedFolder),
+		sharedFolders: normalizeSharedFolders(
+			Array.isArray(data.sharedFolders) ? data.sharedFolders : [data.sharedFolder],
+		),
 		devLoginRole: Role.safeParse(data.devLoginRole).data ?? "",
 	};
+}
+
+/**
+ * Valid entries in order, dropping any that overlaps an earlier folder or maps a workspace an
+ * earlier entry already maps (an unbound `""` workspace may repeat only once).
+ */
+export function normalizeSharedFolders(values: unknown[]): SharedFolder[] {
+	const out: SharedFolder[] = [];
+	for (const value of values) {
+		const folder = normalizeSharedFolder(value);
+		if (!folder) continue;
+		if (
+			out.some((f) => foldersOverlap(f.path, folder.path) || f.workspaceId === folder.workspaceId)
+		)
+			continue;
+		out.push(folder);
+	}
+	return out;
 }
 
 function normalizeSharedFolder(value: unknown): SharedFolder | null {

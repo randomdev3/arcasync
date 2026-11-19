@@ -4,20 +4,27 @@ export interface StatusBarModel {
 	status: ConnectionStatus;
 	message: string | null;
 	userName: string | null;
+	/** The primary workspace's name. */
 	workspaceName: string | null;
-	/** Clients present on the workspace index doc, this one included. */
+	/** Further connected workspaces, shown as `+k` after the primary's name. */
+	extraWorkspaces: number;
+	/** Distinct users present on the connected workspaces' index docs, this one included. */
 	online: number;
 }
 
 const PREFIX = "TeamSync";
 
-/** Renders `TeamSync: alice · Dev · 2 online` in the Obsidian status bar. */
+/**
+ * Renders `TeamSync: alice · Dev · 2 online` in the Obsidian status bar, or
+ * `TeamSync: alice · Dev +1 · 3 online` with two workspaces connected.
+ */
 export class StatusBar {
 	private model: StatusBarModel = {
 		status: "disconnected",
 		message: null,
 		userName: null,
 		workspaceName: null,
+		extraWorkspaces: 0,
 		online: 0,
 	};
 
@@ -33,11 +40,13 @@ export class StatusBar {
 
 	/** Exposed for tests and for the settings tab's status line. */
 	get text(): string {
-		const { status, message, userName, workspaceName, online } = this.model;
+		const { status, message, userName, workspaceName, extraWorkspaces, online } = this.model;
 		if (status === "error") return `${PREFIX}: error${message ? ` — ${message}` : ""}`;
 		if (status === "connecting") return `${PREFIX}: connecting…`;
 		if (status === "disconnected") return `${PREFIX}: offline`;
-		const parts = [userName ?? "connected", workspaceName, online > 0 ? `${online} online` : null];
+		const extra = extraWorkspaces > 0 ? `+${extraWorkspaces}` : null;
+		const workspaces = [workspaceName, extra].filter(Boolean).join(" ") || null;
+		const parts = [userName ?? "connected", workspaces, online > 0 ? `${online} online` : null];
 		return `${PREFIX}: ${parts.filter(Boolean).join(" · ")}`;
 	}
 

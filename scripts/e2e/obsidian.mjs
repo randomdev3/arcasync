@@ -389,12 +389,18 @@ export async function installPlugin(vault, { serverUrl } = {}) {
  * `installPlugin`, then logs in as `name`, connects, and turns on `autoConnect` so a relaunch
  * reconnects with the stored session.
  * `role` is written to `devLoginRole`. `sharedFolder` is a vault folder path (e.g. "Shared"),
- * written as `{path, workspaceId: ""}` so the plugin binds it to the workspace it connects to;
- * `null` unmaps. Leave either undefined to keep the vault's current setting.
+ * written as `sharedFolders: [{path, workspaceId: ""}]` so the plugin binds it to the primary
+ * workspace it connects to; `null` unmaps every folder. Leave either undefined to keep the
+ * vault's current setting.
  */
 export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder }) {
 	await installPlugin(vault, { serverUrl });
-	if (typeof sharedFolder === "string") sharedFolder = { path: sharedFolder, workspaceId: "" };
+	const sharedFolders =
+		sharedFolder === undefined
+			? undefined
+			: sharedFolder === null
+				? []
+				: [{ path: sharedFolder, workspaceId: "" }];
 	return vault.eval(
 		`
 		const p = app.plugins.plugins.teamsync;
@@ -402,12 +408,12 @@ export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder
 		p.settings.devLoginName = args.name;
 		p.settings.autoConnect = true;
 		if (args.role !== undefined) p.settings.devLoginRole = args.role;
-		if (args.sharedFolder !== undefined) p.settings.sharedFolder = args.sharedFolder;
+		if (args.sharedFolders !== undefined) p.settings.sharedFolders = args.sharedFolders;
 		await p.saveSettings();
 		await p.connect();
 		for (let i = 0; i < 75 && p.connection?.status !== "connected"; i++) await new Promise(r => setTimeout(r, 200));
 		return { status: p.connection?.status, message: p.connection?.message ?? null, user: p.settings.user?.name ?? null };
 	`,
-		{ name, role, sharedFolder },
+		{ name, role, sharedFolders },
 	);
 }

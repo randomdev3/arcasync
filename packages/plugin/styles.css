@@ -36,6 +36,19 @@
 	min-width: 18em;
 }
 
+.teamsync-settings .teamsync-mappings {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: var(--size-4-2);
+}
+
+.teamsync-settings .teamsync-mapping {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+
 .teamsync-status {
 	font-size: var(--font-ui-smaller);
 }

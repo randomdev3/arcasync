@@ -21,6 +21,20 @@ export function isUnder(root: string, vaultPath: string): boolean {
 	return root !== "" && vaultPath.startsWith(`${root}/`) && vaultPath.length > root.length + 1;
 }
 
+/** True when one folder is the other or lies inside it (`a` and `a/b`, but not `a` and `ab`). */
+export function foldersOverlap(a: string, b: string): boolean {
+	return a === b || isUnder(a, b) || isUnder(b, a);
+}
+
+/** The item whose root folder contains `vaultPath`, or null (roots never overlap). */
+export function containingRoot<T extends { root: string | null }>(
+	items: Iterable<T>,
+	vaultPath: string,
+): T | null {
+	for (const item of items) if (item.root !== null && isUnder(item.root, vaultPath)) return item;
+	return null;
+}
+
 /** Workspace path for a vault path under `root`; null when outside it or not syncable. */
 export function toWs(root: string, vaultPath: string): string | null {
 	if (!isUnder(root, vaultPath)) return null;

@@ -11,9 +11,34 @@ const STATUS_LABEL = {
 	error: "Error",
 } as const;
 
-function folderSuggest(input: HTMLInputElement) {
-	const destroy = $vm.onFolderInputMount(input);
-	return { destroy };
+function folderSuggest(input: HTMLInputElement, onPick: (path: string) => void) {
+	let pick = onPick;
+	const destroy = $vm.onFolderInputMount(input, (path) => pick(path));
+	return {
+		update(next: (path: string) => void) {
+			pick = next;
+		},
+		destroy,
+	};
+}
+
+/** The blank row for a new mapping is open (it always is while nothing is mapped). */
+let adding = $state(false);
+let picked = $state("");
+const unmapped = $derived(
+	$vm.workspaces.filter((w) => !$vm.sharedFolders.some((f) => f.workspaceId === w.id)),
+);
+/** The new row's workspace: the one picked, else the primary if unmapped, else the first unmapped. */
+const newWorkspace = $derived(
+	unmapped.some((w) => w.id === picked)
+		? picked
+		: ((unmapped.find((w) => w.id === $vm.workspaceId) ?? unmapped[0])?.id ?? ""),
+);
+
+function addMapping(path: string) {
+	if (!path.trim()) return;
+	$vm.onMappingAdd(path, newWorkspace);
+	adding = false;
 }
 </script>
 
@@ -52,30 +77,81 @@ function folderSuggest(input: HTMLInputElement) {
 
 	<div class="teamsync-row">
 		<div class="teamsync-row-info">
-			<div class="teamsync-row-name">Shared folder</div>
+			<div class="teamsync-row-name">Shared folders</div>
 			<div class="teamsync-row-desc">
-				Vault folder synced with the workspace. Leave empty to sync nothing.
+				Each vault folder syncs with one workspace. Folders cannot be inside each other.
 			</div>
 		</div>
-		<input
-			type="text"
-			class="teamsync-shared-folder"
-			spellcheck="false"
-			placeholder="Shared"
-			value={$vm.sharedFolderPath}
-			use:folderSuggest
-			onchange={(event) => $vm.onSharedFolderChange(event.currentTarget.value)}
-		/>
+		<div class="teamsync-mappings">
+			{#each $vm.sharedFolders as folder, index (folder.path)}
+				<div class="teamsync-mapping">
+					<input
+						type="text"
+						class="teamsync-shared-folder"
+						spellcheck="false"
+						value={folder.path}
+						use:folderSuggest={(path) => $vm.onMappingChange(index, { path })}
+						onchange={(event) => $vm.onMappingChange(index, { path: event.currentTarget.value })}
+					/>
+					{#if $vm.workspaces.length > 0}
+						<select
+							class="dropdown teamsync-workspace"
+							disabled={$vm.busy}
+							value={folder.workspaceId}
+							onchange={(event) =>
+								$vm.onMappingChange(index, { workspaceId: event.currentTarget.value })}
+						>
+							{#each $vm.workspaces as workspace (workspace.id)}
+								<option value={workspace.id}>{workspace.name}</option>
+							{/each}
+						</select>
+					{/if}
+					<button class="teamsync-mapping-remove" onclick={() => $vm.onMappingRemove(folder.path)}>
+						Remove
+					</button>
+				</div>
+			{/each}
+			{#if adding || $vm.sharedFolders.length === 0}
+				<div class="teamsync-mapping">
+					<input
+						type="text"
+						class="teamsync-shared-folder teamsync-new-folder"
+						spellcheck="false"
+						placeholder="Shared"
+						use:folderSuggest={addMapping}
+						onchange={(event) => addMapping(event.currentTarget.value)}
+					/>
+					{#if unmapped.length > 0}
+						<select
+							class="dropdown teamsync-workspace"
+							disabled={$vm.busy}
+							value={newWorkspace}
+							onchange={(event) => {
+								picked = event.currentTarget.value;
+							}}
+						>
+							{#each unmapped as workspace (workspace.id)}
+								<option value={workspace.id}>{workspace.name}</option>
+							{/each}
+						</select>
+					{/if}
+				</div>
+			{:else if unmapped.length > 0}
+				<button class="teamsync-mapping-add" onclick={() => (adding = true)}>Add folder</button>
+			{/if}
+		</div>
 	</div>
 
-	{#if $vm.workspaces.length > 0}
+	{#if $vm.workspaces.length > 1}
 		<div class="teamsync-row">
 			<div class="teamsync-row-info">
-				<div class="teamsync-row-name">Workspace</div>
-				<div class="teamsync-row-desc">The shared folder syncs with this workspace.</div>
+				<div class="teamsync-row-name">Primary workspace</div>
+				<div class="teamsync-row-desc">
+					Named first in the status bar, and connected when no folder is mapped.
+				</div>
 			</div>
 			<select
-				class="dropdown teamsync-workspace"
+				class="dropdown teamsync-primary-workspace"
 				disabled={$vm.busy}
 				value={$vm.workspaceId}
 				onchange={(event) => $vm.onWorkspaceChange(event.currentTarget.value)}

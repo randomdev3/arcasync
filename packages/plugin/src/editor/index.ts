@@ -10,9 +10,10 @@ import { EditorBindings } from "./EditorBinding";
 export function editorExtensions(plugin: TeamSyncPlugin): Extension[] {
 	const { workspace } = plugin.app;
 	const bindings = new EditorBindings({
-		get session() {
-			return plugin.session;
+		get sessions() {
+			return plugin.sessions;
 		},
+		sessionFor: (vaultPath) => plugin.sessionFor(vaultPath),
 		activeView: () => workspace.getActiveViewOfType(MarkdownView),
 	});
 	// Connect, disconnect and session restarts all notify the plugin's view listeners.

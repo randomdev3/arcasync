@@ -11,6 +11,8 @@ import { registerNavigatorCommands } from "./presence/commands";
 import {
 	DEFAULT_SETTINGS,
 	normalizeSettings,
+	normalizeSharedFolders,
+	type SharedFolder,
 	type TeamSyncSettings,
 	websocketUrl,
 } from "./settings";
@@ -19,7 +21,8 @@ import type { SettingsViewState } from "./ui/components/settingsProps";
 import { FolderSuggest } from "./ui/FolderSuggest";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
-import { WorkspaceSession } from "./workspace/WorkspaceSession";
+import { containingRoot, foldersOverlap } from "./workspace/paths";
+import { type SessionUser, WorkspaceSession } from "./workspace/WorkspaceSession";
 
 /**
  * Every live plugin instance. Obsidian reloads plugins in place; an instance
@@ -37,6 +40,24 @@ function platformName(): DeviceInfo["platform"] {
 	return "unknown";
 }
 
+/** One connected workspace: its own socket and session. */
+interface LiveWorkspace {
+	connections: ConnectionManager;
+	session: WorkspaceSession;
+	/** Stops the session and closes the socket. */
+	stop(): void;
+}
+
+/** Worst first: the plugin's connection status is the worst of its workspaces'. */
+const STATUS_RANK = { connected: 0, connecting: 1, disconnected: 2, error: 3 } as const;
+
+/** A vault folder path as stored in `sharedFolders`, or "" for none. */
+function cleanFolder(value: string): string {
+	const trimmed = value.trim();
+	const path = trimmed ? normalizePath(trimmed).replace(/^\/+|\/+$/g, "") : "";
+	return path === "/" ? "" : path;
+}
+
 /** The server may send `expiresAt` in seconds or milliseconds; normalise to ms. */
 function toEpochMs(expiresAt: number): number {
 	return expiresAt < 1e12 ? expiresAt * 1000 : expiresAt;
@@ -49,12 +70,10 @@ export default class TeamSyncPlugin extends Plugin {
 	private api!: ApiClient;
 	private tokens!: TokenStore;
 	private statusBar: StatusBar | null = null;
-	private connections: ConnectionManager | null = null;
+	/** Connected workspaces by id: one per mapped folder, or the primary when none is mapped. */
+	private readonly live = new Map<string, LiveWorkspace>();
 	private counter: CounterDebug | null = null;
-	private unsubscribeConnection: (() => void) | null = null;
-	private unsubscribeOnline: (() => void) | null = null;
-	/** The connected workspace; null while disconnected. */
-	session: WorkspaceSession | null = null;
+	private counterSession: WorkspaceSession | null = null;
 
 	private serverInfo: ServerInfo | null = null;
 	private serverError: string | null = null;
@@ -135,14 +154,11 @@ export default class TeamSyncPlugin extends Plugin {
 
 		teardownStep("counter.close", () => this.counter?.close());
 		this.counter = null;
-		teardownStep("online.unsubscribe", () => this.unsubscribeOnline?.());
-		this.unsubscribeOnline = null;
-		teardownStep("session.stop", () => this.session?.stop());
-		this.session = null;
-		teardownStep("connection.unsubscribe", () => this.unsubscribeConnection?.());
-		this.unsubscribeConnection = null;
-		teardownStep("connections.destroy", () => this.connections?.destroy());
-		this.connections = null;
+		this.counterSession = null;
+		for (const [workspaceId, entry] of [...this.live]) {
+			teardownStep(`workspace.stop ${workspaceId}`, () => entry.stop());
+		}
+		this.live.clear();
 		teardownStep("tokens.invalidate", () => this.tokens?.invalidate());
 		teardownStep("statusBar.destroy", () => this.statusBar?.destroy());
 		this.statusBar = null;
@@ -176,27 +192,70 @@ export default class TeamSyncPlugin extends Plugin {
 		this.notifyView();
 	}
 
-	/** Maps (or with `""` unmaps) the shared folder; a live connection restarts on it. */
-	async setSharedFolder(value: string): Promise<void> {
-		const trimmed = value.trim();
-		const path = trimmed ? normalizePath(trimmed) : "";
-		const current = this.settings.sharedFolder;
-		if ((current?.path ?? "") === path) return;
-		const sharedFolder =
-			path && path !== "/" ? { path, workspaceId: this.settings.workspaceId } : null;
-		await this.updateSettings({ sharedFolder });
-		await this.reconnectIfConnected();
+	/**
+	 * Maps a vault folder to a workspace. A folder that overlaps a mapped one, or a workspace that
+	 * is already mapped, is refused with a Notice. While connected, only that workspace's
+	 * connection (re)starts. Returns whether the mapping is in place.
+	 */
+	async addMapping(path: string, workspaceId: string): Promise<boolean> {
+		const folder = cleanFolder(path);
+		// An empty workspace id is bound to the primary workspace on the next connect.
+		if (!folder) return false;
+		const folders = this.settings.sharedFolders;
+		if (folders.some((f) => f.path === folder && f.workspaceId === workspaceId)) return true;
+		if (!this.mappingAllowed(folders, folder, workspaceId)) return false;
+		await this.setSharedFolders([...folders, { path: folder, workspaceId }]);
+		return true;
 	}
 
-	/** Selects the workspace the shared folder syncs with; a live connection restarts on it. */
+	/** Unmaps the folder at `path` (its files stay); its workspace's connection closes. */
+	async removeMapping(path: string): Promise<void> {
+		const folder = cleanFolder(path);
+		const folders = this.settings.sharedFolders;
+		if (!folders.some((f) => f.path === folder)) return;
+		await this.setSharedFolders(folders.filter((f) => f.path !== folder));
+	}
+
+	/** Changes the folder or the workspace of the mapping at `index` (the settings rows). */
+	async updateMapping(index: number, patch: Partial<SharedFolder>): Promise<void> {
+		const folders = this.settings.sharedFolders;
+		const current = folders[index];
+		if (!current) return;
+		const next = {
+			path: patch.path === undefined ? current.path : cleanFolder(patch.path),
+			workspaceId: patch.workspaceId ?? current.workspaceId,
+		};
+		if (next.path === current.path && next.workspaceId === current.workspaceId) return;
+		if (!next.path) return this.removeMapping(current.path);
+		const others = folders.filter((_, i) => i !== index);
+		if (!this.mappingAllowed(others, next.path, next.workspaceId)) return;
+		await this.setSharedFolders(folders.map((f, i) => (i === index ? next : f)));
+	}
+
+	private mappingAllowed(folders: SharedFolder[], path: string, workspaceId: string): boolean {
+		const clash = folders.find((f) => foldersOverlap(f.path, path));
+		if (clash) {
+			new Notice(`TeamSync: ${path} overlaps the shared folder ${clash.path}.`);
+			return false;
+		}
+		if (folders.some((f) => f.workspaceId === workspaceId)) {
+			const name = this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId;
+			new Notice(`TeamSync: workspace ${name} is already mapped to a folder.`);
+			return false;
+		}
+		return true;
+	}
+
+	private async setSharedFolders(sharedFolders: SharedFolder[]): Promise<void> {
+		await this.updateSettings({ sharedFolders });
+		if (this.live.size > 0) this.syncLive();
+	}
+
+	/** Selects the primary workspace (opened when no folder is mapped, named in the status bar). */
 	async setWorkspace(workspaceId: string): Promise<void> {
 		if (workspaceId === this.settings.workspaceId) return;
-		const folder = this.settings.sharedFolder;
-		await this.updateSettings({
-			workspaceId,
-			sharedFolder: folder ? { ...folder, workspaceId } : null,
-		});
-		await this.reconnectIfConnected();
+		await this.updateSettings({ workspaceId });
+		if (this.live.size > 0) this.syncLive();
 	}
 
 	/** Re-reads `GET /api/workspaces` for the workspace select; silent when signed out. */
@@ -210,17 +269,9 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 	}
 
-	attachFolderSuggest(input: HTMLInputElement): () => void {
-		const suggest = new FolderSuggest(this.app, input, (path) => {
-			void this.setSharedFolder(path);
-		});
+	attachFolderSuggest(input: HTMLInputElement, onPick: (path: string) => void): () => void {
+		const suggest = new FolderSuggest(this.app, input, onPick);
 		return () => suggest.close();
-	}
-
-	private async reconnectIfConnected(): Promise<void> {
-		if (!this.connections) return;
-		this.disconnect();
-		await this.connect();
 	}
 
 	async setServerUrl(value: string): Promise<void> {
@@ -256,7 +307,7 @@ export default class TeamSyncPlugin extends Plugin {
 			workspaceName: workspace?.name ?? null,
 			workspaces: this.settings.workspaces.map((w) => ({ id: w.id, name: w.name })),
 			workspaceId: this.settings.workspaceId,
-			sharedFolderPath: this.settings.sharedFolder?.path ?? "",
+			sharedFolders: this.settings.sharedFolders.map((f) => ({ ...f })),
 			busy: this.busy,
 		};
 	}
@@ -301,16 +352,20 @@ export default class TeamSyncPlugin extends Plugin {
 				this.settings.workspaces.find((w) => w.id === this.settings.workspaceId)?.id ??
 				me.workspaces[0]?.id;
 			if (!workspaceId) throw new Error("This account is not a member of any workspace");
-			const folder = this.settings.sharedFolder;
-			if (workspaceId !== this.settings.workspaceId || (folder && !folder.workspaceId)) {
+			const folders = this.settings.sharedFolders;
+			const unbound = folders.some((f) => !f.workspaceId);
+			if (workspaceId !== this.settings.workspaceId || unbound) {
 				this.settings.workspaceId = workspaceId;
-				if (folder && !folder.workspaceId) {
-					this.settings.sharedFolder = { ...folder, workspaceId };
+				if (unbound) {
+					this.settings.sharedFolders = normalizeSharedFolders(
+						folders.map((f) => (f.workspaceId ? f : { ...f, workspaceId })),
+					);
 				}
 				await this.saveSettings();
 			}
 
-			this.openConnection(workspaceId);
+			this.disconnect();
+			this.syncLive();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.setConnectionState({ status: "error", message });
@@ -361,49 +416,119 @@ export default class TeamSyncPlugin extends Plugin {
 		}
 	}
 
-	private openConnection(workspaceId: string): void {
-		this.disconnect();
+	/** The primary workspace's session, otherwise the first connected one; null while disconnected. */
+	get session(): WorkspaceSession | null {
+		return this.primary()?.session ?? null;
+	}
+
+	/** The socket of `session`'s workspace. */
+	get connections(): ConnectionManager | null {
+		return this.primary()?.connections ?? null;
+	}
+
+	/** Every connected workspace's session. */
+	get sessions(): WorkspaceSession[] {
+		return [...this.live.values()].map((entry) => entry.session);
+	}
+
+	/** The session whose mapped folder contains `vaultPath`, or null. */
+	sessionFor(vaultPath: string): WorkspaceSession | null {
+		return containingRoot(this.sessions, vaultPath);
+	}
+
+	private primary(): LiveWorkspace | null {
+		return this.live.get(this.settings.workspaceId) ?? this.live.values().next().value ?? null;
+	}
+
+	/** Workspace id → mapped folder (or null) of every workspace that should be connected. */
+	private wantedWorkspaces(): Map<string, string | null> {
+		const known = new Set(this.settings.workspaces.map((w) => w.id));
+		const mapped = this.settings.sharedFolders.filter((f) => known.has(f.workspaceId));
+		if (mapped.length === 0) return new Map([[this.settings.workspaceId, null]]);
+		return new Map(mapped.map((f) => [f.workspaceId, f.path]));
+	}
+
+	/**
+	 * Opens, restarts or closes workspace connections so they match `sharedFolders`. A workspace
+	 * whose folder did not change keeps its socket and session; there is never more than one
+	 * socket per workspace.
+	 */
+	private syncLive(): void {
 		const user = this.settings.user;
 		if (!user) throw new Error("Not signed in");
+		const wanted = this.wantedWorkspaces();
+		for (const [workspaceId, entry] of [...this.live]) {
+			if (wanted.has(workspaceId) && wanted.get(workspaceId) === entry.session.root) continue;
+			this.live.delete(workspaceId);
+			entry.stop();
+		}
+		for (const [workspaceId, root] of wanted) {
+			if (!this.live.has(workspaceId)) this.startWorkspace(workspaceId, root, user);
+		}
+		const session = this.session;
+		if (session !== this.counterSession) {
+			this.counter?.close();
+			this.counter = session ? new CounterDebug(session.indexDoc) : null;
+			this.counterSession = session;
+		}
+		this.updateConnectionState();
+	}
+
+	private startWorkspace(workspaceId: string, root: string | null, user: SessionUser): void {
+		let session: WorkspaceSession | null = null;
 		const connections = new ConnectionManager({
 			// `?ws=` routes the socket to the workspace's relay; the Node server ignores it.
 			url: `${websocketUrl(this.settings.serverUrl, WS_PATH)}?ws=${encodeURIComponent(workspaceId)}`,
 			tokenStore: this.tokens,
 			features: this.serverInfo?.features,
-			isIdle: () => this.session?.presence?.idle ?? false,
+			isIdle: () => session?.presence?.idle ?? false,
 		});
-		this.connections = connections;
-		this.unsubscribeConnection = connections.onStateChange((state) =>
-			this.setConnectionState(state),
-		);
+		const offState = connections.onStateChange(() => this.updateConnectionState());
 		connections.connect();
-		const folder = this.settings.sharedFolder;
-		const session = new WorkspaceSession({
+		session = new WorkspaceSession({
 			app: this.app,
 			connections,
 			workspaceId,
-			root: folder?.workspaceId === workspaceId ? folder.path : null,
+			root,
 			user,
 			vaultId: this.secrets.vaultId,
 		});
-		this.session = session;
-		this.unsubscribeOnline = session.onOnlineChange(() => this.renderStatusBar());
-		session.start();
-		this.counter = new CounterDebug(session.indexDoc);
+		const started = session;
+		const offOnline = started.onOnlineChange(() => this.renderStatusBar());
+		this.live.set(workspaceId, {
+			connections,
+			session: started,
+			stop: () => {
+				offOnline();
+				started.stop();
+				offState();
+				connections.destroy();
+			},
+		});
+		started.start();
 	}
 
 	disconnect(): void {
 		this.counter?.close();
 		this.counter = null;
-		this.unsubscribeOnline?.();
-		this.unsubscribeOnline = null;
-		this.session?.stop();
-		this.session = null;
-		this.unsubscribeConnection?.();
-		this.unsubscribeConnection = null;
-		this.connections?.destroy();
-		this.connections = null;
+		this.counterSession = null;
+		for (const entry of [...this.live.values()]) entry.stop();
+		this.live.clear();
 		this.setConnectionState({ status: "disconnected" });
+	}
+
+	/** The worst state of the connected workspaces' sockets. */
+	private updateConnectionState(): void {
+		let state: ConnectionState = { status: "disconnected" };
+		let rank = -1;
+		for (const { connections } of this.live.values()) {
+			const current = connections.currentState;
+			if (STATUS_RANK[current.status] > rank) {
+				rank = STATUS_RANK[current.status];
+				state = current;
+			}
+		}
+		this.setConnectionState(state);
 	}
 
 	async signOut(): Promise<void> {
@@ -422,12 +547,22 @@ export default class TeamSyncPlugin extends Plugin {
 
 	private renderStatusBar(): void {
 		const workspaceId = this.session?.workspaceId ?? this.settings.workspaceId;
+		const sessions = this.sessions;
+		// The same user is present on every workspace they connect to; count them once.
+		const users = new Set<string>();
+		let online = 0;
+		for (const session of sessions) {
+			const present = session.presence?.users();
+			if (present) for (const userId of present.keys()) users.add(userId);
+			else online = Math.max(online, session.online);
+		}
 		this.statusBar?.update({
 			status: this.connection.status,
 			message: this.connection.message ?? null,
 			userName: this.me?.user.name ?? this.settings.user?.name ?? null,
 			workspaceName: this.settings.workspaces.find((w) => w.id === workspaceId)?.name ?? null,
-			online: this.session?.online ?? 0,
+			extraWorkspaces: Math.max(0, sessions.length - 1),
+			online: Math.max(online, users.size),
 		});
 	}
 

@@ -50,13 +50,19 @@ export class TeamSyncSettingsTab extends PluginSettingTab {
 			onDevLoginNameChange: (value) => {
 				void this.plugin.updateSettings({ devLoginName: value });
 			},
-			onSharedFolderChange: (path) => {
-				void this.plugin.setSharedFolder(path);
+			onMappingAdd: (path, workspaceId) => {
+				void this.plugin.addMapping(path, workspaceId);
+			},
+			onMappingChange: (index, patch) => {
+				void this.plugin.updateMapping(index, patch);
+			},
+			onMappingRemove: (path) => {
+				void this.plugin.removeMapping(path);
 			},
 			onWorkspaceChange: (workspaceId) => {
 				void this.plugin.setWorkspace(workspaceId);
 			},
-			onFolderInputMount: (input) => this.plugin.attachFolderSuggest(input),
+			onFolderInputMount: (input, onPick) => this.plugin.attachFolderSuggest(input, onPick),
 			onConnect: () => {
 				void this.plugin.connect();
 			},
