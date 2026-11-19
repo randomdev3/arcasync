@@ -250,6 +250,8 @@ export interface DeviceOptions {
 	warmDocs?: number;
 	/** `limits().maxMdBytes`; file sizes come from the fake disk. */
 	maxBytes?: number;
+	/** `limits().maxBaseBytes`. */
+	maxBaseBytes?: number;
 	flushDelayMs?: number;
 	editorGraceMs?: number;
 	paths?: Record<string, string>;
@@ -286,6 +288,7 @@ export function device(options: DeviceOptions) {
 			options.relay.open(docNameValue, ydoc, awareness, options.readonly),
 		isOffline: options.relay.isOffline,
 		onConnectionChange: options.relay.onConnectionChange,
+		maxBaseBytes: options.maxBaseBytes,
 	};
 	const managerOptions: DocManagerOptions = {
 		note,

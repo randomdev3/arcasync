@@ -212,7 +212,7 @@ export class DocManager implements IDocManager {
 			const text = diskText(raw);
 			const hash = await textHash(text);
 			if (entry) remember(entry, hash);
-			if (text === note.ytext.toString()) await note.setLastSyncedHash(hash);
+			if (text === note.ytext.toString()) await note.setLastSynced(hash, text);
 		};
 		const entry = this.entries.get(note.fileId);
 		if (!entry) return run();
@@ -392,9 +392,10 @@ export class DocManager implements IDocManager {
 		if (entry.editorHashes.length === 0) return;
 		const raw = await this.options.reconcile.writer.read(note.path);
 		if (raw === null) return;
-		const hash = await textHash(diskText(raw));
+		const text = diskText(raw);
+		const hash = await textHash(text);
 		if (entry.editorHashes.includes(hash) && (await note.getLastSyncedHash()) !== hash) {
-			await note.setLastSyncedHash(hash);
+			await note.setLastSynced(hash, text);
 		}
 		// Past the grace period every late editor save has landed; a later match is a real edit.
 		if (entry.editors === 0 && !entry.graceTimer) entry.editorHashes.length = 0;

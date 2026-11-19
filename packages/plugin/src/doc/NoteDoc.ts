@@ -5,9 +5,11 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { OpenDocHandle } from "../net/ConnectionManager";
 import type { NoteDocHandle, NoteDocState } from "../workspace/types";
+import { utf8Bytes } from "./diskText";
 import { isEnrolled, type ReconcileNote } from "./enroll";
 
 const LAST_SYNCED_HASH = "lastSyncedHash";
+const LAST_SYNCED_TEXT = "lastSyncedText";
 
 export interface NoteDocDeps {
 	vaultId: string;
@@ -18,6 +20,8 @@ export interface NoteDocDeps {
 	isOffline(): boolean;
 	/** Subscribe to connection status changes; returns the unsubscribe function. */
 	onConnectionChange(listener: () => void): () => void;
+	/** Larger synced texts are not stored as a merge base (`limits().maxBaseBytes`; default: all). */
+	maxBaseBytes?: number;
 }
 
 export function noteDbName(vaultId: string, fileId: string): string {
@@ -44,6 +48,8 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 	private readonly attachment: OpenDocHandle;
 	private readonly closeListeners = new Set<() => void>();
 	private lastSyncedHash: string | undefined;
+	/** The hash whose text this session already stored (or dropped) in IndexedDB. */
+	private storedBaseHash: string | undefined;
 
 	private constructor(
 		readonly fileId: string,
@@ -125,6 +131,11 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 		return () => this.closeListeners.delete(listener);
 	}
 
+	/** A getter, so a check after an `await` is not narrowed away. */
+	private get closed(): boolean {
+		return this.state === "closed";
+	}
+
 	hasLocalData(): boolean {
 		return this.ytext.length > 0 || isEnrolled(this.ydoc);
 	}
@@ -133,9 +144,27 @@ export class NoteDoc implements NoteDocHandle, ReconcileNote {
 		return this.lastSyncedHash;
 	}
 
-	async setLastSyncedHash(hash: string): Promise<void> {
+	/**
+	 * The text disk and doc last agreed on, the base of a 3-way merge. It is stored next to its
+	 * hash but read only on demand; callers check it against `getLastSyncedHash` (a text over
+	 * `maxBaseBytes` is not stored, and an older one may be left from before).
+	 */
+	async getLastSyncedText(): Promise<string | undefined> {
+		if (this.closed) return undefined;
+		const text = (await this.idb.get(LAST_SYNCED_TEXT)) as unknown;
+		return typeof text === "string" ? text : undefined;
+	}
+
+	async setLastSynced(hash: string, text: string): Promise<void> {
 		this.lastSyncedHash = hash;
-		if (this.state !== "closed") await this.idb.set(LAST_SYNCED_HASH, hash);
+		if (this.closed) return;
+		await this.idb.set(LAST_SYNCED_HASH, hash);
+		if (this.storedBaseHash === hash || this.closed) return;
+		this.storedBaseHash = hash;
+		const max = this.deps.maxBaseBytes ?? Number.POSITIVE_INFINITY;
+		const fits = text.length * 3 <= max || utf8Bytes(text) <= max;
+		if (fits) await this.idb.set(LAST_SYNCED_TEXT, text);
+		else await this.idb.del(LAST_SYNCED_TEXT);
 	}
 
 	/** Detaches the provider and closes IndexedDB (data kept). */

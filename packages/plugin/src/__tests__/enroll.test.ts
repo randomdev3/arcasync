@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { textHash } from "../doc/diskText";
 import { decide, enrollmentUpdate, isEnrolled, type ReconcileInput } from "../doc/enroll";
 import { device, FakeDisk, FakeRelay, noteName, sleep, waitUntil } from "./helpers/noteFakes";
 
@@ -59,6 +60,7 @@ describe("decide", () => {
 		lastSyncedHash: "ha",
 		canEnroll: true,
 		writable: true,
+		hasBase: false,
 	};
 	it.each<[string, Partial<ReconcileInput>, string]>([
 		["missing file", { disk: null, diskHash: null }, "missing"],
@@ -73,8 +75,18 @@ describe("decide", () => {
 			{ disk: "c", diskHash: "hc", doc: "b", docHash: "hb" },
 			"conflict",
 		],
+		[
+			"differ + touched, doc moved, base kept",
+			{ disk: "c", diskHash: "hc", doc: "b", docHash: "hb", hasBase: true },
+			"merged",
+		],
 		["differ + touched, doc at last sync", { disk: "c", diskHash: "hc" }, "apply-disk"],
 		["differ + touched, viewer", { disk: "c", diskHash: "hc", writable: false }, "conflict"],
+		[
+			"differ + touched, viewer with a base",
+			{ disk: "c", diskHash: "hc", doc: "b", docHash: "hb", writable: false, hasBase: true },
+			"conflict",
+		],
 		[
 			"differ, never synced here",
 			{ disk: "c", diskHash: "hc", lastSyncedHash: undefined },
@@ -168,6 +180,77 @@ describe("enrollment and reconcile on open (fake-indexeddb)", () => {
 		// The next open is quiet: no second copy.
 		await openOnce(d, fileId);
 		expect(disk.files.size).toBe(2);
+	});
+
+	it("differ + touched while the doc moved, with a base: both edits are merged, no local copy", async () => {
+		const relay = new FakeRelay();
+		const fileId = newId();
+		const { disk, vaultId } = await syncedBefore(relay, fileId, "A\nB\nC\n");
+		remoteReplace(relay, fileId, "A1\nB\nC\n");
+		disk.files.set(PATH, "A\nB\nC3\n");
+		const d = device({ relay, disk, vaultId, name: "dev" });
+		d.paths[fileId] = PATH;
+		const note = await d.docs.acquire(fileId, PATH);
+		await note.whenReady();
+		expect(note.ytext.toString()).toBe("A1\nB\nC3\n");
+		expect(disk.files.get(PATH)).toBe("A1\nB\nC3\n");
+		expect(disk.files.size).toBe(1);
+		expect(d.notices).toEqual([]);
+		expect(d.selfWrites.consume(PATH, "modify")).toBe(true);
+		expect(await note.getLastSyncedHash()).toBe(await textHash("A1\nB\nC3\n"));
+		expect(await note.getLastSyncedText()).toBe("A1\nB\nC3\n");
+		await waitUntil(() => relay.text(noteName(fileId)) === "A1\nB\nC3\n");
+		// The next reconcile is quiet.
+		expect((await d.docs.reconcile(note)).action).toBe("in-sync");
+		d.docs.release(note);
+	});
+
+	it("differ + touched while the doc moved, same line edited: local copy (the merge is not clean)", async () => {
+		const relay = new FakeRelay();
+		const fileId = newId();
+		const { disk, vaultId } = await syncedBefore(relay, fileId, "A\nB\nC\n");
+		remoteReplace(relay, fileId, "A\nB-alice\nC\n");
+		disk.files.set(PATH, "A\nB-bob\nC\n");
+		const d = device({ relay, disk, vaultId, name: "dev" });
+		expect((await openOnce(d, fileId)).text).toBe("A\nB-alice\nC\n");
+		expect(disk.files.get(PATH)).toBe("A\nB-alice\nC\n");
+		expect(disk.files.get(COPY)).toBe("A\nB-bob\nC\n");
+		expect(d.notices).toHaveLength(1);
+	});
+
+	it("differ + touched while the doc moved, base over maxBaseBytes: local copy", async () => {
+		const relay = new FakeRelay();
+		const fileId = newId();
+		const disk = new FakeDisk({ [PATH]: "A\nB\nC\n" });
+		const first = device({ relay, disk, name: "dev", maxBaseBytes: 4 });
+		await openOnce(first, fileId);
+		await waitUntil(() => relay.text(noteName(fileId)) === "A\nB\nC\n");
+		first.docs.destroy();
+		remoteReplace(relay, fileId, "A1\nB\nC\n");
+		disk.files.set(PATH, "A\nB\nC3\n");
+		const d = device({ relay, disk, vaultId: first.vaultId, name: "dev" });
+		expect((await openOnce(d, fileId)).text).toBe("A1\nB\nC\n");
+		expect(disk.files.get(COPY)).toBe("A\nB\nC3\n");
+	});
+
+	it("a stale base (its hash is not the last synced one) is not used", async () => {
+		const relay = new FakeRelay();
+		const fileId = newId();
+		const { disk, vaultId } = await syncedBefore(relay, fileId, "A\nB\nC\n");
+		// The base text from the first sync stays; a later sync of a large text dropped nothing
+		// but moved the hash (as an older plugin version, which kept only the hash, would).
+		const mid = device({ relay, disk, vaultId, name: "dev" });
+		mid.paths[fileId] = PATH;
+		const note = await mid.docs.acquire(fileId, PATH);
+		await note.whenReady();
+		await note.setLastSynced("not-the-hash-of-the-base", "A\nB\nC\n");
+		mid.docs.release(note);
+		mid.docs.destroy();
+		remoteReplace(relay, fileId, "A1\nB\nC\n");
+		disk.files.set(PATH, "A\nB\nC3\n");
+		const d = device({ relay, disk, vaultId, name: "dev" });
+		expect((await openOnce(d, fileId)).text).toBe("A1\nB\nC\n");
+		expect(disk.files.get(COPY)).toBe("A\nB\nC3\n");
 	});
 
 	it("differ + touched while the doc did not move: the disk edit goes into the doc", async () => {
