@@ -6,7 +6,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
-		"dev": "turbo run dev --filter=@arcasync/relay-cf --filter=@arcasync/plugin",
+		"dev": "turbo run dev --filter=@arcasync/relay-cf --filter=@arcasync/plugin --filter=@arcasync/site",
 		"dev:node": "turbo run dev --filter=@arcasync/server --filter=@arcasync/plugin",
 		"build": "turbo run build",
 		"test": "turbo run test",
