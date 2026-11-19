@@ -1,7 +1,6 @@
 // Starts `wrangler dev` for the relay with local state persisted under `persistTo`, and stops it
 // by killing the whole process group (wrangler's workerd child is orphaned otherwise).
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,33 +12,13 @@ const WRANGLER = join(
 	"wrangler.js",
 );
 
-const SITE_DIST = join(PACKAGE_DIR, "..", "site", "dist");
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * wrangler refuses to start without the assets directory (`../site/dist`). Turbo builds the site
- * first for `pnpm dev`/`build`/`test`; vitest integration runs and the e2e harness do not go
- * through turbo, so build it here when it is missing. An existing build is reused as is.
- */
-export function ensureSiteBuilt() {
-	if (existsSync(join(SITE_DIST, "index.html"))) return;
-	const result = spawnSync("pnpm", ["-F", "@arcasync/site", "build"], {
-		cwd: PACKAGE_DIR,
-		stdio: "inherit",
-	});
-	if (result.status !== 0) throw new Error(`building @arcasync/site failed (${result.status})`);
-}
 
 /**
  * @param {{ port: number, persistTo: string, env?: string, vars?: Record<string, string>, log?: boolean }} options
  * @returns {Promise<{ url: string, pid: number, stop: () => Promise<void> }>}
  */
 export async function startRelayDev({ port, persistTo, env = "dev", vars = {}, log = false }) {
-	ensureSiteBuilt();
-	const url = `http://localhost:${port}`;
-	// Invite and device-code links point at this relay, whatever port it is on.
-	if (env === "dev") vars = { ARCASYNC_PUBLIC_URL: url, ...vars };
 	const args = [
 		WRANGLER,
 		"dev",
@@ -64,6 +43,7 @@ export async function startRelayDev({ port, persistTo, env = "dev", vars = {}, l
 		stdio: log ? "inherit" : "ignore",
 	});
 	const exited = new Promise((r) => child.once("exit", r));
+	const url = `http://localhost:${port}`;
 
 	const stop = async () => {
 		if (child.exitCode !== null || child.signalCode !== null) return;

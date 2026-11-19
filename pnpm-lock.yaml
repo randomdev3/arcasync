@@ -112,9 +112,6 @@ importers:
         specifier: ^4.1.0
         version: 4.6.1
     devDependencies:
-      '@arcasync/site':
-        specifier: workspace:*
-        version: link:../site
       '@cloudflare/workers-types':
         specifier: ^5.20261117.1
         version: 5.20261117.1

@@ -26,6 +26,7 @@ import {
 	login,
 	post,
 	request,
+	SITE_URL,
 } from "./helpers";
 
 const PORT = 23_000 + Math.floor(Math.random() * 400);
@@ -74,7 +75,7 @@ describe("accounts", () => {
 			team = boot.workspace;
 			expect(team).toMatchObject({ name: "Team", slug: "team", role: "owner" });
 			expect(boot.invite).toMatchObject({ role: "owner", admin: true, maxUses: 1 });
-			expect(boot.invite.url).toBe(`${relay.url}/join?invite=${boot.invite.token}`);
+			expect(boot.invite.url).toBe(`${SITE_URL}/join?invite=${boot.invite.token}`);
 			expect(boot.invite.expiresAt - Date.now()).toBeGreaterThan(23 * 3600_000);
 
 			dave = await acceptInvite(relay.url, boot.invite.token, "dave");
@@ -111,7 +112,7 @@ describe("accounts", () => {
 	describe("invites", () => {
 		it("lets only owners and admins create, list and revoke", async () => {
 			const editorInvite = await invite({ role: "editor" });
-			expect(editorInvite.url).toBe(`${relay.url}/join?invite=${editorInvite.token}`);
+			expect(editorInvite.url).toBe(`${SITE_URL}/join?invite=${editorInvite.token}`);
 			const erin = SessionResponse.parse((await accept(editorInvite.token, "erin")).body);
 			expect(erin.user.isAdmin).toBe(false);
 			expect(erin.workspaces).toEqual([{ ...team, role: "editor" }]);
@@ -268,7 +269,7 @@ describe("accounts", () => {
 				await post(relay.url, users(nora.user.id, "enable"), {}, dave.sessionToken),
 			);
 			expect(reentry).toMatchObject({ maxUses: 1, admin: false });
-			expect(reentry.url).toBe(`${relay.url}/join?invite=${reentry.token}`);
+			expect(reentry.url).toBe(`${SITE_URL}/join?invite=${reentry.token}`);
 			expect(reentry.expiresAt - Date.now()).toBeGreaterThan(6.9 * 24 * 3600_000);
 			// It is not a workspace invite: an existing user cannot redeem it.
 			const redeem = await request(relay.url, "POST", "/api/invites/redeem", {

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { unstable_readConfig } from "wrangler";
@@ -73,27 +73,24 @@ describe("wrangler.jsonc", () => {
 		expect(resolved(undefined).observability?.enabled).toBe(false);
 	});
 
-	it("serves the site from static assets in every env, with only /api/* and /ws on the Worker", () => {
-		const site = resolve(dirname(CONFIG), "..", "site", "dist");
+	it("serves no static assets (the website is on Cloudflare Pages)", () => {
 		for (const env of [undefined, "production", "dev", "probe"]) {
-			const assets = resolved(env).assets;
-			expect(assets, `env ${env}`).toBeDefined();
-			expect(resolve(dirname(CONFIG), assets?.directory ?? "")).toBe(site);
-			expect(assets?.run_worker_first).toEqual(["/api/*", "/ws"]);
-			// Unknown paths stay on the (free) asset layer instead of falling through to the Worker.
-			expect(assets?.not_found_handling).toBe("404-page");
-			expect(assets?.html_handling).toBe("auto-trailing-slash");
-			expect(assets?.binding).toBeUndefined();
+			expect(resolved(env).assets, `env ${env}`).toBeUndefined();
 		}
 	});
 
-	it("sets ARCASYNC_PUBLIC_URL for dev only (elsewhere the request origin is used)", () => {
+	it("points links at the website and allows it cross-origin in dev only", () => {
 		for (const env of [undefined, "production", "probe"]) {
-			expect("ARCASYNC_PUBLIC_URL" in (resolved(env).vars as Record<string, string>)).toBe(false);
+			const vars = resolved(env).vars as Record<string, string>;
+			expect("ARCASYNC_PUBLIC_URL" in vars, `env ${env}`).toBe(false);
+			expect("ARCASYNC_SITE_ORIGINS" in vars, `env ${env}`).toBe(false);
 		}
-		expect((resolved("dev").vars as Record<string, string>).ARCASYNC_PUBLIC_URL).toBe(
-			"http://localhost:8789",
-		);
+		const dev = resolved("dev").vars as Record<string, string>;
+		expect(dev.ARCASYNC_PUBLIC_URL).toBe("http://localhost:5173");
+		expect(dev.ARCASYNC_SITE_ORIGINS?.split(",")).toEqual([
+			"http://localhost:5173",
+			"http://localhost:4173",
+		]);
 	});
 
 	it("serves wrangler dev on 8789", () => {

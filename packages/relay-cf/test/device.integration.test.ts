@@ -16,7 +16,17 @@ import {
 } from "@arcasync/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startRelayDev } from "../scripts/dev-server.mjs";
-import { acceptInvite, bootstrap, device, errorCode, get, post, request, sleep } from "./helpers";
+import {
+	acceptInvite,
+	bootstrap,
+	device,
+	errorCode,
+	get,
+	post,
+	request,
+	SITE_URL,
+	sleep,
+} from "./helpers";
 
 const PORT = 26_000 + Math.floor(Math.random() * 400);
 const TTL_S = 20;
@@ -80,7 +90,7 @@ describe("device-code sign-in", () => {
 	it("starts with a user code, an approve link and the server's interval", async () => {
 		const code = await start("phone");
 		expect(code.userCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
-		expect(code.verificationUri).toBe(`${relay.url}/approve?code=${code.userCode}`);
+		expect(code.verificationUri).toBe(`${SITE_URL}/approve?code=${code.userCode}`);
 		expect(code.interval).toBe(DEVICE_CODE_INTERVAL_S);
 		expect(code.expiresIn).toBe(TTL_S);
 		const bad = await request(relay.url, "POST", "/api/auth/device/start", { body: {} });

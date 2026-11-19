@@ -79,6 +79,9 @@ export const patch = (base: string, path: string, body: unknown, token?: string)
 export const del = (base: string, path: string, token?: string) =>
 	ok(base, "DELETE", path, { token });
 
+/** `env.dev`'s `ARCASYNC_PUBLIC_URL` (the website under `vite dev`): invite and approve links. */
+export const SITE_URL = "http://localhost:5173";
+
 /** `env.dev`'s public bootstrap bearer (wrangler.jsonc); not a secret. */
 export const DEV_BOOTSTRAP_TOKEN = "arcasync-local-dev-bootstrap-token-not-secret-0";
 
