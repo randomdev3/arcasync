@@ -1,5 +1,6 @@
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import {
+	BootstrapResponse,
 	createKeepaliveWebSocket,
 	installPresencePolicy,
 	SessionResponse,
@@ -27,32 +28,93 @@ export async function waitFor<T>(
 	throw new Error(`timed out waiting for ${label} (last: ${JSON.stringify(last)})`);
 }
 
-export async function post(base: string, path: string, body: unknown, token?: string) {
+/** Any request; resolves with the status and the parsed JSON body whatever the status. */
+export async function request(
+	base: string,
+	method: string,
+	path: string,
+	{ body, token }: { body?: unknown; token?: string } = {},
+): Promise<{ status: number; body: unknown }> {
 	const res = await fetch(`${base}${path}`, {
-		method: "POST",
+		method,
 		headers: {
-			"Content-Type": "application/json",
+			...(body === undefined ? {} : { "Content-Type": "application/json" }),
 			...(token ? { Authorization: `Bearer ${token}` } : {}),
 		},
-		body: JSON.stringify(body),
+		body: body === undefined ? undefined : JSON.stringify(body),
 	});
-	if (!res.ok) throw new Error(`${path} -> ${res.status} ${await res.text()}`);
-	return res.json() as Promise<unknown>;
+	const text = await res.text();
+	let parsed: unknown = text;
+	try {
+		parsed = text ? JSON.parse(text) : null;
+	} catch {}
+	return { status: res.status, body: parsed };
+}
+
+/** The `error.code` of an API error body. */
+export function errorCode(body: unknown): string | undefined {
+	return (body as { error?: { code?: string } } | null)?.error?.code;
+}
+
+async function ok(
+	base: string,
+	method: string,
+	path: string,
+	options: { body?: unknown; token?: string },
+): Promise<unknown> {
+	const res = await request(base, method, path, options);
+	if (res.status < 200 || res.status >= 300) {
+		throw new Error(`${method} ${path} -> ${res.status} ${JSON.stringify(res.body)}`);
+	}
+	return res.body;
+}
+
+export const post = (base: string, path: string, body: unknown, token?: string) =>
+	ok(base, "POST", path, { body, token });
+export const get = (base: string, path: string, token?: string) => ok(base, "GET", path, { token });
+export const patch = (base: string, path: string, body: unknown, token?: string) =>
+	ok(base, "PATCH", path, { body, token });
+export const del = (base: string, path: string, token?: string) =>
+	ok(base, "DELETE", path, { token });
+
+/** `env.dev`'s public bootstrap bearer (wrangler.jsonc); not a secret. */
+export const DEV_BOOTSTRAP_TOKEN = "teamsync-local-dev-bootstrap-token-not-secret-0";
+
+export async function bootstrap(base: string, workspaceName = "Team", token = DEV_BOOTSTRAP_TOKEN) {
+	return BootstrapResponse.parse(await post(base, "/api/auth/bootstrap", { workspaceName }, token));
+}
+
+export const device = (name: string) => ({
+	name: `${name}-device`,
+	platform: "macos" as const,
+	vaultId: `${name}-vault`,
+});
+
+/** A new user joins through an invite token → `SessionResponse`. */
+export async function acceptInvite(base: string, inviteToken: string, name: string) {
+	return SessionResponse.parse(
+		await post(base, "/api/auth/invite/accept", {
+			token: inviteToken,
+			name,
+			device: device(name),
+		}),
+	);
+}
+
+/** A `WsTokenResponse.token` minter for a session, for `client().open`. */
+export function wsTokenFor(base: string, sessionToken: string, workspaceId: string) {
+	return async () =>
+		WsTokenResponse.parse(await post(base, "/api/auth/ws-token", { workspaceId }, sessionToken))
+			.token;
 }
 
 export async function login(base: string, name: string) {
 	const session = SessionResponse.parse(
-		await post(base, "/api/auth/dev-login", {
-			name,
-			device: { name: `${name}-device`, platform: "macos", vaultId: `${name}-vault` },
-		}),
+		await post(base, "/api/auth/dev-login", { name, device: device(name) }),
 	);
 	const workspace = session.workspaces[0];
 	if (!workspace) throw new Error("no workspace");
-	const token = async () =>
-		WsTokenResponse.parse(
-			await post(base, "/api/auth/ws-token", { workspaceId: workspace.id }, session.sessionToken),
-		).token;
+	const token = wsTokenFor(base, session.sessionToken, workspace.id);
 	return { session, workspaceId: workspace.id, token };
 }
 
