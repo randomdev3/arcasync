@@ -11,14 +11,17 @@ import {
 	totals,
 } from "../scripts/budget-model.ts";
 
+/** The pre-R-9 worst case the plan's §2.B totals were computed with. */
+const WORST = { ...BILLING, PINGS_BILLED: true, CLOSES_BILLED: true, DELETE_ROWS_BILLED: true };
+
 const over = (usage: Record<Cap, number>) =>
 	(Object.keys(FREE_CAPS) as Cap[]).filter((cap) => usage[cap] > FREE_CAPS[cap] * BUDGET_FRACTION);
 
 describe("budget model", () => {
 	it("reproduces the plan's §2.B totals from the plan's unit costs", () => {
-		const list = components(PLAN_UNITS);
-		const a = totals(list, "A");
-		const b = totals(list, "B");
+		const list = components(PLAN_UNITS, TEAM, WORST);
+		const a = totals(list, "A", TEAM, WORST);
+		const b = totals(list, "B", TEAM, WORST);
 		// Plan: A 31,640 requests / 12,120 rows; B adds 7,680 requests. The plan rounds compaction
 		// and counts 100 closes plus 440 reconnect requests; the model derives both from connects.
 		expect(a.doRequests).toBeGreaterThan(31_000);
@@ -48,12 +51,12 @@ describe("budget model", () => {
 
 	it("bills pings, closes and deletes only when the switches say so", () => {
 		const free = {
-			...BILLING,
+			...WORST,
 			PINGS_BILLED: false,
 			CLOSES_BILLED: false,
 			DELETE_ROWS_BILLED: false,
 		};
-		const worst = totals(components(PLAN_UNITS), "B");
+		const worst = totals(components(PLAN_UNITS, TEAM, WORST), "B", TEAM, WORST);
 		const best = totals(components(PLAN_UNITS, TEAM, free), "B", TEAM, free);
 		expect(worst.doRequests - best.doRequests).toBeCloseTo(
 			TEAM.users * 24 * PLAN_UNITS.pingsPerHour +
@@ -61,6 +64,16 @@ describe("budget model", () => {
 			6,
 		);
 		expect(best.rowsWritten).toBeLessThan(worst.rowsWritten - 5000);
+	});
+
+	it("the measured billing (R-9) drops only the auto-responded pings from the worst case", () => {
+		const worst = totals(components(PLAN_UNITS, TEAM, WORST), "B", TEAM, WORST);
+		const measured = totals(components(PLAN_UNITS), "B");
+		expect(worst.doRequests - measured.doRequests).toBeCloseTo(
+			TEAM.users * 24 * PLAN_UNITS.pingsPerHour,
+			6,
+		);
+		expect(measured.rowsWritten).toBe(worst.rowsWritten);
 	});
 
 	it("models the object as awake while events are frequent and asleep when rare", () => {

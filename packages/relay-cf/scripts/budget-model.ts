@@ -6,12 +6,22 @@
  * component here in the same branch.
  */
 
-/** Billing semantics that only a real Cloudflare account can settle (R-9). Worst case for now. */
+/**
+ * Billing semantics, settled by the R-9 probe on a free-plan account (2026-11-19, GraphQL
+ * analytics per phase of `load-probe.ts`) unless noted:
+ * - 501 awareness frames → 505 DO requests, 301 updates → 305: inbound messages bill 1:1.
+ * - ~140 keepalive pings in one minute → 2 DO requests (both stats reads): auto-responded pings
+ *   are not billed.
+ * - 50 × (connect + Auth + close) → 152 DO requests: closes are billed.
+ * - Compaction did not run in the probe, so tail deletes stay counted (worst case).
+ * - Duration: the 10-client live run billed 0.25 GB-s in 10 min (≈1.8 ms active per request),
+ *   far below the awake model in `awakeSeconds`, which is kept as a deliberately loose bound.
+ */
 export const BILLING = {
 	/** Inbound WebSocket messages per billed DO request (20 is documented for Workers Paid). */
 	MSG_RATIO: 1,
-	/** Keepalive pings answered by `setWebSocketAutoResponse` still count as requests. */
-	PINGS_BILLED: true,
+	/** Keepalive pings answered by `setWebSocketAutoResponse` count as requests. */
+	PINGS_BILLED: false,
 	/** `webSocketClose` events count as requests. */
 	CLOSES_BILLED: true,
 	/** Compaction's tail deletes count as rows written (they do in local SQLite). */

@@ -60,22 +60,19 @@ as rows written). It runs only on the `probe` environment, and the worker is del
    node packages/relay-cf/scripts/load-probe.ts --url https://teamsync-relay-probe.<subdomain>.workers.dev \
      --pings 500 --frames 500 --rows 300 --connects 50 --json .e2e/probe-$(date +%F).json
    ```
-3. Close open login right away by redeploying with it off:
-   ```sh
-   pnpm -F @teamsync/relay-cf exec wrangler deploy --env probe --var TEAMSYNC_DEV_OPEN_LOGIN:0
-   ```
+3. Delete the probe right away (step 5). Cloudflare keeps its analytics after the worker is
+   gone, so there is no reason to leave an open-login worker running while you wait.
 4. Wait at least 10 minutes for analytics to settle, then read the counters for each printed UTC
-   window in the dashboard:
-   - **Workers & Pages → teamsync-relay-probe → Metrics**: Worker requests.
-   - **Workers & Pages → teamsync-relay-probe → Durable Objects** (or **Storage & Databases →
-     Durable Objects**), per namespace: requests, rows written, rows read, duration.
-   - The probe has no GraphQL Analytics mode: the Durable Objects datasets
-     (`durableObjectsInvocationsAdaptiveGroups`, `durableObjectsPeriodicGroups`,
-     `durableObjectsStorageGroups`) are documented, but their WebSocket-message and SQL-row field
-     names are not, so read them from the dashboard (or discover them with GraphQL introspection).
-   - Compare each window with the probe's expected numbers: the `pings` window shows whether
-     auto-responses bill, `frames` gives the inbound message ratio, `rows` the rows written per
-     update, and `connects` whether close events count as requests.
+   window. The GraphQL Analytics API answers with the token `wrangler login` stores (account
+   analytics are readable with it), grouped by `datetimeMinute`:
+   - `workersInvocationsAdaptive`: `sum { requests }` (Worker requests).
+   - `durableObjectsInvocationsAdaptiveGroups`: `sum { requests }` (billed DO requests).
+   - `durableObjectsPeriodicGroups`: `sum { duration rowsWritten rowsRead activeTime }`;
+     `duration` is the billed GB-s.
+   The probe env has debug stats on, which writes one extra stats row per message; subtract it
+   when reading rows written. Compare each window with the probe's expected numbers: `pings`
+   shows whether auto-responses bill, `frames` the inbound message ratio, `rows` the rows written
+   per update, and `connects` whether close events count as requests.
 5. **Teardown (always, also after a failure):**
    ```sh
    pnpm -F @teamsync/relay-cf exec wrangler delete --env probe
@@ -83,6 +80,20 @@ as rows written). It runs only on the `probe` environment, and the worker is del
    ```
    Follow any CLI prompt about removing the Durable Object namespaces. Run `wrangler logout` when
    you no longer need the session.
+
+### Results (2026-11-19, free plan)
+
+| Question | Answer | Evidence |
+|---|---|---|
+| Inbound WebSocket messages per DO request | 1:1 | 501 frames → 505 requests; 301 updates → 305 |
+| Auto-responded keepalive pings billed? | No | ~140 pings in one minute → 2 requests (stats reads) |
+| Close events billed? | Yes | 50 × (connect + Auth + close) → 152 requests |
+| Rows written per update | 1 | 301 updates → 605 rows, of which 301 are debug-stats rows |
+| Duration | ≈1.8 ms active per request | 10 clients × 10 min → 0.25 GB-s |
+
+`budget-model.ts` uses these (`PINGS_BILLED: false`). Its duration model stays far looser than the
+measurement. The whole probe (functional smoke, `budget --live`, load probe) used under 4% of the
+daily DO request cap and 7% of rows written. No CPU or memory limit was hit.
 
 ## Rollback
 
