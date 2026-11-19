@@ -52,6 +52,14 @@ characters, or equal to the public dev secret (outside `env.dev`), every route a
    `"ok":false` names the configuration problem. `/api/server-info` lists
    `features: {accounts: true, chunks: true, bulkClone: true}` once the bucket binding resolves.
 
+## Website
+
+The website (landing page, install guide, join, browser sign-in and approve pages) is a static
+site on Cloudflare Pages at `https://arca-sync.pages.dev`, separate from the relay. Its build,
+configuration (`VITE_ARCASYNC_API_URL`, `ARCASYNC_PUBLIC_URL`, `ARCASYNC_SITE_ORIGINS`) and deploy
+are in [site.md](site.md). Deploy the site before (or together with) a relay deploy that sets
+`ARCASYNC_PUBLIC_URL`, since new invite links point at it.
+
 ## Accounts: bootstrap, invites and sign-in
 
 Production has dev login off. Every user signs in through an invite or a device code.
@@ -64,15 +72,17 @@ curl -s -X POST https://arcasync-relay.<subdomain>.workers.dev/api/auth/bootstra
   -H "Content-Type: application/json" \
   -d '{"workspaceName":"Team"}' | jq -r .invite.url
 ```
-It prints the invite link (`invite.url`, an `obsidian://arcasync?…` link carrying the server URL
-and the invite token). A second bootstrap answers `409 already_bootstrapped`; a missing or wrong
+It prints the invite link (`invite.url`). With `ARCASYNC_PUBLIC_URL` set (production:
+`https://arca-sync.pages.dev`) it is a website link, `https://arca-sync.pages.dev/join?invite=…`;
+unset, it is an `obsidian://arcasync?…` deep link carrying the server URL and the invite token. A second bootstrap answers `409 already_bootstrapped`; a missing or wrong
 token answers `401`, and a server without `ARCASYNC_BOOTSTRAP_TOKEN` answers `404`. Delete the
 secret afterwards if you like (`wrangler secret delete ARCASYNC_BOOTSTRAP_TOKEN --env production`);
 it is never needed again.
 
-**First sign-in.** On the admin's machine, open the printed link (Obsidian with the plugin
-installed handles `obsidian://arcasync`), or paste it into Settings → ArcaSync → "Join with an
-invite", pick a display name, and Join. The plugin accepts the invite, stores the session token
+**First sign-in.** Open the printed link. On the website's join page, either create the account
+in the browser (then sign Obsidian in with a device code approved on `/approve`) or choose "Open in
+Obsidian". You can also paste the link into Settings → ArcaSync → "Join with an invite" (set the
+Server URL first on a fresh install), pick a display name, and Join. The plugin accepts the invite, stores the session token
 in Obsidian's secret storage, and connects.
 
 **More people.** An owner or admin runs "Create an invite link" (command palette) and sends the
@@ -82,7 +92,8 @@ members".
 
 **More devices (device code).** On the new device, Settings → ArcaSync → "Sign in with another
 device" shows a short user code. On a device that is already signed in, run "Approve a device
-sign-in" (or open the `obsidian://arcasync?approve=<code>` link), check the device name and
+sign-in", or open the code's link (`https://arca-sync.pages.dev/approve?code=<code>` with the
+website, `obsidian://arcasync?approve=<code>` without it), check the device name and
 platform it shows, and approve. The new device polls every 5 s at most (faster polls get
 `slow_down`) and signs in as the approver; the code expires after 10 minutes.
 
