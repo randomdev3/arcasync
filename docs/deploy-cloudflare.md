@@ -57,7 +57,7 @@ characters, or equal to the public dev secret (outside `env.dev`), every route a
 Production has dev login off. Every user signs in through an invite or a device code.
 
 **Bootstrap (once).** The first call creates the first workspace and a single-use invite that
-makes its redeemer the workspace owner **and** server admin. The invite is valid for 24 hours.
+makes whoever accepts it the workspace owner **and** server admin. The invite is valid for 24 hours.
 ```sh
 curl -s -X POST https://arcasync-relay.<subdomain>.workers.dev/api/auth/bootstrap \
   -H "Authorization: Bearer $BOOTSTRAP_TOKEN" \
@@ -72,7 +72,7 @@ it is never needed again.
 
 **First sign-in.** On the admin's machine, open the printed link (Obsidian with the plugin
 installed handles `obsidian://arcasync`), or paste it into Settings → ArcaSync → "Join with an
-invite", pick a display name, and Join. The plugin redeems the invite, stores the session token
+invite", pick a display name, and Join. The plugin accepts the invite, stores the session token
 in Obsidian's secret storage, and connects.
 
 **More people.** An owner or admin runs "Create an invite link" (command palette) and sends the
@@ -214,7 +214,8 @@ Nothing below has been done; each needs its own go-ahead.
 
 - The plugin has no admin UI to disable or enable a user. The API exists
   (`POST /api/admin/users/:id/disable|enable`); enable returns a re-entry invite bound to that
-  user, which they redeem like any invite.
+  user. It works only through the signed-out "Join with an invite" path (accept); a signed-in
+  "Join another workspace" (redeem) refuses it with 404.
 - Redeeming a re-entry invite through the signed-out "Join with an invite" path still asks for a
   display name (the relay ignores it). This path has no e2e test.
 - A disabled user's next ws-token mint answers 401. The plugin retries once and then shows an
