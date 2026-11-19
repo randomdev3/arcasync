@@ -2,9 +2,9 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	// The top level is production-safe: a bare `wrangler deploy` ships with dev login and debug
 	// stats off and no secret, so every route answers 503 until `wrangler secret put
-	// TEAMSYNC_SECRET` (src/config.ts). Environments do not inherit vars or durable_objects,
+	// ARCASYNC_SECRET` (src/config.ts). Environments do not inherit vars or durable_objects,
 	// so every env repeats them (test/config.test.ts checks the resolved result).
-	"name": "teamsync-relay",
+	"name": "arcasync-relay",
 	"main": "src/worker.ts",
 	"compatibility_date": "2026-11-01",
 	"durable_objects": {
@@ -17,11 +17,11 @@
 	// Environments do not inherit bindings either: production and dev repeat this, probe has none
 	// (no R2 in the probe, so its `features.chunks` stays false). Dev uses wrangler's local R2
 	// emulation; the production bucket is created by the user.
-	"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
+	"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "arcasync-chunks" }],
 	"vars": {
-		"TEAMSYNC_DEV_OPEN_LOGIN": "0",
-		"TEAMSYNC_DEBUG_STATS": "0",
-		"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+		"ARCASYNC_DEV_OPEN_LOGIN": "0",
+		"ARCASYNC_DEBUG_STATS": "0",
+		"ARCASYNC_MAX_FILE_BYTES": "209715200"
 	},
 	// `dev` settings are top-level only; this is the port for `wrangler dev --env dev`. The Node
 	// server defaults to 8787, so `pnpm dev` (turbo runs both) stays collision-free.
@@ -30,18 +30,18 @@
 	"env": {
 		// `pnpm -F @arcasync/relay-cf deploy:production` (user only).
 		"production": {
-			"name": "teamsync-relay",
+			"name": "arcasync-relay",
 			"durable_objects": {
 				"bindings": [
 					{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
 					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
 				]
 			},
-			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
+			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "arcasync-chunks" }],
 			"vars": {
-				"TEAMSYNC_DEV_OPEN_LOGIN": "0",
-				"TEAMSYNC_DEBUG_STATS": "0",
-				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_DEV_OPEN_LOGIN": "0",
+				"ARCASYNC_DEBUG_STATS": "0",
+				"ARCASYNC_MAX_FILE_BYTES": "209715200"
 			},
 			"observability": { "enabled": true }
 		},
@@ -53,21 +53,21 @@
 					{ "name": "RELAY", "class_name": "WorkspaceRelay" }
 				]
 			},
-			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "teamsync-chunks" }],
+			"r2_buckets": [{ "binding": "CHUNKS", "bucket_name": "arcasync-chunks" }],
 			"vars": {
-				"TEAMSYNC_SECRET": "teamsync-local-dev-secret-not-for-production",
-				"TEAMSYNC_ALLOW_DEV_SECRET": "1",
+				"ARCASYNC_SECRET": "arcasync-local-dev-secret-not-for-production",
+				"ARCASYNC_ALLOW_DEV_SECRET": "1",
 				// Public, dev only: the bearer for `POST /api/auth/bootstrap` in local tests and e2e.
-				"TEAMSYNC_BOOTSTRAP_TOKEN": "teamsync-local-dev-bootstrap-token-not-secret-0",
-				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
-				"TEAMSYNC_DEBUG_STATS": "1",
-				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_BOOTSTRAP_TOKEN": "arcasync-local-dev-bootstrap-token-not-secret-0",
+				"ARCASYNC_DEV_OPEN_LOGIN": "1",
+				"ARCASYNC_DEBUG_STATS": "1",
+				"ARCASYNC_MAX_FILE_BYTES": "209715200"
 			}
 		},
 		// Throwaway free-tier probe (R-9): open dev login and debug stats, secret via `wrangler
-		// secret put TEAMSYNC_SECRET --env probe`. Delete it after the probe.
+		// secret put ARCASYNC_SECRET --env probe`. Delete it after the probe.
 		"probe": {
-			"name": "teamsync-relay-probe",
+			"name": "arcasync-relay-probe",
 			"durable_objects": {
 				"bindings": [
 					{ "name": "ACCOUNTS", "class_name": "AccountsDO" },
@@ -75,9 +75,9 @@
 				]
 			},
 			"vars": {
-				"TEAMSYNC_DEV_OPEN_LOGIN": "1",
-				"TEAMSYNC_DEBUG_STATS": "1",
-				"TEAMSYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_DEV_OPEN_LOGIN": "1",
+				"ARCASYNC_DEBUG_STATS": "1",
+				"ARCASYNC_MAX_FILE_BYTES": "209715200"
 			}
 		}
 	}

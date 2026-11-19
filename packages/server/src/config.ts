@@ -5,15 +5,15 @@ import { z } from "zod";
 
 const envSchema = z.object({
 	NODE_ENV: z.string().default("development"),
-	TEAMSYNC_PORT: z.coerce.number().int().positive().default(8787),
-	TEAMSYNC_PUBLIC_URL: z.string().default(""),
-	TEAMSYNC_DB_URL: z.string().default(""),
-	TEAMSYNC_DATA_DIR: z.string().default(".data"),
-	TEAMSYNC_BLOB_BACKEND: z.enum(["fs", "s3"]).default("fs"),
-	TEAMSYNC_SECRET: z.string().default(""),
-	TEAMSYNC_DEV_OPEN_LOGIN: z.string().default(""),
-	TEAMSYNC_ADMIN_BOOTSTRAP_TOKEN: z.string().default(""),
-	TEAMSYNC_MAX_FILE_BYTES: z.coerce
+	ARCASYNC_PORT: z.coerce.number().int().positive().default(8787),
+	ARCASYNC_PUBLIC_URL: z.string().default(""),
+	ARCASYNC_DB_URL: z.string().default(""),
+	ARCASYNC_DATA_DIR: z.string().default(".data"),
+	ARCASYNC_BLOB_BACKEND: z.enum(["fs", "s3"]).default("fs"),
+	ARCASYNC_SECRET: z.string().default(""),
+	ARCASYNC_DEV_OPEN_LOGIN: z.string().default(""),
+	ARCASYNC_ADMIN_BOOTSTRAP_TOKEN: z.string().default(""),
+	ARCASYNC_MAX_FILE_BYTES: z.coerce
 		.number()
 		.int()
 		.positive()
@@ -69,7 +69,7 @@ function truthy(v: string): boolean {
 
 /**
  * Read (or create) the dev JWT/pepper secret at `<dataDir>/secret`.
- * Never used in production: there `TEAMSYNC_SECRET` is required.
+ * Never used in production: there `ARCASYNC_SECRET` is required.
  */
 function loadOrCreateSecret(dataDir: string): string {
 	const file = path.join(dataDir, "secret");
@@ -97,35 +97,35 @@ export function loadConfig(
 ): Config {
 	const parsed = envSchema.parse(env);
 	const isProduction = parsed.NODE_ENV === "production";
-	const dataDir = path.resolve(overrides.dataDir ?? parsed.TEAMSYNC_DATA_DIR);
-	const dbUrl = parsed.TEAMSYNC_DB_URL.trim();
+	const dataDir = path.resolve(overrides.dataDir ?? parsed.ARCASYNC_DATA_DIR);
+	const dbUrl = parsed.ARCASYNC_DB_URL.trim();
 
-	let secret = overrides.secret ?? parsed.TEAMSYNC_SECRET.trim();
+	let secret = overrides.secret ?? parsed.ARCASYNC_SECRET.trim();
 	if (!secret) {
 		if (isProduction) {
 			throw new Error(
-				"TEAMSYNC_SECRET is required in production (it signs WebSocket JWTs and peppers session tokens)",
+				"ARCASYNC_SECRET is required in production (it signs WebSocket JWTs and peppers session tokens)",
 			);
 		}
 		secret = loadOrCreateSecret(dataDir);
 	}
 
 	// Dev-open-login defaults on only for a zero-config (PGlite) setup.
-	const devOpenLoginRaw = parsed.TEAMSYNC_DEV_OPEN_LOGIN.trim();
+	const devOpenLoginRaw = parsed.ARCASYNC_DEV_OPEN_LOGIN.trim();
 	const devOpenLogin =
 		overrides.devOpenLogin ?? (devOpenLoginRaw === "" ? dbUrl === "" : truthy(devOpenLoginRaw));
 
-	const port = parsed.TEAMSYNC_PORT;
+	const port = parsed.ARCASYNC_PORT;
 
 	return {
 		env: parsed.NODE_ENV,
 		isProduction,
 		port,
-		publicUrl: parsed.TEAMSYNC_PUBLIC_URL || `http://localhost:${port}`,
+		publicUrl: parsed.ARCASYNC_PUBLIC_URL || `http://localhost:${port}`,
 		dbUrl,
 		pgliteDir: overrides.pgliteDir ?? path.join(dataDir, "pglite"),
 		dataDir,
-		blobBackend: parsed.TEAMSYNC_BLOB_BACKEND,
+		blobBackend: parsed.ARCASYNC_BLOB_BACKEND,
 		blobDir: path.join(dataDir, "blobs"),
 		s3: {
 			endpoint: parsed.S3_ENDPOINT,
@@ -137,9 +137,9 @@ export function loadConfig(
 		},
 		secret,
 		devOpenLogin,
-		adminBootstrapToken: parsed.TEAMSYNC_ADMIN_BOOTSTRAP_TOKEN,
+		adminBootstrapToken: parsed.ARCASYNC_ADMIN_BOOTSTRAP_TOKEN,
 		presign: truthy(parsed.BLOB_PRESIGN),
-		maxFileBytes: parsed.TEAMSYNC_MAX_FILE_BYTES,
+		maxFileBytes: parsed.ARCASYNC_MAX_FILE_BYTES,
 		logLevel: parsed.LOG_LEVEL,
 		logFormat: parsed.LOG_FORMAT,
 		version: SERVER_VERSION,

@@ -27,7 +27,7 @@ async function devLogin(base: string, name: string, role?: string, workspace?: s
 	});
 }
 
-describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
+describe("relay with ARCASYNC_DEBUG_STATS=0", () => {
 	let relay: Relay;
 	let dir: string;
 
@@ -36,7 +36,7 @@ describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
 		relay = await startRelayDev({
 			port: PORT,
 			persistTo: dir,
-			vars: { TEAMSYNC_DEBUG_STATS: "0" },
+			vars: { ARCASYNC_DEBUG_STATS: "0" },
 		});
 	});
 
@@ -101,7 +101,7 @@ describe("relay with TEAMSYNC_DEBUG_STATS=0", () => {
 	});
 });
 
-describe("relay with TEAMSYNC_ALLOW_DEV_SECRET=0 (the dev secret is then rejected)", () => {
+describe("relay with ARCASYNC_ALLOW_DEV_SECRET=0 (the dev secret is then rejected)", () => {
 	let relay: Relay;
 	let dir: string;
 
@@ -110,7 +110,7 @@ describe("relay with TEAMSYNC_ALLOW_DEV_SECRET=0 (the dev secret is then rejecte
 		relay = await startRelayDev({
 			port: PORT + 100,
 			persistTo: dir,
-			vars: { TEAMSYNC_ALLOW_DEV_SECRET: "0" },
+			vars: { ARCASYNC_ALLOW_DEV_SECRET: "0" },
 		});
 	});
 

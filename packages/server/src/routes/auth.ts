@@ -22,7 +22,7 @@ export function authRoutes(deps: Deps) {
 
 	/**
 	 * P0 convenience login. Identity is the supplied name; only available when
-	 * `TEAMSYNC_DEV_OPEN_LOGIN=1` (the default for a zero-config PGlite server).
+	 * `ARCASYNC_DEV_OPEN_LOGIN=1` (the default for a zero-config PGlite server).
 	 */
 	app.post("/auth/dev-login", zValidator("json", DevLoginRequest), async (c) => {
 		if (!deps.config.devOpenLogin) throw forbidden("Dev login is disabled");

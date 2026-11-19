@@ -4,8 +4,8 @@ export const RELAY_VERSION = "0.0.1-cf";
 
 /** The `Env` fields `/server-info` reads (kept free of Workers types for unit tests). */
 export interface ServerInfoEnv {
-	TEAMSYNC_DEV_OPEN_LOGIN: string;
-	TEAMSYNC_MAX_FILE_BYTES: string;
+	ARCASYNC_DEV_OPEN_LOGIN: string;
+	ARCASYNC_MAX_FILE_BYTES: string;
 	CHUNKS?: unknown;
 }
 
@@ -16,7 +16,7 @@ export function serverInfo(env: ServerInfoEnv, publicUrl: string): ServerInfo {
 		version: RELAY_VERSION,
 		publicUrl,
 		features: {
-			devOpenLogin: env.TEAMSYNC_DEV_OPEN_LOGIN === "1",
+			devOpenLogin: env.ARCASYNC_DEV_OPEN_LOGIN === "1",
 			presign: false,
 			excalidraw: false,
 			textKeepalive: true,
@@ -25,6 +25,6 @@ export function serverInfo(env: ServerInfoEnv, publicUrl: string): ServerInfo {
 			chunks: !!env.CHUNKS,
 			bulkClone: true,
 		},
-		limits: { maxFileBytes: Number(env.TEAMSYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
+		limits: { maxFileBytes: Number(env.ARCASYNC_MAX_FILE_BYTES), chunkBytes: CHUNK_BYTES },
 	};
 }

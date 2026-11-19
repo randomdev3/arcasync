@@ -15,8 +15,8 @@ to the server. Postgres and MinIO are internal only.
 
 1. Create a project; add a **Postgres** service and a **Bucket** (S3-compatible).
 2. Add a service from this repo with root Dockerfile path `packages/server/Dockerfile`.
-3. Set variables from `.env.example` (`TEAMSYNC_DB_URL` = Postgres `DATABASE_URL`, `S3_*` from the
-   bucket credentials, `TEAMSYNC_PUBLIC_URL` = the generated domain).
+3. Set variables from `.env.example` (`ARCASYNC_DB_URL` = Postgres `DATABASE_URL`, `S3_*` from the
+   bucket credentials, `ARCASYNC_PUBLIC_URL` = the generated domain).
 4. Generate a domain; health check path `/api/ready`.
 
 ## Backups

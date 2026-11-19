@@ -3,7 +3,7 @@
 import { vaultId as harnessVaultId } from "./obsidian.mjs";
 
 /** `env.dev`'s public bootstrap bearer (packages/relay-cf/wrangler.jsonc); not a secret. */
-export const DEV_BOOTSTRAP_TOKEN = "teamsync-local-dev-bootstrap-token-not-secret-0";
+export const DEV_BOOTSTRAP_TOKEN = "arcasync-local-dev-bootstrap-token-not-secret-0";
 
 /** Thrown for a non-2xx response; `status` and the parsed `body` are kept for assertions. */
 export class ApiError extends Error {
@@ -50,7 +50,7 @@ export function createApi(getBaseUrl) {
 		request,
 		json,
 		/**
-		 * Dev-login (`TEAMSYNC_DEV_OPEN_LOGIN=1`) → `SessionResponse`. `vaultId` defaults to the
+		 * Dev-login (`ARCASYNC_DEV_OPEN_LOGIN=1`) → `SessionResponse`. `vaultId` defaults to the
 		 * harness vault id of `name`, so it reuses that vault's device row.
 		 */
 		devLogin(name, { workspace, role, vaultId = harnessVaultId(name) } = {}) {
@@ -81,7 +81,7 @@ export function createApi(getBaseUrl) {
 				body: { workspaceId },
 			});
 		},
-		/** Relay counters (`TEAMSYNC_DEBUG_STATS=1`). */
+		/** Relay counters (`ARCASYNC_DEBUG_STATS=1`). */
 		stats(workspaceId) {
 			return json(`/api/debug/stats?${ws(workspaceId)}`);
 		},

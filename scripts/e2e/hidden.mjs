@@ -31,7 +31,7 @@ proto.show = function () {
 proto.focus = function () {};
 proto.moveTop = function () {};
 app.focus = function () {};
-const real = process.env.TEAMSYNC_E2E_OBSIDIAN_ASAR;
+const real = process.env.ARCASYNC_E2E_OBSIDIAN_ASAR;
 module.exports = (_asarPath, updateEvents) => require(real + "/main.js")(real, updateEvents);
 `;
 
@@ -102,5 +102,5 @@ export function prepareProfile(profile, obsidianBin) {
 	}
 	writeFileSync(shim, packAsar({ "main.js": SHIM_MAIN }));
 	const resources = join(obsidianBin, "..", "..", "Resources");
-	return { TEAMSYNC_E2E_OBSIDIAN_ASAR: realAsar(profile, resources) };
+	return { ARCASYNC_E2E_OBSIDIAN_ASAR: realAsar(profile, resources) };
 }

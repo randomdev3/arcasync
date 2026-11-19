@@ -20,7 +20,7 @@ export function newOpaqueToken(): string {
 		.replace(/=+$/, "");
 }
 
-/** What is stored for a secret: `hex(sha256(pepper:value))`, the pepper being `TEAMSYNC_SECRET`. */
+/** What is stored for a secret: `hex(sha256(pepper:value))`, the pepper being `ARCASYNC_SECRET`. */
 export async function hashSecret(pepper: string, value: string): Promise<string> {
 	return hex(await sha256(`${pepper}:${value}`));
 }

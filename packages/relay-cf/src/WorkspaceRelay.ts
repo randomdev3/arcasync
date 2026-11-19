@@ -194,7 +194,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		super(ctx, env);
 		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(KEEPALIVE_PING, KEEPALIVE_PONG));
 		this.store = new DocStore(ctx.storage.sql, (fn) => ctx.storage.transactionSync(fn));
-		this.stats = env.TEAMSYNC_DEBUG_STATS === "1" ? new Stats(ctx.storage.sql, this.store) : null;
+		this.stats = env.ARCASYNC_DEBUG_STATS === "1" ? new Stats(ctx.storage.sql, this.store) : null;
 		ctx.storage.sql.exec(
 			"CREATE TABLE IF NOT EXISTS revocations (user_id TEXT PRIMARY KEY, at INTEGER NOT NULL)",
 		);
@@ -396,7 +396,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		let readOnly: boolean | null = null;
 		let uid: string | null = null;
 		try {
-			const claims = await verifyWsToken(token, this.env.TEAMSYNC_SECRET);
+			const claims = await verifyWsToken(token, this.env.ARCASYNC_SECRET);
 			const att = this.attachment(ws);
 			if (
 				ref &&
@@ -643,7 +643,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		}
 		const claims = await bearerClaims(
 			request.headers.get("authorization"),
-			this.env.TEAMSYNC_SECRET,
+			this.env.ARCASYNC_SECRET,
 		);
 		if (!claims || claims.ws !== workspaceId || this.isRevoked(claims)) {
 			return json(errorBody("unauthorized", "Missing or invalid workspace token"), 401);
@@ -693,7 +693,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 	/** One `getAlarm` per wake; arms `+delay` only when no alarm is pending. */
 	private armChunkGc(): void {
 		this.gcArmChecked = true;
-		const override = Number(this.env.TEAMSYNC_CHUNK_GC_DELAY_MS);
+		const override = Number(this.env.ARCASYNC_CHUNK_GC_DELAY_MS);
 		const delay = Number.isFinite(override) && override > 0 ? override : CHUNK_GC_DELAY_MS;
 		void (async () => {
 			if ((await this.ctx.storage.getAlarm()) === null) {
@@ -751,7 +751,7 @@ export class WorkspaceRelay extends DurableObject<Env> {
 		return result;
 	}
 
-	// --- dev-only instrumentation (worker gates these on TEAMSYNC_DEBUG_STATS) ---
+	// --- dev-only instrumentation (worker gates these on ARCASYNC_DEBUG_STATS) ---
 
 	async debugStats(): Promise<Record<string, unknown>> {
 		const docs = this.ctx.storage.sql

@@ -9,12 +9,12 @@ is sized for the **free plan**. Every command below runs from the repository roo
 
 | Env | Worker name | Dev login | Debug stats | Secret | Use |
 |---|---|---|---|---|---|
-| (top level) | `teamsync-relay` | off | off | none | Safe default: a bare `wrangler deploy` serves nothing until a secret is set. |
-| `production` | `teamsync-relay` | off | off | `wrangler secret put` | The real deployment. Observability on. |
-| `dev` | `teamsync-relay-dev` | on | on | public dev secret in `vars` | Local `wrangler dev --env dev` only (`pnpm dev`, tests). Never deploy it. |
-| `probe` | `teamsync-relay-probe` | on | on | `wrangler secret put --env probe` | Throwaway free-tier measurement. Delete it afterwards. |
+| (top level) | `arcasync-relay` | off | off | none | Safe default: a bare `wrangler deploy` serves nothing until a secret is set. |
+| `production` | `arcasync-relay` | off | off | `wrangler secret put` | The real deployment. Observability on. |
+| `dev` | `arcasync-relay-dev` | on | on | public dev secret in `vars` | Local `wrangler dev --env dev` only (`pnpm dev`, tests). Never deploy it. |
+| `probe` | `arcasync-relay-probe` | on | on | `wrangler secret put --env probe` | Throwaway free-tier measurement. Delete it afterwards. |
 
-The worker checks `TEAMSYNC_SECRET` on every request. If it is missing, shorter than 32
+The worker checks `ARCASYNC_SECRET` on every request. If it is missing, shorter than 32
 characters, or equal to the public dev secret (outside `env.dev`), every route answers
 `503 {"error":{"code":"misconfigured"}}`, WebSocket upgrades included, and `/api/health` answers
 `{"ok":false,"error":"…"}`.
@@ -28,17 +28,17 @@ characters, or equal to the public dev secret (outside `env.dev`), every route a
 2. Set the secret. It signs WebSocket JWTs and peppers session tokens, so rotating it signs
    everyone out. It is read from stdin and never stored in the repository:
    ```sh
-   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env production
+   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put ARCASYNC_SECRET --env production
    ```
 3. Deploy:
    ```sh
    pnpm -F @arcasync/relay-cf deploy:production
    ```
-4. Check: `curl https://teamsync-relay.<subdomain>.workers.dev/api/health` returns `"ok":true`.
+4. Check: `curl https://arcasync-relay.<subdomain>.workers.dev/api/health` returns `"ok":true`.
    `"ok":false` names the configuration problem.
 
 **Accounts.** Production has dev login off, so nobody can sign in yet. The admin bootstrap
-(`POST /api/auth/bootstrap` with a `TEAMSYNC_BOOTSTRAP_TOKEN` secret) and invites arrive in P2.
+(`POST /api/auth/bootstrap` with a `ARCASYNC_BOOTSTRAP_TOKEN` secret) and invites arrive in P2.
 
 ## Free-tier probe
 
@@ -49,15 +49,15 @@ as rows written). It runs only on the `probe` environment, and the worker is del
 1. Deploy, then confirm the guard: health reports `ok:false` before the secret exists.
    ```sh
    pnpm -F @arcasync/relay-cf deploy:probe
-   curl https://teamsync-relay-probe.<subdomain>.workers.dev/api/health
-   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put TEAMSYNC_SECRET --env probe
-   curl https://teamsync-relay-probe.<subdomain>.workers.dev/api/health   # now "ok":true
+   curl https://arcasync-relay-probe.<subdomain>.workers.dev/api/health
+   openssl rand -base64 48 | pnpm -F @arcasync/relay-cf exec wrangler secret put ARCASYNC_SECRET --env probe
+   curl https://arcasync-relay-probe.<subdomain>.workers.dev/api/health   # now "ok":true
    ```
 2. Run the load probe. Its phases are 2 minutes apart, and it prints each phase's UTC window and
    the expected DO requests (1:1 and 20:1), rows written and Worker requests, next to the deltas
    it measured through `/api/debug/stats`:
    ```sh
-   node packages/relay-cf/scripts/load-probe.ts --url https://teamsync-relay-probe.<subdomain>.workers.dev \
+   node packages/relay-cf/scripts/load-probe.ts --url https://arcasync-relay-probe.<subdomain>.workers.dev \
      --pings 500 --frames 500 --rows 300 --connects 50 --json .e2e/probe-$(date +%F).json
    ```
 3. Delete the probe right away (step 5). Cloudflare keeps its analytics after the worker is
@@ -76,7 +76,7 @@ as rows written). It runs only on the `probe` environment, and the worker is del
 5. **Teardown (always, also after a failure):**
    ```sh
    pnpm -F @arcasync/relay-cf exec wrangler delete --env probe
-   curl -s -o /dev/null -w '%{http_code}\n' https://teamsync-relay-probe.<subdomain>.workers.dev/api/health   # not 200
+   curl -s -o /dev/null -w '%{http_code}\n' https://arcasync-relay-probe.<subdomain>.workers.dev/api/health   # not 200
    ```
    Follow any CLI prompt about removing the Durable Object namespaces. Run `wrangler logout` when
    you no longer need the session.

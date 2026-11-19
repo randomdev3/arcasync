@@ -21,10 +21,10 @@ export async function bearerClaims(
 }
 
 /** The verified claims, or the 401 to answer. */
-export async function requireWsJwt<E extends { TEAMSYNC_SECRET: string }>(
+export async function requireWsJwt<E extends { ARCASYNC_SECRET: string }>(
 	c: Context<{ Bindings: E }>,
 ): Promise<WsClaims | Response> {
-	const claims = await bearerClaims(c.req.header("authorization"), c.env.TEAMSYNC_SECRET);
+	const claims = await bearerClaims(c.req.header("authorization"), c.env.ARCASYNC_SECRET);
 	return claims ?? c.json(errorBody("unauthorized", "Missing or invalid workspace token"), 401);
 }
 

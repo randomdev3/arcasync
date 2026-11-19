@@ -12,7 +12,7 @@ import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/pro
 import { WebSocket } from "ws";
 import * as Y from "yjs";
 
-const BASE = process.env.TEAMSYNC_URL ?? "http://localhost:8787";
+const BASE = process.env.ARCASYNC_URL ?? "http://localhost:8787";
 // `?ws=` routes the socket to the workspace's relay object; the Node server ignores it.
 const wsUrl = (workspaceId: string) =>
 	`${BASE.replace(/^http/, "ws")}${WS_PATH}?ws=${encodeURIComponent(workspaceId)}`;

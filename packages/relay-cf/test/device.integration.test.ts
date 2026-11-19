@@ -63,7 +63,7 @@ beforeAll(async () => {
 	relay = await startRelayDev({
 		port: PORT,
 		persistTo: dir,
-		vars: { TEAMSYNC_DEVICE_CODE_TTL_S: String(TTL_S) },
+		vars: { ARCASYNC_DEVICE_CODE_TTL_S: String(TTL_S) },
 	});
 	const boot = await bootstrap(relay.url, "Team");
 	teamId = boot.workspace.id;

@@ -111,7 +111,7 @@ async function parseBody<T>(
 
 const badRequest = (c: Ctx) => c.json(errorBody("bad_request", "Invalid request"), 400);
 const bearer = (c: Ctx) => bearerToken(c.req.header("authorization"));
-const publicUrl = (c: Ctx) => c.env.TEAMSYNC_PUBLIC_URL || new URL(c.req.url).origin;
+const publicUrl = (c: Ctx) => c.env.ARCASYNC_PUBLIC_URL || new URL(c.req.url).origin;
 
 const accounts = (env: Env) => env.ACCOUNTS.getByName(ACCOUNTS_NAME);
 /** Per isolate (D10); dropped for the caller on logout and invite redeem. */
@@ -282,19 +282,19 @@ api.post("/auth/device/approve", async (c) => {
 
 /** Dev-only: AccountsDO RPC calls since its last wake (the `me` cache test reads it). */
 api.get("/debug/accounts", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	return c.json(await accounts(c.env).debugAccounts());
 });
 
 /** Dev-only: expire an invite now, so tests reach 410 `invite_expired` without waiting. */
 api.post("/debug/accounts/expire-invite", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	return c.json(await accounts(c.env).debugExpireInvite(c.req.query("id") ?? ""));
 });
 
 /** Dev-only relay instrumentation (G4). Each call is itself one DO request. */
 api.on(["GET", "POST"], "/debug/:op{stats|reset}", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
 	const relay = c.env.RELAY.getByName(ws);
@@ -307,7 +307,7 @@ const DEBUG_CHUNKS_MAX = 1000;
 
 /** Dev-only: the workspace's R2 objects (≤ 1000), so tests see what is stored. */
 api.get("/debug/chunks", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
 	if (!c.env.CHUNKS) return c.json(errorBody("chunks_unavailable", "No chunk storage"), 503);
@@ -323,7 +323,7 @@ api.get("/debug/chunks", async (c) => {
 
 /** Dev-only chunk GC: run it now (`graceMs` defaults to 0), or read the pending alarm. */
 api.post("/debug/gc", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	const graceMs = Number(c.req.query("graceMs") ?? 0);
 	if (!WORKSPACE_ID.test(ws) || !(Number.isFinite(graceMs) && graceMs >= 0)) {
@@ -333,7 +333,7 @@ api.post("/debug/gc", async (c) => {
 });
 
 api.get("/debug/alarm", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);
 	return c.json(await c.env.RELAY.getByName(ws).debugAlarm());
@@ -341,7 +341,7 @@ api.get("/debug/alarm", async (c) => {
 
 /** Dev-only attribution readout of one doc (P1-8): rows per user, client ids, tail, state size. */
 api.get("/debug/doc", async (c) => {
-	if (c.env.TEAMSYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
 	const ws = c.req.query("ws") ?? "";
 	const doc = c.req.query("doc") ?? "";
 	if (!WORKSPACE_ID.test(ws)) return c.json(errorBody("bad_request", "Missing ?ws="), 400);

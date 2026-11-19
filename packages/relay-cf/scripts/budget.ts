@@ -398,7 +398,7 @@ try {
 	bob = await login(base, "bob");
 	ws = alice.workspaceId;
 	const probe = await fetch(`${base}/api/debug/stats?ws=${ws}`);
-	if (!probe.ok) throw new Error(`${base} has no /api/debug/stats (TEAMSYNC_DEBUG_STATS=1 needed)`);
+	if (!probe.ok) throw new Error(`${base} has no /api/debug/stats (ARCASYNC_DEBUG_STATS=1 needed)`);
 
 	process.stderr.write(`measuring unit costs against ${base}\n`);
 	const units = await measureUnits();

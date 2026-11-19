@@ -357,7 +357,7 @@ describe("accounts", () => {
 	});
 });
 
-describe("bootstrap without TEAMSYNC_BOOTSTRAP_TOKEN", () => {
+describe("bootstrap without ARCASYNC_BOOTSTRAP_TOKEN", () => {
 	let relay: Relay;
 	let dir: string;
 
@@ -366,7 +366,7 @@ describe("bootstrap without TEAMSYNC_BOOTSTRAP_TOKEN", () => {
 		relay = await startRelayDev({
 			port: PORT + 500,
 			persistTo: dir,
-			vars: { TEAMSYNC_BOOTSTRAP_TOKEN: "" },
+			vars: { ARCASYNC_BOOTSTRAP_TOKEN: "" },
 		});
 	});
 

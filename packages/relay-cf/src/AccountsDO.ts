@@ -197,7 +197,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	private hashToken(token: string): Promise<string> {
-		return hashSecret(this.env.TEAMSYNC_SECRET, token);
+		return hashSecret(this.env.ARCASYNC_SECRET, token);
 	}
 
 	/** One audit row; callers write it in the same synchronous block as the mutation. */
@@ -394,7 +394,7 @@ export class AccountsDO extends DurableObject<Env> {
 		workspace?: string,
 	): Promise<Result<SessionResponse>> {
 		this.calls += 1;
-		if (this.env.TEAMSYNC_DEV_OPEN_LOGIN !== "1") {
+		if (this.env.ARCASYNC_DEV_OPEN_LOGIN !== "1") {
 			return fail(403, "forbidden", "Dev login is disabled");
 		}
 		const color = await userColor(name);
@@ -480,7 +480,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok(
 			await signWsToken(
 				{ userId: user.id, workspaceId, role: membership.role as Role, deviceId: row.device_id },
-				this.env.TEAMSYNC_SECRET,
+				this.env.ARCASYNC_SECRET,
 				WS_TOKEN_TTL_SECONDS,
 			),
 		);
@@ -514,13 +514,13 @@ export class AccountsDO extends DurableObject<Env> {
 		publicUrl: string,
 	): Promise<Result<BootstrapResponse>> {
 		this.calls += 1;
-		const expected = this.env.TEAMSYNC_BOOTSTRAP_TOKEN ?? "";
+		const expected = this.env.ARCASYNC_BOOTSTRAP_TOKEN ?? "";
 		if (!expected) return fail(404, "not_found", "Bootstrap is not enabled");
 		if (
 			expected.length < MIN_BOOTSTRAP_TOKEN_LENGTH &&
-			this.env.TEAMSYNC_ALLOW_DEV_SECRET !== "1"
+			this.env.ARCASYNC_ALLOW_DEV_SECRET !== "1"
 		) {
-			return fail(503, "misconfigured", "TEAMSYNC_BOOTSTRAP_TOKEN is too short");
+			return fail(503, "misconfigured", "ARCASYNC_BOOTSTRAP_TOKEN is too short");
 		}
 		const [given, wanted] = await Promise.all([sha256(token ?? ""), sha256(expected)]);
 		if (!token || !constantTimeEqual(given, wanted)) {
@@ -940,7 +940,7 @@ export class AccountsDO extends DurableObject<Env> {
 	// --- P2 device-code sign-in (D2) ---
 
 	private deviceCodeTtlS(): number {
-		const override = Number(this.env.TEAMSYNC_DEVICE_CODE_TTL_S);
+		const override = Number(this.env.ARCASYNC_DEVICE_CODE_TTL_S);
 		return Number.isInteger(override) && override > 0 ? override : DEVICE_CODE_TTL_S;
 	}
 
@@ -1071,7 +1071,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ ok: true });
 	}
 
-	// --- dev-only (worker gates these on TEAMSYNC_DEBUG_STATS) ---
+	// --- dev-only (worker gates these on ARCASYNC_DEBUG_STATS) ---
 
 	async debugAccounts(): Promise<{ calls: number }> {
 		return { calls: this.calls };

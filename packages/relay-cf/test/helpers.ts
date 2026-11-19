@@ -80,7 +80,7 @@ export const del = (base: string, path: string, token?: string) =>
 	ok(base, "DELETE", path, { token });
 
 /** `env.dev`'s public bootstrap bearer (wrangler.jsonc); not a secret. */
-export const DEV_BOOTSTRAP_TOKEN = "teamsync-local-dev-bootstrap-token-not-secret-0";
+export const DEV_BOOTSTRAP_TOKEN = "arcasync-local-dev-bootstrap-token-not-secret-0";
 
 export async function bootstrap(base: string, workspaceName = "Team", token = DEV_BOOTSTRAP_TOKEN) {
 	return BootstrapResponse.parse(await post(base, "/api/auth/bootstrap", { workspaceName }, token));

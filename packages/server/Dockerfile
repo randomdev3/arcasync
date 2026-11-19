@@ -22,8 +22,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 FROM base AS runtime
 ENV NODE_ENV=production
-ENV TEAMSYNC_PORT=8787
-ENV TEAMSYNC_DATA_DIR=/data
+ENV ARCASYNC_PORT=8787
+ENV ARCASYNC_DATA_DIR=/data
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json

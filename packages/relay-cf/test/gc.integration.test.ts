@@ -41,7 +41,7 @@ beforeAll(async () => {
 	relay = await startRelayDev({
 		port: PORT,
 		persistTo: dir,
-		vars: { TEAMSYNC_CHUNK_GC_DELAY_MS: "3000" },
+		vars: { ARCASYNC_CHUNK_GC_DELAY_MS: "3000" },
 	});
 });
 

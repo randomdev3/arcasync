@@ -23,12 +23,12 @@ const cleanup: Array<() => void> = [];
 
 async function restart(): Promise<void> {
 	await relay.stop();
-	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { TEAMSYNC_SECRET: SECRET } });
+	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { ARCASYNC_SECRET: SECRET } });
 }
 
 beforeAll(async () => {
 	dir = mkdtempSync(join(tmpdir(), "relay-it-"));
-	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { TEAMSYNC_SECRET: SECRET } });
+	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { ARCASYNC_SECRET: SECRET } });
 });
 
 afterAll(async () => {

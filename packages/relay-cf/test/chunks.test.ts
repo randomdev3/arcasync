@@ -28,7 +28,7 @@ async function token(role: "editor" | "viewer" = "editor") {
 		.token;
 }
 
-const env = { TEAMSYNC_SECRET: SECRET, CHUNKS: undefined };
+const env = { ARCASYNC_SECRET: SECRET, CHUNKS: undefined };
 
 describe("chunk routes without R2", () => {
 	it("answer 503 chunks_unavailable once auth and the request are valid", async () => {
@@ -70,7 +70,7 @@ describe("chunk routes without R2", () => {
 });
 
 describe("/server-info", () => {
-	const base = { TEAMSYNC_DEV_OPEN_LOGIN: "0", TEAMSYNC_MAX_FILE_BYTES: "209715200" };
+	const base = { ARCASYNC_DEV_OPEN_LOGIN: "0", ARCASYNC_MAX_FILE_BYTES: "209715200" };
 
 	it("advertises chunks only with an R2 binding", () => {
 		expect(serverInfo(base, "https://relay.example").features.chunks).toBe(false);

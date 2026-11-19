@@ -36,7 +36,7 @@ async function reset() {
 
 beforeAll(async () => {
 	dir = mkdtempSync(join(tmpdir(), "relay-traffic-"));
-	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { TEAMSYNC_SECRET: SECRET } });
+	relay = await startRelayDev({ port: PORT, persistTo: dir, vars: { ARCASYNC_SECRET: SECRET } });
 	session = { alice: await login(relay.url, "alice"), bob: await login(relay.url, "bob") };
 	ws = session.alice.workspaceId;
 });
