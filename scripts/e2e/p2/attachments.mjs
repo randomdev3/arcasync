@@ -61,7 +61,7 @@ function conflicts(v) {
 /** The index entry for a vault path, and whether the relay acked every local index change. */
 function entry(v, path) {
 	return v.eval(
-		`const s = app.plugins.plugins.teamsync?.session;
+		`const s = app.plugins.plugins.arcasync?.session;
 		const meta = s?.index?.get(args.path.slice("Shared/".length)) ?? null;
 		return { meta, acked: !!s && !s.indexProvider.hasUnsyncedChanges };`,
 		{ path },
@@ -83,7 +83,7 @@ export default {
 	backends: ["cf"],
 	async run({ vaults, api, step }) {
 		const { alice, bob, carol } = vaults;
-		const ws = await alice.eval("return app.plugins.plugins.teamsync.session.workspaceId;");
+		const ws = await alice.eval("return app.plugins.plugins.arcasync.session.workspaceId;");
 		const initial = await chunkCount(api, ws);
 
 		// 1. Two binaries, one of three chunks.

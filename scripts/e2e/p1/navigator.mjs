@@ -24,17 +24,17 @@ const FAR_TEXT = Array.from({ length: 200 }, (_, i) => `Line ${i}`)
 	.join("\n")
 	.concat("\n");
 
-const USER_ID = "return app.plugins.plugins.teamsync.settings.user.id;";
+const USER_ID = "return app.plugins.plugins.arcasync.settings.user.id;";
 const HAS_FILE = "return !!app.vault.getAbstractFileByPath(args.path);";
-const FOLLOWING = "return app.plugins.plugins.teamsync.session?.navigator?.following ?? null;";
-const BADGE = 'return document.querySelector(".teamsync-follow-badge")?.textContent ?? null;';
+const FOLLOWING = "return app.plugins.plugins.arcasync.session?.navigator?.following ?? null;";
+const BADGE = 'return document.querySelector(".arcasync-follow-badge")?.textContent ?? null;';
 /** Workspace path of `userId`'s note as this vault's presence sees it (null: none or offline). */
 const PEER_FILE = `
-	const devices = app.plugins.plugins.teamsync.session?.presence?.users().get(args.userId);
+	const devices = app.plugins.plugins.arcasync.session?.presence?.users().get(args.userId);
 	return devices?.[0]?.file ?? null;
 `;
 const PEER_FOLLOWING = `
-	const devices = app.plugins.plugins.teamsync.session?.presence?.users().get(args.userId);
+	const devices = app.plugins.plugins.arcasync.session?.presence?.users().get(args.userId);
 	return devices?.[0]?.following ?? null;
 `;
 /** Where 0-based `line` sits in the active editor's viewport: 0 = top edge, 1 = bottom edge. */
@@ -47,7 +47,7 @@ const LINE_FRACTION = `
 /** Clicks the avatar of `userId` in the header of the active note's view. */
 const CLICK_AVATAR = `
 	const view = app.workspace.activeLeaf?.view;
-	const sel = '.view-header .teamsync-facepile .teamsync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
+	const sel = '.view-header .arcasync-facepile .arcasync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
 	const el = view?.containerEl.querySelector(sel);
 	if (!el) return false;
 	if (args.shift) el.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
@@ -55,11 +55,11 @@ const CLICK_AVATAR = `
 	return true;
 `;
 const LIVE =
-	'return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live");';
+	'return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("arcasync-live");';
 /** Counts alice's own awareness changes on the index doc and on every attached note. */
 const COUNT_OWN = `
-	const s = app.plugins.plugins.teamsync.session;
-	globalThis.__teamsyncOwn?.off();
+	const s = app.plugins.plugins.arcasync.session;
+	globalThis.__arcasyncOwn?.off();
 	const c = { n: 0, offs: [] };
 	const watch = (a) => {
 		const on = ({ added, updated, removed }) => {
@@ -69,17 +69,17 @@ const COUNT_OWN = `
 		c.offs.push(() => a.off("change", on));
 	};
 	watch(s.awareness);
-	for (const h of app.plugins.plugins.teamsync.connections.docs.values()) if (h.provider.awareness) watch(h.provider.awareness);
+	for (const h of app.plugins.plugins.arcasync.connections.docs.values()) if (h.provider.awareness) watch(h.provider.awareness);
 	c.off = () => c.offs.forEach((f) => f());
-	globalThis.__teamsyncOwn = c;
+	globalThis.__arcasyncOwn = c;
 	return true;
 `;
-const OWN_COUNT = "const c = globalThis.__teamsyncOwn; c.off(); return c.n;";
+const OWN_COUNT = "const c = globalThis.__arcasyncOwn; c.off(); return c.n;";
 /** Right-clicks `userId`'s avatar in the active view's header (dispatched on the element itself:
  * the notices in the top right may cover it). */
 const AVATAR_MENU = `
 	const view = app.workspace.activeLeaf?.view;
-	const sel = '.view-header .teamsync-facepile .teamsync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
+	const sel = '.view-header .arcasync-facepile .arcasync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
 	const el = view?.containerEl.querySelector(sel);
 	if (!el) return false;
 	const r = el.getBoundingClientRect();
@@ -94,7 +94,7 @@ const MENU_CLICK = `
 	return true;
 `;
 const BADGE_STOP = `
-	const b = document.querySelector(".teamsync-follow-badge .teamsync-follow-stop");
+	const b = document.querySelector(".arcasync-follow-badge .arcasync-follow-stop");
 	if (!b) return false;
 	b.click();
 	return true;
@@ -188,7 +188,7 @@ export default {
 		await waitPeerOn(alice, bobId, FAR);
 		const t1 = Date.now();
 		await alice.eval(
-			"await app.plugins.plugins.teamsync.session.navigator.jumpTo(args.bobId); return true;",
+			"await app.plugins.plugins.arcasync.session.navigator.jumpTo(args.bobId); return true;",
 			{ bobId },
 		);
 		assert.ok(Date.now() - t1 <= 3000, `jumpTo resolved in ${Date.now() - t1} ms`);
@@ -295,7 +295,7 @@ export default {
 		ctx.step("avatar menu → Follow bob; badge Stop → unfollowed");
 
 		// 5. The "Follow user…" command (typing in its modal does not cancel), then bob disconnects.
-		await alice.eval('app.commands.executeCommandById("teamsync:follow-user"); return true;');
+		await alice.eval('app.commands.executeCommandById("arcasync:follow-user"); return true;');
 		await waitFor(() => alice.eval('return !!document.querySelector(".prompt-input");'), {
 			timeout: 3000,
 			label: "user picker open",
@@ -304,17 +304,17 @@ export default {
 		await pressKey(alice, "Enter");
 		await waitFollowing(alice, bobId, { label: "command follows bob" });
 		const tDisconnect = Date.now();
-		await bob.eval('app.commands.executeCommandById("teamsync:disconnect"); return true;');
+		await bob.eval('app.commands.executeCommandById("arcasync:disconnect"); return true;');
 		await waitFollowing(alice, null, { timeout: 5000, label: "bob's disconnect stops the follow" });
 		ctx.step(`command follow; bob disconnected: follow stopped in ${Date.now() - tDisconnect} ms`);
-		await bob.eval('app.commands.executeCommandById("teamsync:connect"); return true;');
+		await bob.eval('app.commands.executeCommandById("arcasync:connect"); return true;');
 		await waitConnected(bob);
 		await openFile(bob, FAR);
 		await waitPeerOn(alice, bobId, FAR);
 
 		// 6. bob quits → the follow stops (relay close removes his presence).
 		await alice.eval(
-			"app.plugins.plugins.teamsync.session.navigator.follow(args.bobId); return true;",
+			"app.plugins.plugins.arcasync.session.navigator.follow(args.bobId); return true;",
 			{
 				bobId,
 			},

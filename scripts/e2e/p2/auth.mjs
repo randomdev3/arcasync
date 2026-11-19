@@ -6,16 +6,16 @@ import assert from "node:assert/strict";
 import { inModal, modalText } from "../editor.mjs";
 import { waitFor } from "../obsidian.mjs";
 
-const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? null;`;
+const STATUS = `return document.querySelector(".arcasync-status-bar")?.textContent ?? null;`;
 
-/** Opens TeamSync's settings tab; `fill` maps selectors to values, then `click` is clicked. */
+/** Opens ArcaSync's settings tab; `fill` maps selectors to values, then `click` is clicked. */
 async function settingsForm(v, { fill = {}, click, keepOpen = false }) {
-	await v.eval('app.setting.open(); app.setting.openTabById("teamsync"); return true;');
+	await v.eval('app.setting.open(); app.setting.openTabById("arcasync"); return true;');
 	try {
 		await waitFor(
 			() =>
 				v.eval(
-					`const el = app.setting.activeTab?.id === "teamsync" ? app.setting.activeTab.containerEl : null;
+					`const el = app.setting.activeTab?.id === "arcasync" ? app.setting.activeTab.containerEl : null;
 					return !!el?.querySelector(args.click);`,
 					{ click },
 				),
@@ -41,7 +41,7 @@ async function settingsForm(v, { fill = {}, click, keepOpen = false }) {
 }
 
 function plugin(v) {
-	return v.eval(`const p = app.plugins.plugins.teamsync;
+	return v.eval(`const p = app.plugins.plugins.arcasync;
 		return {
 			status: p.connection?.status ?? null,
 			message: p.connection?.message ?? null,
@@ -64,8 +64,8 @@ export default {
 		const inv = await api.bootstrap({ workspaceName: "Team" });
 		const teamId = inv.workspace.id;
 		await settingsForm(dave, {
-			fill: { ".teamsync-invite-input": inv.invite.url, ".teamsync-invite-name": "dave" },
-			click: ".teamsync-invite-join",
+			fill: { ".arcasync-invite-input": inv.invite.url, ".arcasync-invite-name": "dave" },
+			click: ".arcasync-invite-join",
 		});
 		const daveState = await waitFor(
 			async () => {
@@ -87,12 +87,12 @@ export default {
 
 		// 2. dave invites an editor (API only); alice, already signed in, redeems it in settings.
 		const editorInvite = await dave.eval(
-			`return await app.plugins.plugins.teamsync.api.createInvite(args.teamId, { role: "editor" });`,
+			`return await app.plugins.plugins.arcasync.api.createInvite(args.teamId, { role: "editor" });`,
 			{ teamId },
 		);
 		await settingsForm(alice, {
-			fill: { ".teamsync-invite-input": editorInvite.url },
-			click: ".teamsync-invite-join",
+			fill: { ".arcasync-invite-input": editorInvite.url },
+			click: ".arcasync-invite-join",
 		});
 		await waitFor(
 			async () => {
@@ -105,28 +105,28 @@ export default {
 
 		// 3. dave-phone signs in with a device code that dave approves.
 		const started = Date.now();
-		await settingsForm(phone, { click: ".teamsync-device-signin", keepOpen: true });
-		const userCode = await waitFor(() => modalText(phone, ".teamsync-user-code"), {
+		await settingsForm(phone, { click: ".arcasync-device-signin", keepOpen: true });
+		const userCode = await waitFor(() => modalText(phone, ".arcasync-user-code"), {
 			timeout: 10000,
 			label: "dave-phone shows a user code",
 		});
 		assert.match(userCode, /^[A-Z]{4}-[A-Z]{4}$/);
-		await dave.eval(`app.commands.executeCommandById("teamsync:approve-device"); return true;`);
-		await waitFor(() => modalText(dave, ".teamsync-approve-lookup"), {
+		await dave.eval(`app.commands.executeCommandById("arcasync:approve-device"); return true;`);
+		await waitFor(() => modalText(dave, ".arcasync-approve-lookup"), {
 			timeout: 5000,
 			label: "dave's approve modal is open",
 		});
 		await inModal(
 			dave,
-			".teamsync-approve-code",
+			".arcasync-approve-code",
 			`const input = root.querySelector(args.selector);
 			input.value = args.code;
 			input.dispatchEvent(new Event("input", { bubbles: true }));
-			root.querySelector(".teamsync-approve-lookup").click();
+			root.querySelector(".arcasync-approve-lookup").click();
 			return true;`,
 			{ code: userCode },
 		);
-		const shown = await waitFor(() => modalText(dave, ".teamsync-approve-device-name"), {
+		const shown = await waitFor(() => modalText(dave, ".arcasync-approve-device-name"), {
 			timeout: 5000,
 			label: "dave's approve modal names the device",
 		});
@@ -134,7 +134,7 @@ export default {
 		assert.equal(shown, phoneVault, "the approve modal names dave-phone's vault");
 		await inModal(
 			dave,
-			".teamsync-approve-accept",
+			".arcasync-approve-accept",
 			"root.querySelector(args.selector).click(); return true;",
 		);
 		const phoneState = await waitFor(
@@ -147,14 +147,14 @@ export default {
 		const elapsed = (Date.now() - started) / 1000;
 		assert.equal(phoneState.me.id, daveState.me.id, "dave-phone is signed in as dave");
 		const polls = await phone.eval(
-			`return app.plugins.plugins.teamsync.api.requestCounts["/auth/device/poll"] ?? 0;`,
+			`return app.plugins.plugins.arcasync.api.requestCounts["/auth/device/poll"] ?? 0;`,
 		);
 		assert.ok(polls >= 1, "dave-phone polled");
 		assert.ok(
 			polls <= Math.ceil(elapsed / 5) + 1,
 			`${polls} polls in ${elapsed.toFixed(1)} s is faster than every 5 s`,
 		);
-		assert.equal(await modalText(phone, ".teamsync-user-code"), null, "the code modal closed");
+		assert.equal(await modalText(phone, ".arcasync-user-code"), null, "the code modal closed");
 		await phone.eval("app.setting.close(); return true;");
 		step(
 			`dave approved dave-phone's code ${userCode}: signed in as dave, ${polls} polls in ${elapsed.toFixed(1)} s`,
@@ -162,11 +162,11 @@ export default {
 
 		// 4. Sign-out revokes the session on the relay. `/me` is read first so the Worker caches it:
 		// the 401 afterwards proves logout dropped the cached entry too.
-		const token = await phone.eval("return app.plugins.plugins.teamsync.secrets.get();");
+		const token = await phone.eval("return app.plugins.plugins.arcasync.secrets.get();");
 		assert.ok(token, "dave-phone has a session token");
 		const before = await api.request("/api/auth/me", { token });
 		assert.equal(before.status, 200, "the session works before sign-out");
-		await phone.eval(`app.commands.executeCommandById("teamsync:sign-out"); return true;`);
+		await phone.eval(`app.commands.executeCommandById("arcasync:sign-out"); return true;`);
 		await waitFor(async () => !(await plugin(phone)).signedIn, {
 			timeout: 5000,
 			label: "dave-phone signed out locally",

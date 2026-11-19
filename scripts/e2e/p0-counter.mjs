@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { connectPlugin, launchObsidian, prepareVaults, waitFor } from "./obsidian.mjs";
 import { restartServer, SkipError, startServer } from "./server.mjs";
 
-const COUNTER = `return app.plugins.plugins.teamsync?.session?.indexDoc.getMap("debug").get("counter") ?? 0;`;
-const BUMP = `app.commands.executeCommandById("teamsync:debug-counter-increment"); return true;`;
+const COUNTER = `return app.plugins.plugins.arcasync?.session?.indexDoc.getMap("debug").get("counter") ?? 0;`;
+const BUMP = `app.commands.executeCommandById("arcasync:debug-counter-increment"); return true;`;
 const NOTICES = `return [...document.querySelectorAll(".notice")].map((n) => n.textContent);`;
 
 let server = await startServer();
@@ -35,7 +35,7 @@ try {
 	step(`bob +1 → alice sees ${start + 2}`);
 
 	const notices = await bob.eval(NOTICES);
-	assert.ok(notices.includes(`TeamSync counter: ${start + 1}`), `bob notices: ${notices}`);
+	assert.ok(notices.includes(`ArcaSync counter: ${start + 1}`), `bob notices: ${notices}`);
 	step("remote change Notice rendered in bob's window");
 
 	try {

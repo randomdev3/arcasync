@@ -15,11 +15,11 @@ import {
 import { startServer } from "./server.mjs";
 
 const step = (msg) => console.log(`  ✓ ${msg}`);
-const MARKER = "return 'teamsync-smoke:' + app.appId;";
+const MARKER = "return 'arcasync-smoke:' + app.appId;";
 
 const IDB_PUT = `
 	const db = await new Promise((res, rej) => {
-		const r = indexedDB.open("teamsync-smoke-" + app.appId, 1);
+		const r = indexedDB.open("arcasync-smoke-" + app.appId, 1);
 		r.onupgradeneeded = () => r.result.createObjectStore("kv");
 		r.onsuccess = () => res(r.result);
 		r.onerror = () => rej(r.error);
@@ -35,7 +35,7 @@ const IDB_PUT = `
 `;
 const IDB_GET = `
 	const db = await new Promise((res, rej) => {
-		const r = indexedDB.open("teamsync-smoke-" + app.appId, 1);
+		const r = indexedDB.open("arcasync-smoke-" + app.appId, 1);
 		r.onupgradeneeded = () => r.result.createObjectStore("kv");
 		r.onsuccess = () => res(r.result);
 		r.onerror = () => rej(r.error);
@@ -67,7 +67,7 @@ try {
 	// --- quit / relaunch keeps the vault id, storage and session ---------------------------
 	const r = await connectPlugin(bob, { serverUrl: server.url, name: "bob" });
 	assert.equal(r.status, "connected", JSON.stringify(r));
-	const bobUserId = await bob.eval("return app.plugins.plugins.teamsync.settings.user.id;");
+	const bobUserId = await bob.eval("return app.plugins.plugins.arcasync.settings.user.id;");
 	const idBefore = await bob.eval("return app.appId;");
 	assert.equal(idBefore, bob.id);
 	const markerKey = await bob.eval(MARKER);
@@ -87,7 +87,7 @@ try {
 	assert.equal(await bob.eval(IDB_GET), "kept-idb");
 	await waitConnected(bob);
 	assert.equal(
-		await bob.eval("return app.plugins.plugins.teamsync.settings.user.id;"),
+		await bob.eval("return app.plugins.plugins.arcasync.settings.user.id;"),
 		bobUserId,
 		"relaunch should reuse the stored session",
 	);

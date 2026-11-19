@@ -3,10 +3,10 @@
 import assert from "node:assert/strict";
 import { waitFor } from "../obsidian.mjs";
 
-const SESSION = `const s = app.plugins.plugins.teamsync?.session;
+const SESSION = `const s = app.plugins.plugins.arcasync?.session;
 	return s ? { synced: s.started && s.indexProvider.synced, root: s.root } : null;`;
-const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? null;`;
-const DOCS = "return app.plugins.plugins.teamsync.connections.docs.size;";
+const STATUS = `return document.querySelector(".arcasync-status-bar")?.textContent ?? null;`;
+const DOCS = "return app.plugins.plugins.arcasync.connections.docs.size;";
 const NOTES = `return app.vault.getMarkdownFiles().map((f) => f.path)
 	.filter((p) => p.startsWith("Shared/")).sort();`;
 
@@ -31,20 +31,20 @@ export default {
 		const status = await waitFor(
 			async () => {
 				const t = await alice.eval(STATUS);
-				return /^TeamSync: alice · dev\b/i.test(t ?? "") ? t : null;
+				return /^ArcaSync: alice · dev\b/i.test(t ?? "") ? t : null;
 			},
 			{ timeout: 5000, label: "alice status bar names the workspace" },
 		);
 		ctx.step(`status bar: "${status}"`);
 
-		await alice.eval('app.setting.open(); app.setting.openTabById("teamsync"); return true;');
+		await alice.eval('app.setting.open(); app.setting.openTabById("arcasync"); return true;');
 		try {
 			const form = await waitFor(
 				() =>
 					alice.eval(`// The settings tab may live in its own window: query its container, not document.
-						const el = app.setting.activeTab?.id === "teamsync" ? app.setting.activeTab.containerEl : null;
-						const folder = el?.querySelector(".teamsync-shared-folder");
-						const options = [...(el?.querySelectorAll("select.teamsync-workspace option") ?? [])];
+						const el = app.setting.activeTab?.id === "arcasync" ? app.setting.activeTab.containerEl : null;
+						const folder = el?.querySelector(".arcasync-shared-folder");
+						const options = [...(el?.querySelectorAll("select.arcasync-workspace option") ?? [])];
 						return folder && options.length
 							? { folder: folder.value, workspaces: options.map((o) => o.textContent) } : null;`),
 				{ timeout: 5000, label: "alice settings tab shows folder and workspace" },
@@ -62,15 +62,15 @@ export default {
 		// Providers are the index doc plus the attached note docs; a stop drops warm note docs, so
 		// the leak check compares against that, not against the count before the restart.
 		const ATTACHED =
-			"return 1 + (app.plugins.plugins.teamsync.session.docs?.attachedCount() ?? 0);";
+			"return 1 + (app.plugins.plugins.arcasync.session.docs?.attachedCount() ?? 0);";
 		assert.equal(await alice.eval(DOCS), await alice.eval(ATTACHED), "providers before restart");
 		const notesBefore = await alice.eval(NOTES);
-		await alice.eval("const s = app.plugins.plugins.teamsync.session; s.stop(); s.start();");
+		await alice.eval("const s = app.plugins.plugins.arcasync.session; s.stop(); s.start();");
 		await waitFor(async () => (await alice.eval(SESSION))?.synced, {
 			timeout: 10000,
 			label: "alice index doc re-synced after restart",
 		});
-		await alice.eval("await app.plugins.plugins.teamsync.session.settled();");
+		await alice.eval("await app.plugins.plugins.arcasync.session.settled();");
 		// A note doc still loading IndexedDB counts as attached before its provider exists.
 		const after = await waitFor(
 			async () => {

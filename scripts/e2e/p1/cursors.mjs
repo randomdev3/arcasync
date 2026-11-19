@@ -22,7 +22,7 @@ const OTHER = `Shared/${NAME}/other.md`;
 const FRESH = `Shared/${NAME}/fresh.md`;
 const TEXT = "Line one\nLine two\nLine three\n";
 
-const USER_ID = "return app.plugins.plugins.teamsync.settings.user?.id ?? null;";
+const USER_ID = "return app.plugins.plugins.arcasync.settings.user?.id ?? null;";
 
 function rgb(hex) {
 	const n = Number.parseInt(hex.slice(1, 7), 16);
@@ -126,16 +126,16 @@ export default {
 
 			// Hidden until ready: the gate class hides carets, and a rebind applies it then lifts it.
 			const gateHides = await alice.eval(`const ed = document.querySelector(".cm-editor");
-				ed.classList.add("teamsync-carets-pending");
+				ed.classList.add("arcasync-carets-pending");
 				const caret = ed.querySelector(".cm-ySelectionCaret");
 				const display = caret ? getComputedStyle(caret).display : null;
-				ed.classList.remove("teamsync-carets-pending");
+				ed.classList.remove("arcasync-carets-pending");
 				return display;`);
 			assert.equal(gateHides, "none", "the not-ready gate hides remote carets");
 			await alice.eval(`window.__tsGate = [];
 				window.__tsGateObserver = new MutationObserver((records) => {
 					for (const r of records) if (r.target.classList?.contains("cm-editor"))
-						window.__tsGate.push((r.oldValue ?? "").includes("teamsync-carets-pending"));
+						window.__tsGate.push((r.oldValue ?? "").includes("arcasync-carets-pending"));
 				});
 				window.__tsGateObserver.observe(document.body,
 					{ subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
@@ -145,7 +145,7 @@ export default {
 			await bobCaretAt(alice, bobUser, pos);
 			const gate = await alice.eval(`window.__tsGateObserver.disconnect();
 				return { sawPending: window.__tsGate.includes(true),
-					pendingNow: !!document.querySelector(".cm-editor.teamsync-carets-pending") };`);
+					pendingNow: !!document.querySelector(".cm-editor.arcasync-carets-pending") };`);
 			assert.deepEqual(gate, { sawPending: true, pendingNow: false }, "gate on rebind");
 			step("rebind: carets gated until the note is ready, then bob's caret is back");
 			// The label shows for 2 s after a move (`.is-recent`), then only on hover.

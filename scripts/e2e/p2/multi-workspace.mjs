@@ -11,11 +11,11 @@ const NAME = "multi-workspace";
 const SECOND = "Second";
 const X = `${SECOND}/x.md`;
 const Y = `Shared/${NAME}/y.md`;
-const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? null;`;
+const STATUS = `return document.querySelector(".arcasync-status-bar")?.textContent ?? null;`;
 
 /** Workspace ids of the plugin's sessions, with each index doc's sync state and socket count. */
 function sessions(v) {
-	return v.eval(`const p = app.plugins.plugins.teamsync;
+	return v.eval(`const p = app.plugins.plugins.arcasync;
 		const list = p.sessions;
 		return {
 			ids: list.map((s) => s.workspaceId),
@@ -41,7 +41,7 @@ function leaves(v, path) {
 		`const ls = app.workspace.getLeavesOfType("markdown").filter((l) => l.view.file?.path === args.path);
 		return {
 			texts: ls.map((l) => l.view.editor.getValue()),
-			live: ls.filter((l) => l.view.editor?.cm?.dom.classList.contains("teamsync-live")).length,
+			live: ls.filter((l) => l.view.editor?.cm?.dom.classList.contains("arcasync-live")).length,
 		};`,
 		{ path },
 	);
@@ -76,11 +76,11 @@ export default {
 		await api.devLogin("bob", { workspace: "second" });
 		const secondId = login.workspaces.find((w) => w.slug === "second")?.id;
 		assert.ok(secondId, `alice is in workspace second: ${JSON.stringify(login.workspaces)}`);
-		const primaryId = await alice.eval("return app.plugins.plugins.teamsync.settings.workspaceId;");
+		const primaryId = await alice.eval("return app.plugins.plugins.arcasync.settings.workspaceId;");
 		assert.notEqual(secondId, primaryId);
 		for (const v of [alice, bob]) {
 			const added = await v.eval(
-				`const p = app.plugins.plugins.teamsync;
+				`const p = app.plugins.plugins.arcasync;
 				await p.refreshWorkspaces();
 				return await p.addMapping("Second", args.id);`,
 				{ id: secondId },
@@ -107,7 +107,7 @@ export default {
 			label: `bob ${X} == "hello second\\n" (has ${JSON.stringify(diskText(bob.path, X))})`,
 		});
 		const inSecond = await alice.eval(
-			`const p = app.plugins.plugins.teamsync;
+			`const p = app.plugins.plugins.arcasync;
 			return { second: p.sessionFor(args.path)?.workspaceId ?? null,
 				primary: p.session.fileIdOf(args.path) };`,
 			{ path: X },
@@ -160,14 +160,14 @@ export default {
 		const status = await waitFor(
 			async () => {
 				const t = await alice.eval(STATUS);
-				return /^TeamSync: alice · .+ \+1 · /.test(t ?? "") ? t : null;
+				return /^ArcaSync: alice · .+ \+1 · /.test(t ?? "") ? t : null;
 			},
 			{ timeout: 5000, label: "alice status bar shows +1" },
 		);
 		step(`status bar: "${status}"`);
 
 		// 6. bob unmaps Second/: his files stay, alice's later edits no longer reach him.
-		await bob.eval(`await app.plugins.plugins.teamsync.removeMapping("Second"); return true;`);
+		await bob.eval(`await app.plugins.plugins.arcasync.removeMapping("Second"); return true;`);
 		const after = await waitFor(
 			async () => {
 				const r = await sessions(bob);
@@ -190,7 +190,7 @@ export default {
 		await waitFor(
 			() =>
 				alice.eval(
-					`const s = app.plugins.plugins.teamsync.sessionFor(args.path);
+					`const s = app.plugins.plugins.arcasync.sessionFor(args.path);
 					const note = await s.docs.peek(s.fileIdOf(args.path));
 					return note.ytext.toString().startsWith("after ") && !note.provider.hasUnsyncedChanges;`,
 					{ path: X },
@@ -203,15 +203,15 @@ export default {
 		step("bob unmapped Second/: one session, files kept, alice's later edit does not reach him");
 
 		// alice unmaps Second/ from the settings tab: one row per mapping, each with Remove.
-		await alice.eval('app.setting.open(); app.setting.openTabById("teamsync"); return true;');
+		await alice.eval('app.setting.open(); app.setting.openTabById("arcasync"); return true;');
 		try {
 			const rows = await waitFor(
 				() =>
 					alice.eval(`// The settings tab may live in its own window: query its container.
-						const el = app.setting.activeTab?.id === "teamsync" ? app.setting.activeTab.containerEl : null;
-						const rows = [...(el?.querySelectorAll(".teamsync-mapping") ?? [])].map((row) => ({
-							folder: row.querySelector(".teamsync-shared-folder")?.value ?? null,
-							remove: !!row.querySelector(".teamsync-mapping-remove"),
+						const el = app.setting.activeTab?.id === "arcasync" ? app.setting.activeTab.containerEl : null;
+						const rows = [...(el?.querySelectorAll(".arcasync-mapping") ?? [])].map((row) => ({
+							folder: row.querySelector(".arcasync-shared-folder")?.value ?? null,
+							remove: !!row.querySelector(".arcasync-mapping-remove"),
 						}));
 						return rows.length === 2 ? rows : null;`),
 				{ timeout: 5000, label: "alice settings tab shows two mapping rows" },
@@ -221,7 +221,7 @@ export default {
 				{ folder: "Second", remove: true },
 			]);
 			await alice.eval(`const el = app.setting.activeTab.containerEl;
-				el.querySelectorAll(".teamsync-mapping")[1].querySelector(".teamsync-mapping-remove").click();
+				el.querySelectorAll(".arcasync-mapping")[1].querySelector(".arcasync-mapping-remove").click();
 				return true;`);
 			await waitFor(async () => (await sessions(alice)).ids.length === 1, {
 				timeout: 5000,

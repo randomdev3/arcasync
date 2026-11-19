@@ -14,7 +14,7 @@ const NOTES = Array.from({ length: N }, (_, i) => i + 1);
 /** alice's index has every note with a docRevs entry, and the relay acked all of it. */
 function aliceReady(alice) {
 	return alice.eval(
-		`const s = app.plugins.plugins.teamsync?.session;
+		`const s = app.plugins.plugins.arcasync?.session;
 		if (!s?.index) return false;
 		const revs = s.indexDoc.getMap("docRevs");
 		const ok = args.paths.every((p) => {
@@ -38,7 +38,7 @@ export default {
 			timeout: 30000,
 			label: "alice's 60 notes indexed, enrolled and acked",
 		});
-		const ws = await alice.eval("return app.plugins.plugins.teamsync.session.workspaceId;");
+		const ws = await alice.eval("return app.plugins.plugins.arcasync.session.workspaceId;");
 		await api.resetStats(ws);
 		step(`alice's ${N} notes are indexed and acked; relay stats reset`);
 
@@ -55,7 +55,7 @@ export default {
 		});
 		const seconds = ((Date.now() - started) / 1000).toFixed(1);
 		const docStats = await erin.eval(
-			"return { ...app.plugins.plugins.teamsync.session.docs.stats };",
+			"return { ...app.plugins.plugins.arcasync.session.docs.stats };",
 		);
 		const stats = await api.stats(ws);
 		assert.ok(stats.clone_requests >= 1, `clone requests: ${stats.clone_requests}`);

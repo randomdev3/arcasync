@@ -12,7 +12,7 @@ const SEED = `Shared/${NAME}/seed.md`;
 /** The note's index entry `{key, id}` (key relative to the mapped folder), or null. */
 function indexEntry(v) {
 	return v.eval(
-		`const files = app.plugins.plugins.teamsync?.session?.indexDoc.getMap("files");
+		`const files = app.plugins.plugins.arcasync?.session?.indexDoc.getMap("files");
 		const key = args.path.slice("Shared/".length);
 		const meta = files?.get(key);
 		return meta ? { key, id: meta.id } : null;`,
@@ -22,7 +22,7 @@ function indexEntry(v) {
 
 function rev(v, id) {
 	return v.eval(
-		`return app.plugins.plugins.teamsync?.session?.indexDoc.getMap("docRevs").get(args.id) ?? null;`,
+		`return app.plugins.plugins.arcasync?.session?.indexDoc.getMap("docRevs").get(args.id) ?? null;`,
 		{ id },
 	);
 }
@@ -114,14 +114,14 @@ export default {
 		await bob.cdp("Runtime.enable");
 		const offConsole = bob.on("Runtime.consoleAPICalled", (e) => {
 			const text = e.args.map((a) => a.value ?? a.description ?? "").join(" ");
-			if (e.type === "error" && text.includes("TeamSync")) errors.push(text);
+			if (e.type === "error" && text.includes("ArcaSync")) errors.push(text);
 		});
 		const command = (id) =>
 			bob.eval(`app.commands.executeCommandById(args.id); return true;`, { id });
-		await command("teamsync:disconnect");
-		await command("teamsync:connect");
+		await command("arcasync:disconnect");
+		await command("arcasync:connect");
 		await waitFor(
-			() => bob.eval(`return app.plugins.plugins.teamsync.connection?.status === "connected";`),
+			() => bob.eval(`return app.plugins.plugins.arcasync.connection?.status === "connected";`),
 			{ timeout: 20000, label: "bob reconnected" },
 		);
 		await modify(alice, "A-wins\nafter reconnect\n");
@@ -132,7 +132,7 @@ export default {
 		await modify(alice, "A-wins\nafter relay restart\n");
 		await waitDisk(bob, "A-wins\nafter relay restart\n", 30000);
 		offConsole();
-		assert.deepEqual(errors, [], "TeamSync console errors on bob");
-		step("bob converges after a relay restart; no TeamSync console errors");
+		assert.deepEqual(errors, [], "ArcaSync console errors on bob");
+		step("bob converges after a relay restart; no ArcaSync console errors");
 	},
 };

@@ -12,7 +12,7 @@ const Y = "Shared/presence/y.md";
 /** bob's avatar in the header of alice's view of `path`: `{state, title, opacity}` or null. */
 const AVATAR = `
 	const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view.file?.path === args.path);
-	const sel = '.view-header .teamsync-facepile .teamsync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
+	const sel = '.view-header .arcasync-facepile .arcasync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
 	const el = leaf?.view.containerEl.querySelector(sel);
 	return el ? { state: el.dataset.state, title: el.title, opacity: getComputedStyle(el).opacity } : null;
 `;
@@ -21,22 +21,22 @@ const HEADER_RECT = `
 	const r = leaf?.view.containerEl.querySelector(".view-header")?.getBoundingClientRect();
 	return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
 `;
-const STATUS = `return document.querySelector(".teamsync-status-bar")?.textContent ?? "";`;
-const USER_ID = "return app.plugins.plugins.teamsync.settings.user.id;";
+const STATUS = `return document.querySelector(".arcasync-status-bar")?.textContent ?? "";`;
+const USER_ID = "return app.plugins.plugins.arcasync.settings.user.id;";
 const HAS_FILE = "return !!app.vault.getAbstractFileByPath(args.path);";
 
-const IDLE = "return app.plugins.plugins.teamsync.session?.presence?.idle ?? null;";
+const IDLE = "return app.plugins.plugins.arcasync.session?.presence?.idle ?? null;";
 /** Counts this client's own index-awareness changes (renewals do not change the state). */
 const COUNT_OWN = `
-	const a = app.plugins.plugins.teamsync.session.awareness;
-	globalThis.__teamsyncOwnChanges?.off();
+	const a = app.plugins.plugins.arcasync.session.awareness;
+	globalThis.__arcasyncOwnChanges?.off();
 	const c = { n: 0 };
 	const on = ({ added, updated, removed }) => {
 		if ([...added, ...updated, ...removed].includes(a.clientID)) c.n++;
 	};
 	a.on("change", on);
 	c.off = () => a.off("change", on);
-	globalThis.__teamsyncOwnChanges = c;
+	globalThis.__arcasyncOwnChanges = c;
 	return true;
 `;
 const FOCUS_EXPLORER = `
@@ -136,13 +136,13 @@ export default {
 		await nudge(bob, 50);
 		await bob.eval(FOCUS_EXPLORER);
 		await openFile(bob, X);
-		const quiet = await bob.eval("return globalThis.__teamsyncOwnChanges.n;");
+		const quiet = await bob.eval("return globalThis.__arcasyncOwnChanges.n;");
 		assert.equal(quiet, 0, "own presence changes after input and sidebar focus");
 		await openFile(bob, Y);
 		await openFile(bob, X);
-		const switched = await bob.eval("return globalThis.__teamsyncOwnChanges.n;");
+		const switched = await bob.eval("return globalThis.__arcasyncOwnChanges.n;");
 		assert.equal(switched, 2, "own presence changes after two note switches");
-		await bob.eval("globalThis.__teamsyncOwnChanges.off(); return true;");
+		await bob.eval("globalThis.__arcasyncOwnChanges.off(); return true;");
 		ctx.step("bob: 50 mouse moves + sidebar focus → 0 own presence changes; 2 note switches → 2");
 
 		// 5. Status bar counts users.
@@ -169,7 +169,7 @@ export default {
 		ctx.step(`header screenshots: ${shotHere}, ${shotAway}`);
 
 		// 3. bob disconnects → gone within 3 s; reconnects → back.
-		await bob.eval('app.commands.executeCommandById("teamsync:disconnect"); return true;');
+		await bob.eval('app.commands.executeCommandById("arcasync:disconnect"); return true;');
 		const left = await waitAvatar(alice, X, bobId, (a) => a === null, {
 			timeout: 3000,
 			label: "bob's avatar gone after disconnect",
@@ -180,7 +180,7 @@ export default {
 			`alice status bar ${online - 1} online after bob disconnects`,
 		);
 		ctx.step(`bob disconnected: avatar gone after ${left.ms} ms, status "${online - 1} online"`);
-		await bob.eval('app.commands.executeCommandById("teamsync:connect"); return true;');
+		await bob.eval('app.commands.executeCommandById("arcasync:connect"); return true;');
 		await waitConnected(bob);
 		await openFile(bob, X);
 		await waitAvatar(alice, X, bobId, (a) => a?.state === "here", {
@@ -191,7 +191,7 @@ export default {
 
 		// Quit → the clean close removes bob as well. It runs before the SIGKILL on purpose: Obsidian
 		// persists its own state (the vault's plugin trust) lazily, and a SIGKILL soon after the plugin
-		// was first enabled loses it, so the crash below then tests only TeamSync.
+		// was first enabled loses it, so the crash below then tests only ArcaSync.
 		const tq = Date.now();
 		const quitGone = waitFor(async () => (await avatar(alice, X, bobId)) === null, {
 			timeout: 15000,
@@ -231,7 +231,7 @@ export default {
 		});
 		await waitStatus(alice, onlineRe(online), `alice status bar ${online} online after relaunch`);
 		for (const v of [alice, bob]) {
-			const s = await v.eval("return app.plugins.plugins.teamsync.connection.status;");
+			const s = await v.eval("return app.plugins.plugins.arcasync.connection.status;");
 			assert.equal(s, "connected", `${v.name} still connected`);
 		}
 		ctx.step(`bob relaunched: here again, ${online} online, both connected`);

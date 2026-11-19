@@ -45,7 +45,7 @@ function waitDisk(fn, what, timeout = 5000) {
 function waitAcked(v) {
 	return waitFor(
 		() =>
-			v.eval(`const s = app.plugins.plugins.teamsync?.session;
+			v.eval(`const s = app.plugins.plugins.arcasync?.session;
 				return !!s?.started && s.indexProvider.synced && !s.indexProvider.hasUnsyncedChanges;`),
 		{ timeout: 10000, label: `${v.name} index changes acked` },
 	);
@@ -56,8 +56,8 @@ function waitKnown(v, name) {
 	return waitFor(
 		() =>
 			v.eval(
-				`const p = app.plugins.plugins.teamsync;
-				const raw = localStorage.getItem("teamsync:" + app.appId + ":" + p.settings.workspaceId + ":known");
+				`const p = app.plugins.plugins.arcasync;
+				const raw = localStorage.getItem("arcasync:" + app.appId + ":" + p.settings.workspaceId + ":known");
 				return !!raw && args.path in (JSON.parse(raw).files ?? {});`,
 				{ path: `index-sync/${name}` },
 			),
@@ -122,7 +122,7 @@ export default {
 			console.log("  - SKIP echo-loop check (needs relay-cf debug stats)");
 			return;
 		}
-		const ws = await alice.eval("return app.plugins.plugins.teamsync.settings.workspaceId;");
+		const ws = await alice.eval("return app.plugins.plugins.arcasync.settings.workspaceId;");
 		const rows = async () => {
 			const r = await fetch(`${ctx.server.url}/api/debug/stats?ws=${encodeURIComponent(ws)}`);
 			if (!r.ok) throw new Error(`debug stats: HTTP ${r.status}`);

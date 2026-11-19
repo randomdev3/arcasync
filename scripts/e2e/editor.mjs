@@ -196,13 +196,13 @@ export function notices(v) {
 }
 
 /**
- * Runs `body` in vault `v` with \`root\` = the TeamSync modal that contains \`args.selector\`;
+ * Runs `body` in vault `v` with \`root\` = the ArcaSync modal that contains \`args.selector\`;
  * null while there is none. Modals are found through the plugin (`modals`), since Obsidian may
  * open one in another window's document.
  */
 export function inModal(v, selector, body, args = {}) {
 	return v.eval(
-		`const modal = [...app.plugins.plugins.teamsync.modals].find((m) =>
+		`const modal = [...app.plugins.plugins.arcasync.modals].find((m) =>
 			m.modalEl.querySelector(args.selector));
 		if (!modal) return null;
 		const root = modal.modalEl;

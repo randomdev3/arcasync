@@ -31,11 +31,11 @@ function leafTexts(v, path) {
 	);
 }
 
-/** Leaves showing `path` whose editor is bound to the note (`.teamsync-live`). */
+/** Leaves showing `path` whose editor is bound to the note (`.arcasync-live`). */
 function liveLeaves(v, path) {
 	return v.eval(
 		`return app.workspace.getLeavesOfType("markdown")
-			.filter((l) => l.view.file?.path === args.path && l.view.editor?.cm?.dom.classList.contains("teamsync-live"))
+			.filter((l) => l.view.file?.path === args.path && l.view.editor?.cm?.dom.classList.contains("arcasync-live"))
 			.length;`,
 		{ path },
 	);
@@ -43,7 +43,7 @@ function liveLeaves(v, path) {
 
 function activeLive(v) {
 	return v.eval(
-		`return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live");`,
+		`return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("arcasync-live");`,
 	);
 }
 
@@ -82,13 +82,13 @@ function assertNoLocalCopies(v) {
 	assert.deepEqual(copies, [], `${v.name} local copies`);
 }
 
-/** Collects TeamSync console errors; returns `stop()` which yields them. */
+/** Collects ArcaSync console errors; returns `stop()` which yields them. */
 async function watchErrors(v) {
 	const errors = [];
 	await v.cdp("Runtime.enable");
 	const off = v.on("Runtime.consoleAPICalled", (e) => {
 		const text = e.args.map((a) => a.value ?? a.description ?? "").join(" ");
-		if (e.type === "error" && text.includes("TeamSync")) errors.push(text);
+		if (e.type === "error" && text.includes("ArcaSync")) errors.push(text);
 	});
 	return () => {
 		off();
@@ -99,7 +99,7 @@ async function watchErrors(v) {
 /** The awareness of `path`'s attached note doc: own client and state, and peers' user ids. */
 function noteAwareness(v, path) {
 	return v.eval(
-		`const p = app.plugins.plugins.teamsync;
+		`const p = app.plugins.plugins.arcasync;
 		const id = p.session.fileIdOf(args.path);
 		const note = id && (await p.session.docs.peek(id));
 		if (!note) return null;
@@ -117,7 +117,7 @@ function noteAwareness(v, path) {
 /** Records updates to `v`'s co.md doc that did not come from the relay (local echoes). */
 function watchLocalUpdates(v) {
 	return v.eval(
-		`const s = app.plugins.plugins.teamsync.session;
+		`const s = app.plugins.plugins.arcasync.session;
 		const note = await s.docs.peek(s.fileIdOf(args.path));
 		window.__tsLocal = [];
 		const fn = (_u, origin) => {
@@ -285,7 +285,7 @@ export default {
 
 			// A session stop/start under an open editor unbinds it and binds it again.
 			await alice.eval(
-				"const s = app.plugins.plugins.teamsync.session; s.stop(); s.start(); return true;",
+				"const s = app.plugins.plugins.arcasync.session; s.stop(); s.start(); return true;",
 			);
 			assert.equal(await activeLive(alice), false, "alice unbound while the session is down");
 			await waitLive(alice);
@@ -315,7 +315,7 @@ export default {
 
 			for (const v of [alice, bob, carol]) assertNoLocalCopies(v);
 			const errors = stops.flatMap((stop) => stop());
-			assert.deepEqual(errors, [], "TeamSync console errors");
+			assert.deepEqual(errors, [], "ArcaSync console errors");
 		} finally {
 			for (const stop of stops) stop();
 			for (const v of [alice, bob, carol]) if (v.running) await closeLeaves(v);

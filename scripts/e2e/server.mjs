@@ -20,7 +20,7 @@ export class SkipError extends Error {}
 
 export async function startServer({ port = Number(process.env.E2E_PORT ?? 8788), dataDir } = {}) {
 	if (BACKEND === "remote") return remoteServer();
-	const dir = dataDir ?? mkdtempSync(join(tmpdir(), "teamsync-e2e-"));
+	const dir = dataDir ?? mkdtempSync(join(tmpdir(), "arcasync-e2e-"));
 	if (BACKEND === "cf") return startCfRelay({ port, dir });
 	if (BACKEND !== "node") throw new Error(`unknown E2E_BACKEND=${BACKEND} (cf|node|remote)`);
 	const child = spawn("pnpm", ["--filter", "@arcasync/server", "exec", "tsx", "src/index.ts"], {

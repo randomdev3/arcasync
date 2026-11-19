@@ -13,14 +13,14 @@ const C = `${FOLDER}/c.md`;
 const SEED = "A\nB\nC\n";
 
 function fileId(v, path) {
-	return v.eval(`return app.plugins.plugins.teamsync?.session?.fileIdOf(args.path) ?? null;`, {
+	return v.eval(`return app.plugins.plugins.arcasync?.session?.fileIdOf(args.path) ?? null;`, {
 		path,
 	});
 }
 
 function rev(v, id) {
 	return v.eval(
-		`return app.plugins.plugins.teamsync?.session?.indexDoc.getMap("docRevs").get(args.id) ?? null;`,
+		`return app.plugins.plugins.arcasync?.session?.indexDoc.getMap("docRevs").get(args.id) ?? null;`,
 		{ id },
 	);
 }
@@ -31,7 +31,7 @@ function rev(v, id) {
  */
 function base(v, path) {
 	return v.eval(
-		`const s = app.plugins.plugins.teamsync?.session;
+		`const s = app.plugins.plugins.arcasync?.session;
 		const id = s?.fileIdOf(args.path);
 		if (!id || !s.docs) return null;
 		const note = await s.docs.acquire(id, args.path);

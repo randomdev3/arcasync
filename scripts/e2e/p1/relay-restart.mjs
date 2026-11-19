@@ -22,7 +22,7 @@ function waitLive(v) {
 	return waitFor(
 		() =>
 			v.eval(
-				`return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live");`,
+				`return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("arcasync-live");`,
 			),
 		{ timeout: 15000, label: `${v.name} editor bound` },
 	);

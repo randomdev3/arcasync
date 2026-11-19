@@ -28,16 +28,16 @@ const MOBILE_LIMITS = {
 /** Over the 2 MiB mobile limit. */
 const BIG_BYTES = 2.5 * 1024 * 1024;
 
-const LIVE = `return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live")
+const LIVE = `return !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("arcasync-live")
 	&& app.workspace.getActiveFile()?.path === args.path;`;
 const AVATAR = `
 	const leaf = app.workspace.getLeavesOfType("markdown").find((l) => l.view.file?.path === args.path);
-	const sel = '.view-header .teamsync-facepile .teamsync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
+	const sel = '.view-header .arcasync-facepile .arcasync-avatar[data-user-id="' + CSS.escape(args.userId) + '"]';
 	return leaf?.view.containerEl.querySelector(sel)?.dataset.state ?? null;
 `;
-const USER_ID = "return app.plugins.plugins.teamsync.settings.user.id;";
+const USER_ID = "return app.plugins.plugins.arcasync.settings.user.id;";
 const HEAP = "return performance.memory?.usedJSHeapSize ?? null;";
-const ATTACHED = "return app.plugins.plugins.teamsync.session.docs.attachedCount();";
+const ATTACHED = "return app.plugins.plugins.arcasync.session.docs.attachedCount();";
 
 function waitLive(v, path) {
 	return waitFor(() => v.eval(LIVE, { path }), {
@@ -99,13 +99,13 @@ async function emulateMobile(v, on) {
 	}
 }
 
-/** Collects TeamSync console errors (call after the reload); returns `stop()` which yields them. */
+/** Collects ArcaSync console errors (call after the reload); returns `stop()` which yields them. */
 async function watchErrors(v) {
 	const errors = [];
 	await v.cdp("Runtime.enable");
 	const off = v.on("Runtime.consoleAPICalled", (e) => {
 		const text = e.args.map((a) => a.value ?? a.description ?? "").join(" ");
-		if (e.type === "error" && text.includes("TeamSync")) errors.push(text);
+		if (e.type === "error" && text.includes("ArcaSync")) errors.push(text);
 	});
 	return () => {
 		off();
@@ -138,7 +138,7 @@ export default {
 			mobile = true;
 			stopErrors = await watchErrors(bob);
 			const state = await bob.eval(`
-				const p = app.plugins.plugins.teamsync;
+				const p = app.plugins.plugins.arcasync;
 				return {
 					bodyMobile: document.body.classList.contains("is-mobile"),
 					status: p.connection.status,
@@ -257,12 +257,12 @@ export default {
 			await openFile(bob, BIG);
 			await sleep(3000);
 			const big = await bob.eval(
-				`const p = app.plugins.plugins.teamsync;
+				`const p = app.plugins.plugins.arcasync;
 				const id = p.session.fileIdOf(args.path);
 				return {
 					id,
 					attached: !!(id && p.session.docs.peek(id)),
-					live: !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("teamsync-live"),
+					live: !!app.workspace.activeEditor?.editor?.cm?.dom.classList.contains("arcasync-live"),
 					length: app.workspace.activeEditor?.editor?.getValue().length ?? null,
 				};`,
 				{ path: BIG },
@@ -274,7 +274,7 @@ export default {
 			assert.equal(diskText(alice.path, BIG), "", "alice's big.md stays empty");
 			assert.equal(diskText(bob.path, BIG).length, BIG_BYTES + 1, "bob's big.md is untouched");
 			if (server.backend === "cf") {
-				const ws = await bob.eval("return app.plugins.plugins.teamsync.settings.workspaceId;");
+				const ws = await bob.eval("return app.plugins.plugins.arcasync.settings.workspaceId;");
 				const r = await fetch(
 					`${server.url}/api/debug/doc?ws=${encodeURIComponent(ws)}&doc=${encodeURIComponent(`ws:${ws}:md:${big.id}`)}`,
 				);
@@ -291,7 +291,7 @@ export default {
 			// 7. Idle mobile: no polling traffic, no rows.
 			await closeLeaves(bob);
 			if (server.backend === "cf") {
-				const ws = await bob.eval("return app.plugins.plugins.teamsync.settings.workspaceId;");
+				const ws = await bob.eval("return app.plugins.plugins.arcasync.settings.workspaceId;");
 				const stats = async () => {
 					const r = await fetch(`${server.url}/api/debug/stats?ws=${encodeURIComponent(ws)}`);
 					if (!r.ok) throw new Error(`debug stats: HTTP ${r.status}`);
@@ -314,14 +314,14 @@ export default {
 			step(
 				`bob JS heap: desktop ${mb(heapDesktop)}, mobile after reload ${mb(heapMobile)}, after the scenario ${mb(heapAfter)}`,
 			);
-			assert.deepEqual(stopErrors(), [], "TeamSync console errors on mobile bob");
+			assert.deepEqual(stopErrors(), [], "ArcaSync console errors on mobile bob");
 		} finally {
 			stopErrors();
 			for (const v of [alice, bob]) if (v.running) await closeLeaves(v).catch(() => {});
 			if (bob.running && (mobile || (await bob.eval("return app.isMobile;").catch(() => false)))) {
 				await emulateMobile(bob, false);
 				assert.equal(
-					(await bob.eval("return app.plugins.plugins.teamsync.limits();")).warmDocs,
+					(await bob.eval("return app.plugins.plugins.arcasync.limits();")).warmDocs,
 					20,
 				);
 				step("bob back on desktop limits");

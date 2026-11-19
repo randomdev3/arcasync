@@ -83,7 +83,7 @@ const PLUGIN_FILES = ["main.js", "manifest.json", "styles.css"];
  * Linking the whole `dist` folder would make every vault share one `data.json` (settings).
  */
 function linkPlugin(vaultPath) {
-	const dir = join(vaultPath, ".obsidian", "plugins", "teamsync");
+	const dir = join(vaultPath, ".obsidian", "plugins", "arcasync");
 	if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) unlinkSync(dir);
 	mkdirSync(dir, { recursive: true });
 	for (const file of PLUGIN_FILES) {
@@ -92,13 +92,13 @@ function linkPlugin(vaultPath) {
 	}
 }
 
-/** True once Obsidian has flushed the vault's enabled-plugin list with `teamsync` in it. */
+/** True once Obsidian has flushed the vault's enabled-plugin list with `arcasync` in it. */
 function pluginEnabledOnDisk(vaultPath) {
 	try {
 		const ids = JSON.parse(
 			readFileSync(join(vaultPath, ".obsidian", "community-plugins.json"), "utf8"),
 		);
-		return Array.isArray(ids) && ids.includes("teamsync");
+		return Array.isArray(ids) && ids.includes("arcasync");
 	} catch {
 		return false;
 	}
@@ -341,7 +341,7 @@ export async function waitConnected(vault, { timeout = 20000 } = {}) {
 		return await waitFor(
 			async () => {
 				last = await vault.eval(
-					`const p = app.plugins.plugins.teamsync;
+					`const p = app.plugins.plugins.arcasync;
 					return p ? { status: p.connection?.status ?? null, message: p.connection?.message ?? null,
 						autoConnect: p.settings?.autoConnect, hasSession: !!p.secrets?.get?.() } : { plugin: "not loaded" };`,
 				);
@@ -367,9 +367,9 @@ export async function installPlugin(vault, { serverUrl } = {}) {
 		`
 		await app.plugins.loadManifests();
 		if (!app.plugins.isEnabled()) await app.plugins.setEnable(true);
-		if (!app.plugins.plugins.teamsync) await app.plugins.enablePluginAndSave("teamsync");
-		const p = app.plugins.plugins.teamsync;
-		if (!p) throw new Error("teamsync plugin did not load");
+		if (!app.plugins.plugins.arcasync) await app.plugins.enablePluginAndSave("arcasync");
+		const p = app.plugins.plugins.arcasync;
+		if (!p) throw new Error("arcasync plugin did not load");
 		if (args.serverUrl !== undefined) {
 			p.settings.serverUrl = args.serverUrl;
 			await p.saveSettings();
@@ -381,7 +381,7 @@ export async function installPlugin(vault, { serverUrl } = {}) {
 	// inside that window loses it, and the relaunched vault never loads the plugin.
 	await waitFor(() => pluginEnabledOnDisk(vault.path), {
 		timeout: 15000,
-		label: `${vault.name} community-plugins.json lists teamsync`,
+		label: `${vault.name} community-plugins.json lists arcasync`,
 	});
 }
 
@@ -403,8 +403,8 @@ export async function connectPlugin(vault, { serverUrl, name, role, sharedFolder
 				: [{ path: sharedFolder, workspaceId: "" }];
 	return vault.eval(
 		`
-		const p = app.plugins.plugins.teamsync;
-		if (!p) throw new Error("teamsync plugin did not load");
+		const p = app.plugins.plugins.arcasync;
+		if (!p) throw new Error("arcasync plugin did not load");
 		p.settings.devLoginName = args.name;
 		p.settings.autoConnect = true;
 		if (args.role !== undefined) p.settings.devLoginRole = args.role;

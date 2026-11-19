@@ -1,7 +1,7 @@
 // P2-10: owner tools and membership changes on live sockets. alice (owner of `dev`) demotes bob
 // to viewer in the members modal: the relay closes bob's socket with 4401 and his editor turns
 // read-only. Promoting him back makes it writable; removing him stops his session for `dev`
-// (Notice, files kept). The invite modal shows an `obsidian://teamsync` link.
+// (Notice, files kept). The invite modal shows an `obsidian://arcasync` link.
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -22,17 +22,17 @@ const NAME = "members";
 const NOTE = `Shared/${NAME}/r.md`;
 const SEED = "roles\n";
 
-/** Whether the active editor is bound to its note (`.teamsync-live`) and read-only. */
+/** Whether the active editor is bound to its note (`.arcasync-live`) and read-only. */
 function editorState(v) {
 	return v.eval(`const cm = app.workspace.activeEditor?.editor?.cm;
-		return { live: !!cm?.dom.classList.contains("teamsync-live"), readOnly: cm?.state.readOnly ?? null };`);
+		return { live: !!cm?.dom.classList.contains("arcasync-live"), readOnly: cm?.state.readOnly ?? null };`);
 }
 
 /** Sets bob's role in alice's open members modal through its dropdown. */
 async function setRole(alice, userId, role) {
 	const done = await inModal(
 		alice,
-		`.teamsync-member[data-user-id="${userId}"] .teamsync-member-role`,
+		`.arcasync-member[data-user-id="${userId}"] .arcasync-member-role`,
 		`const select = root.querySelector(args.selector);
 		select.value = args.role;
 		select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -43,7 +43,7 @@ async function setRole(alice, userId, role) {
 }
 
 function bobSessions(bob) {
-	return bob.eval(`const p = app.plugins.plugins.teamsync;
+	return bob.eval(`const p = app.plugins.plugins.arcasync;
 		return { ids: p.sessions.map((s) => s.workspaceId), status: p.connection?.status ?? null };`);
 }
 
@@ -55,10 +55,10 @@ export default {
 	async run({ vaults, step }) {
 		const { alice, bob } = vaults;
 		const devId = await alice.eval(
-			`return app.plugins.plugins.teamsync.settings.workspaces.find((w) => w.slug === "dev")?.id ?? null;`,
+			`return app.plugins.plugins.arcasync.settings.workspaces.find((w) => w.slug === "dev")?.id ?? null;`,
 		);
 		assert.ok(devId, "alice is in workspace dev");
-		const bobId = await bob.eval("return app.plugins.plugins.teamsync.settings.user.id;");
+		const bobId = await bob.eval("return app.plugins.plugins.arcasync.settings.user.id;");
 		await waitFor(() => diskText(bob.path, NOTE) === SEED, {
 			timeout: 15000,
 			label: `bob has ${NOTE}`,
@@ -74,8 +74,8 @@ export default {
 
 		try {
 			// 1. alice demotes bob to viewer in the members modal.
-			await alice.eval(`app.commands.executeCommandById("teamsync:manage-members"); return true;`);
-			await waitFor(() => modalText(alice, `.teamsync-member[data-user-id="${bobId}"]`), {
+			await alice.eval(`app.commands.executeCommandById("arcasync:manage-members"); return true;`);
+			await waitFor(() => modalText(alice, `.arcasync-member[data-user-id="${bobId}"]`), {
 				timeout: 5000,
 				label: "alice's members modal lists bob",
 			});
@@ -89,7 +89,7 @@ export default {
 			await sleep(2000);
 			assert.equal(await editorText(alice), SEED, "bob's typing as a viewer does not reach alice");
 			const closeCode = await bob.eval(
-				"return app.plugins.plugins.teamsync.connections?.lastCloseCode ?? null;",
+				"return app.plugins.plugins.arcasync.connections?.lastCloseCode ?? null;",
 			);
 			assert.equal(closeCode, 4401, "bob's socket was closed with 4401");
 			step("bob demoted to viewer: socket closed 4401, editor read-only, typing stays local");
@@ -97,7 +97,7 @@ export default {
 			// 2. alice promotes bob back to editor. bob's first token invalidation (the 4401's) is
 			// skipped, so the reconnect re-sends a token from before the revocation: the relay
 			// refuses it and each doc takes ConnectionManager's one re-Auth retry.
-			await bob.eval(`const t = app.plugins.plugins.teamsync.tokens;
+			await bob.eval(`const t = app.plugins.plugins.arcasync.tokens;
 				const real = t.invalidate;
 				window.__tsInvalidations = 0;
 				t.invalidate = function (ws) {
@@ -110,7 +110,7 @@ export default {
 				() =>
 					inModal(
 						alice,
-						`.teamsync-member[data-user-id="${bobId}"] .teamsync-member-role`,
+						`.arcasync-member[data-user-id="${bobId}"] .arcasync-member-role`,
 						"return root.querySelector(args.selector).value === 'viewer';",
 					),
 				{ timeout: 5000, label: "alice's members modal shows bob as viewer" },
@@ -127,7 +127,7 @@ export default {
 			await waitFor(
 				() =>
 					bob.eval(
-						`const s = app.plugins.plugins.teamsync.session;
+						`const s = app.plugins.plugins.arcasync.session;
 						const note = await s.docs.peek(s.fileIdOf(args.path));
 						return s.indexProvider.synced && !!note?.provider.synced;`,
 						{ path: NOTE },
@@ -155,21 +155,21 @@ export default {
 				() =>
 					inModal(
 						alice,
-						`.teamsync-member[data-user-id="${bobId}"] .teamsync-member-role`,
+						`.arcasync-member[data-user-id="${bobId}"] .arcasync-member-role`,
 						"return root.querySelector(args.selector).value === 'editor';",
 					),
 				{ timeout: 5000, label: "alice's members modal shows bob as editor" },
 			);
 			await inModal(
 				alice,
-				`.teamsync-member[data-user-id="${bobId}"] .teamsync-member-remove`,
+				`.arcasync-member[data-user-id="${bobId}"] .arcasync-member-remove`,
 				"root.querySelector(args.selector).click(); return true;",
 			);
 			const confirmed = await waitFor(
 				() =>
 					inModal(
 						alice,
-						".teamsync-confirm",
+						".arcasync-confirm",
 						"root.querySelector(args.selector).click(); return true;",
 					),
 				{ timeout: 5000, label: "alice confirms the removal" },
@@ -191,11 +191,11 @@ export default {
 			step(`bob removed: "${notice}", no dev session, ${NOTE} kept`);
 		} finally {
 			await alice.eval(
-				"for (const m of [...app.plugins.plugins.teamsync.modals]) m.close(); return true;",
+				"for (const m of [...app.plugins.plugins.arcasync.modals]) m.close(); return true;",
 			);
 			// 4. bob signs in again through dev-login, which re-adds his membership as an editor.
 			await bob.eval(
-				"const p = app.plugins.plugins.teamsync; await p.signOut(); await p.connect(); return true;",
+				"const p = app.plugins.plugins.arcasync; await p.signOut(); await p.connect(); return true;",
 			);
 			await waitFor(
 				async () => {
@@ -208,27 +208,27 @@ export default {
 		}
 
 		// 5. The invite modal shows the new link.
-		await alice.eval(`app.commands.executeCommandById("teamsync:create-invite"); return true;`);
+		await alice.eval(`app.commands.executeCommandById("arcasync:create-invite"); return true;`);
 		try {
-			await waitFor(() => modalText(alice, ".teamsync-invite-create"), {
+			await waitFor(() => modalText(alice, ".arcasync-invite-create"), {
 				timeout: 5000,
 				label: "alice's invite modal is open",
 			});
 			await inModal(
 				alice,
-				".teamsync-invite-create",
+				".arcasync-invite-create",
 				"root.querySelector(args.selector).click(); return true;",
 			);
 			const url = await waitFor(
 				() =>
-					inModal(alice, ".teamsync-invite-url", "return root.querySelector(args.selector).value;"),
+					inModal(alice, ".arcasync-invite-url", "return root.querySelector(args.selector).value;"),
 				{ timeout: 5000, label: "alice's invite modal shows a link" },
 			);
-			assert.ok(url.startsWith("obsidian://teamsync?server="), `invite link: ${url}`);
+			assert.ok(url.startsWith("obsidian://arcasync?server="), `invite link: ${url}`);
 			step(`invite modal shows ${url.slice(0, 40)}…`);
 		} finally {
 			await alice.eval(
-				"for (const m of [...app.plugins.plugins.teamsync.modals]) m.close(); return true;",
+				"for (const m of [...app.plugins.plugins.arcasync.modals]) m.close(); return true;",
 			);
 			for (const v of [alice, bob]) {
 				await v.eval(
