@@ -76,9 +76,33 @@ async function userColor(seed: string): Promise<string> {
 	return PALETTE[(digest[0] ?? 0) % PALETTE.length] ?? "#2f90d0";
 }
 
-/** `obsidian://` link the plugin's protocol handler turns into a prefilled join. */
-export function inviteUrl(publicUrl: string, token: string): string {
-	return `obsidian://arcasync?server=${encodeURIComponent(publicUrl)}&invite=${token}`;
+/**
+ * Where links point. `site` is the website (`ARCASYNC_PUBLIC_URL`, hosted on Cloudflare Pages),
+ * `relay` this relay's own origin. Without a site, links fall back to the plugin's deep links.
+ */
+export interface LinkBase {
+	site: string | null;
+	relay: string;
+}
+
+/**
+ * The website's join page (it offers "create your account here" and "open in Obsidian"), or,
+ * without a site, the `obsidian://arcasync?server=…&invite=…` link the plugin's protocol handler
+ * turns into a prefilled join. The plugin accepts both pasted into its settings.
+ */
+export function inviteUrl(links: LinkBase, token: string): string {
+	if (links.site) return `${trimSlashes(links.site)}/join?invite=${token}`;
+	return `obsidian://arcasync?server=${encodeURIComponent(links.relay)}&invite=${token}`;
+}
+
+/** A device code's `verificationUri`: the website's approve page, or the plugin's deep link. */
+export function approveUrl(links: LinkBase, userCode: string): string {
+	if (links.site) return `${trimSlashes(links.site)}/approve?code=${userCode}`;
+	return `obsidian://arcasync?approve=${userCode}`;
+}
+
+function trimSlashes(url: string): string {
+	return url.replace(/\/+$/, "");
 }
 
 /** Lowercase `a-z0-9-`, at most 40 characters (the `DevLoginRequest.workspace` slug shape). */
@@ -511,7 +535,7 @@ export class AccountsDO extends DurableObject<Env> {
 	async bootstrap(
 		token: string | null,
 		workspaceName: string,
-		publicUrl: string,
+		links: LinkBase,
 	): Promise<Result<BootstrapResponse>> {
 		this.calls += 1;
 		const expected = this.env.ARCASYNC_BOOTSTRAP_TOKEN ?? "";
@@ -546,7 +570,7 @@ export class AccountsDO extends DurableObject<Env> {
 			invite: {
 				id: inviteId,
 				token: inviteToken,
-				url: inviteUrl(publicUrl, inviteToken),
+				url: inviteUrl(links, inviteToken),
 				role: "owner",
 				admin: true,
 				maxUses: 1,
@@ -559,7 +583,7 @@ export class AccountsDO extends DurableObject<Env> {
 		token: string | null,
 		workspaceId: string,
 		req: InviteCreateRequest,
-		publicUrl: string,
+		links: LinkBase,
 	): Promise<Result<InviteCreated>> {
 		this.calls += 1;
 		const inviteToken = newOpaqueToken();
@@ -586,7 +610,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({
 			id,
 			token: inviteToken,
-			url: inviteUrl(publicUrl, inviteToken),
+			url: inviteUrl(links, inviteToken),
 			role: req.role,
 			admin: false,
 			maxUses: req.maxUses,
@@ -875,7 +899,7 @@ export class AccountsDO extends DurableObject<Env> {
 	async enableUser(
 		token: string | null,
 		userId: string,
-		publicUrl: string,
+		links: LinkBase,
 	): Promise<Result<InviteCreated>> {
 		this.calls += 1;
 		const inviteToken = newOpaqueToken();
@@ -894,7 +918,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({
 			id,
 			token: inviteToken,
-			url: inviteUrl(publicUrl, inviteToken),
+			url: inviteUrl(links, inviteToken),
 			role: "viewer",
 			admin: false,
 			maxUses: 1,
@@ -945,7 +969,7 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	/** Unauthenticated: a new device asks for a code that a signed-in device approves. */
-	async deviceStart(device: DeviceInfo): Promise<Result<DeviceCodeResponse>> {
+	async deviceStart(device: DeviceInfo, links: LinkBase): Promise<Result<DeviceCodeResponse>> {
 		this.calls += 1;
 		const deviceCode = newOpaqueToken();
 		const codeHash = await this.hashToken(deviceCode);
@@ -969,7 +993,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({
 			deviceCode,
 			userCode,
-			verificationUri: `obsidian://arcasync?approve=${userCode}`,
+			verificationUri: approveUrl(links, userCode),
 			interval: DEVICE_CODE_INTERVAL_S,
 			expiresIn: ttl,
 		});

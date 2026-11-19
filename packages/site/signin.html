@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ArcaSync · Sign in</title>
+		<meta name="description" content="Sign this browser in to ArcaSync with a code approved in Obsidian." />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script src="/theme.js"></script>
+		<script type="module" src="/src/pages/signin.ts"></script>
+	</head>
+	<body>
+		<!--@header-->
+		<main id="main" tabindex="-1">
+			<div class="wrap flow" data-flow>
+				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
+
+				<section data-state="idle">
+					<div class="flow-head">
+						<p class="kicker">no passwords</p>
+						<h1>Sign in</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">
+						ArcaSync has no passwords. You approve this browser from an Obsidian where you're
+						already signed in.
+					</p>
+					<p class="callout callout--error" data-start-error hidden></p>
+					<div class="btn-row">
+						<button class="btn btn--primary" type="button" data-start>Get a code</button>
+						<a href="/join">New here? You need an invite</a>
+					</div>
+				</section>
+
+				<section data-state="starting" hidden>
+					<div class="flow-head">
+						<h1>Sign in</h1>
+						<!--@thread-->
+					</div>
+					<div class="btn-row">
+						<button class="btn btn--primary" type="button" aria-busy="true" disabled>Getting a code…</button>
+					</div>
+				</section>
+
+				<section data-state="waiting" hidden>
+					<div class="flow-head">
+						<p class="kicker">waiting for approval</p>
+						<h1>Approve this code in Obsidian</h1>
+						<!--@thread-->
+					</div>
+					<div class="card code-card">
+						<p class="card__eyebrow">Your code</p>
+						<span class="code-display" id="user-code" role="img" data-code>BCDF-GHJK</span>
+						<div class="btn-row">
+							<button class="btn btn--small" type="button" data-copy="user-code">Copy code</button>
+							<a class="btn btn--small" href="/signin" data-open-approve>Open in Obsidian</a>
+						</div>
+						<div class="meta-row">
+							<span>Expires in <span class="mono" data-expires aria-live="off">10:00</span></span>
+							<span>Waiting for approval…</span>
+						</div>
+					</div>
+					<ol class="steps">
+						<li>In Obsidian, open the command palette.</li>
+						<li>Run <strong>ArcaSync: Approve a device sign-in</strong>.</li>
+						<li>Enter this code and approve <strong data-device-name>Browser</strong>.</li>
+					</ol>
+					<div class="btn-row">
+						<button class="btn" type="button" data-cancel>Cancel</button>
+					</div>
+				</section>
+
+				<section data-state="approved" hidden>
+					<div class="flow-head">
+						<p class="kicker">approved</p>
+						<h1 class="big-who"><span class="dot" data-user-dot></span><span data-approved-text>Signed in</span></h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">Taking you on…</p>
+				</section>
+
+				<section data-state="denied" hidden>
+					<div class="flow-head">
+						<h1 tabindex="-1">The sign-in was denied in Obsidian.</h1>
+						<!--@thread-->
+					</div>
+					<div class="btn-row"><button class="btn btn--primary" type="button" data-restart>Start again</button></div>
+				</section>
+
+				<section data-state="expired" hidden>
+					<div class="flow-head">
+						<h1 tabindex="-1">That code expired.</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">Codes last 10 minutes.</p>
+					<div class="btn-row"><button class="btn btn--primary" type="button" data-restart>Get a new code</button></div>
+				</section>
+			</div>
+		</main>
+		<!--@footer-->
+	</body>
+</html>

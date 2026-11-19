@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ArcaSync · Account</title>
+		<meta name="description" content="Your ArcaSync account in this browser." />
+		<meta name="robots" content="noindex" />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script src="/theme.js"></script>
+		<script type="module" src="/src/pages/account.ts"></script>
+	</head>
+	<body>
+		<!--@header-->
+		<main id="main" tabindex="-1">
+			<div class="wrap flow" data-flow>
+				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
+
+				<section data-state="loading">
+					<div class="flow-head">
+						<h1>Account</h1>
+						<!--@thread-->
+					</div>
+					<div class="skeleton" aria-hidden="true">
+						<div class="skeleton__line"></div>
+						<div class="skeleton__line"></div>
+					</div>
+				</section>
+
+				<section data-state="signed-out" hidden>
+					<div class="flow-head">
+						<p class="kicker">account</p>
+						<h1 tabindex="-1">You're not signed in.</h1>
+						<!--@thread-->
+					</div>
+					<p class="callout callout--ok" data-signed-out-notice hidden></p>
+					<p class="lede">This browser holds no ArcaSync session.</p>
+					<div class="btn-row">
+						<a class="btn btn--primary" href="/signin?next=%2Faccount">Sign in</a>
+						<a class="btn" href="/join">I have an invite</a>
+					</div>
+				</section>
+
+				<section data-state="ready" hidden>
+					<div class="flow-head">
+						<p class="kicker">account</p>
+						<h1 class="big-who">
+							<span class="dot" data-me-dot></span><span data-me-name></span>
+							<span class="badge" data-admin hidden>admin</span>
+						</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">This browser: <strong data-device-name></strong></p>
+					<div class="card">
+						<h2 class="card__title">Workspaces</h2>
+						<table class="plain" data-workspaces-table>
+							<thead>
+								<tr>
+									<th scope="col">Name</th>
+									<th scope="col">Role</th>
+								</tr>
+							</thead>
+							<tbody data-workspaces></tbody>
+						</table>
+						<p class="muted" data-no-workspaces hidden>No workspaces yet.</p>
+					</div>
+					<p class="callout" data-owner-note hidden>
+						Manage members and create invites from Obsidian:
+						<strong>ArcaSync: Manage workspace members</strong>,
+						<strong>ArcaSync: Create an invite link</strong>.
+					</p>
+					<div class="btn-row">
+						<a class="btn btn--primary" href="/approve">Approve a device</a>
+						<button class="btn" type="button" data-logout>Sign out</button>
+					</div>
+				</section>
+
+				<section data-state="error" hidden>
+					<div class="flow-head">
+						<h1 tabindex="-1">Account</h1>
+						<!--@thread-->
+					</div>
+					<p class="callout callout--error" data-page-error></p>
+					<div class="btn-row"><button class="btn btn--primary" type="button" data-retry>Try again</button></div>
+				</section>
+			</div>
+		</main>
+		<!--@footer-->
+	</body>
+</html>

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ArcaSync · Join</title>
+		<meta name="description" content="Use an ArcaSync invite: create your account here or open it in Obsidian." />
+		<meta name="robots" content="noindex" />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script src="/theme.js"></script>
+		<script type="module" src="/src/pages/join.ts"></script>
+	</head>
+	<body>
+		<!--@header-->
+		<main id="main" tabindex="-1">
+			<div class="wrap flow flow--wide" data-flow>
+				<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
+
+				<section data-state="no-invite">
+					<div class="flow-head">
+						<p class="kicker">invite-only</p>
+						<h1>Join ArcaSync</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">ArcaSync is invite-only. Paste the invite link you were sent.</p>
+					<form class="field" data-paste-form novalidate>
+						<label for="paste">Invite link</label>
+						<div class="inline-form">
+							<input
+								id="paste"
+								class="input input--mono"
+								type="text"
+								inputmode="url"
+								autocomplete="off"
+								spellcheck="false"
+								placeholder="https://…/join?invite=…"
+								aria-describedby="paste-hint paste-error"
+							/>
+							<button class="btn btn--primary" type="submit">Continue</button>
+						</div>
+						<p class="hint" id="paste-hint">
+							An https link, an <code>obsidian://arcasync</code> link or the bare code all work.
+						</p>
+						<p class="field-error" id="paste-error" hidden></p>
+					</form>
+					<p class="muted small">
+						Already have an account? <a href="/signin">Sign in</a> instead.
+					</p>
+				</section>
+
+				<section data-state="checking-session" hidden>
+					<div class="flow-head">
+						<h1>Checking who you are…</h1>
+						<!--@thread-->
+					</div>
+					<div class="skeleton" aria-hidden="true">
+						<div class="skeleton__line"></div>
+						<div class="skeleton__line"></div>
+					</div>
+				</section>
+
+				<section data-state="choose" hidden>
+					<div class="flow-head">
+						<p class="kicker">an invite to ArcaSync</p>
+						<h1>You're invited</h1>
+						<!--@thread-->
+					</div>
+					<div class="callout callout--warn">
+						<strong>Use one or the other.</strong> This invite works once, so whichever you use first
+						spends it. If you create your account here, you'll sign Obsidian in with a code
+						afterwards.
+					</div>
+					<div class="choose-grid">
+						<form class="card card--primary" data-join-form novalidate>
+							<p class="card__eyebrow">A · recommended</p>
+							<h2 class="card__title">Create your account here</h2>
+							<div class="field">
+								<label for="name">Your name</label>
+								<input
+									id="name"
+									class="input"
+									type="text"
+									autocomplete="nickname"
+									maxlength="60"
+									required
+									aria-describedby="name-hint name-error"
+								/>
+								<p class="hint" id="name-hint">
+									Shown next to your caret. Pick something your friends will recognise.
+								</p>
+								<p class="field-error" id="name-error" hidden></p>
+							</div>
+							<p class="callout callout--error" data-form-error hidden></p>
+							<div class="btn-row">
+								<button class="btn btn--primary" type="submit" data-join-submit>Create account</button>
+								<span class="muted small" data-cooldown hidden>
+									Try again in <span class="mono" data-cooldown-time aria-live="off">1:00</span>
+								</span>
+							</div>
+						</form>
+						<div class="card">
+							<p class="card__eyebrow">B</p>
+							<h2 class="card__title">Already have the plugin? Join from Obsidian.</h2>
+							<p class="muted">
+								Opens Obsidian, which asks you to confirm and then fills in the server and the invite.
+							</p>
+							<a class="btn" href="/join" data-open-obsidian>Open in Obsidian</a>
+						</div>
+					</div>
+				</section>
+
+				<section data-state="joined" hidden>
+					<div class="flow-head">
+						<p class="kicker">you're in</p>
+						<h1 class="big-who"><span class="dot" data-user-dot></span><span data-welcome>Welcome</span></h1>
+						<!--@thread-->
+					</div>
+					<div class="card">
+						<h2 class="card__title">Your workspaces</h2>
+						<ul class="workspace-list" data-workspaces></ul>
+					</div>
+					<h2>Next steps</h2>
+					<ol class="steps">
+						<li><a href="/guide#install">Install the plugin</a> in Obsidian.</li>
+						<li>
+							In ArcaSync settings, set <strong>Server URL</strong> to:
+							<div class="copy-row">
+								<span class="copy-row__value" id="joined-server">{{relay}}</span>
+								<button class="btn btn--small" type="button" data-copy="joined-server">Copy</button>
+							</div>
+						</li>
+						<li>Click <strong>Sign in with another device</strong>. Obsidian shows a code.</li>
+						<li>
+							Approve it here.
+							<div class="btn-row"><a class="btn btn--primary" href="/approve">Approve a code</a></div>
+						</li>
+					</ol>
+				</section>
+
+				<section data-state="signed-in" hidden>
+					<div class="flow-head">
+						<p class="kicker">an invite to ArcaSync</p>
+						<h1>Add a workspace</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede">
+						You're signed in as <strong class="who"><span class="dot" data-me-dot></span><span data-me-name></span></strong>.
+					</p>
+					<div data-redeem-form>
+						<p class="callout callout--error" data-redeem-error hidden></p>
+						<div class="btn-row">
+							<button class="btn btn--primary" type="button" data-redeem>Add this workspace to my account</button>
+							<button class="link-button" type="button" data-not-me>Not you? Sign out</button>
+						</div>
+					</div>
+					<div class="card" data-redeemed hidden>
+						<h2 class="card__title">Your workspaces</h2>
+						<ul class="workspace-list" data-redeemed-list></ul>
+						<p>
+							Open Obsidian. The new workspace appears under <strong>ArcaSync settings → Shared
+							folders</strong> → workspace picker after you reconnect.
+						</p>
+					</div>
+				</section>
+
+				<section data-state="error" hidden>
+					<div class="flow-head">
+						<p class="kicker">invite</p>
+						<h1 data-error-title tabindex="-1">This invite can't be used</h1>
+						<!--@thread-->
+					</div>
+					<p class="lede" data-error-action></p>
+					<div class="btn-row">
+						<a class="btn" href="/signin" data-error-signin hidden>Sign in instead</a>
+						<a class="btn" href="/guide#sign-in">Read the guide</a>
+					</div>
+				</section>
+			</div>
+		</main>
+		<!--@footer-->
+	</body>
+</html>

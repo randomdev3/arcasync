@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ArcaSync · Install guide</title>
+		<meta name="description" content="Install the ArcaSync plugin with BRAT, connect it to your server, sign in and share a folder." />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script src="/theme.js"></script>
+		<script type="module" src="/src/pages/guide.ts"></script>
+	</head>
+	<body>
+		<!--@header-->
+		<main id="main" tabindex="-1">
+			<div class="wrap guide">
+				<header class="guide__head">
+					<p class="kicker">install guide</p>
+					<h1>From invite to a shared folder</h1>
+					<p class="lede">
+						Every step, with the labels exactly as Obsidian and the plugin show them. It takes about
+						five minutes.
+					</p>
+				</header>
+
+				<nav class="toc" aria-label="On this page">
+					<details class="toc__details" open>
+						<summary>On this page</summary>
+						<ol class="toc__list">
+							<li><a href="#before">Before you start</a></li>
+							<li><a href="#install">Install the plugin</a></li>
+							<li><a href="#connect">Point it at the server</a></li>
+							<li><a href="#sign-in">Sign in</a></li>
+							<li><a href="#share">Share a folder</a></li>
+							<li><a href="#together">Working together</a></li>
+							<li><a href="#trouble">Troubleshooting</a></li>
+						</ol>
+					</details>
+				</nav>
+
+				<article class="guide__body">
+					<section id="before" aria-labelledby="before-h">
+						<h2 id="before-h"><span class="guide__num">1</span>Before you start</h2>
+						<ul>
+							<li>Obsidian <strong>1.11.4</strong> or newer, on desktop or mobile.</li>
+							<li>
+								An invite link from whoever runs your ArcaSync server. Accounts are invite-only. Invites
+								expire after 7 days by default and usually work once.
+							</li>
+						</ul>
+					</section>
+
+					<section id="install" aria-labelledby="install-h">
+						<h2 id="install-h"><span class="guide__num">2</span>Install the plugin</h2>
+						<h3 id="brat">With BRAT <span class="badge">recommended</span></h3>
+						<p>
+							ArcaSync isn't in the community plugin list. BRAT installs it from GitHub and keeps it
+							updated.
+						</p>
+						<ol class="steps">
+							<li>
+								Open Obsidian <strong>Settings → Community plugins</strong>. If <strong>Restricted
+								mode</strong> is on, turn it off.
+							</li>
+							<li>
+								Click <strong>Browse</strong>, search for “BRAT” (by TfTHacker), then
+								<strong>Install</strong> and <strong>Enable</strong>.
+							</li>
+							<li>
+								Open the command palette and run
+								<strong>BRAT: Plugins: Add a beta plugin for testing (with or without version)</strong>.
+							</li>
+							<li>
+								Paste the repository and confirm:
+								<div class="copy-row">
+									<span class="copy-row__value" id="repo">{{repo}}</span>
+									<button class="btn btn--small" type="button" data-copy="repo">Copy</button>
+								</div>
+								<!--@repo-soon-->
+							</li>
+							<li>Back in <strong>Community plugins</strong>, enable <strong>ArcaSync</strong>.</li>
+							<li>
+								Updates: BRAT checks when Obsidian starts. To check now, run
+								<strong>BRAT: Plugins: Check for updates to all beta plugins and UPDATE</strong>.
+							</li>
+						</ol>
+
+						<h3 id="manual">Or install by hand</h3>
+						<ol class="steps">
+							<li>
+								Download <code>main.js</code>, <code>manifest.json</code> and <code>styles.css</code>
+								from the latest release at <!--@repo-releases-->.
+							</li>
+							<li>
+								Create the folder <code>&lt;your vault&gt;/.obsidian/plugins/arcasync/</code> and put
+								the three files in it. <code>.obsidian</code> is hidden: on macOS press
+								<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd> in Finder; on Windows use
+								<strong>View → Show → Hidden items</strong>.
+							</li>
+							<li>
+								In <strong>Settings → Community plugins</strong>, click reload (↻), then enable
+								<strong>ArcaSync</strong>.
+							</li>
+						</ol>
+					</section>
+
+					<section id="connect" aria-labelledby="connect-h">
+						<h2 id="connect-h"><span class="guide__num">3</span>Point it at the server</h2>
+						<p>Open <strong>Settings → ArcaSync → Server URL</strong> and paste:</p>
+						<div class="copy-row">
+							<span class="copy-row__value" id="server-url">{{relay}}</span>
+							<button class="btn btn--small" type="button" data-copy="server-url">Copy</button>
+						</div>
+						<p class="muted">
+							The default points at <code>localhost</code>, which only works for development. If you open
+							an invite with <strong>Open in Obsidian</strong>, it fills this in for you after you
+							confirm.
+						</p>
+					</section>
+
+					<section id="sign-in" aria-labelledby="sign-in-h">
+						<h2 id="sign-in-h"><span class="guide__num">4</span>Sign in</h2>
+						<p>Pick the row that matches you.</p>
+						<div class="rows">
+							<div class="row-card">
+								<h3>I have an invite and no account yet</h3>
+								<p>Any one of these:</p>
+								<ul>
+									<li>
+										Open the invite link and click <strong>Open in Obsidian</strong>. Confirm
+										<strong>Join an ArcaSync server</strong>, enter your name and join.
+									</li>
+									<li>
+										Or paste the link into <strong>Settings → ArcaSync → Join with an invite</strong>,
+										fill in <strong>Your name</strong> and click <strong>Join</strong>. Set the
+										<a href="#connect">Server URL</a> first: the link opens this website, not the server.
+									</li>
+									<li>
+										Or create the account in the browser on the invite page, then continue with the next
+										row.
+									</li>
+								</ul>
+							</div>
+							<div class="row-card">
+								<h3>I made my account in the browser</h3>
+								<p>
+									In <strong>Settings → ArcaSync</strong>, click <strong>Sign in with another
+									device</strong>. Obsidian shows a code and a link: open the link in the browser where you
+									made your account (or go to <a href="/approve">the approve page</a>) and approve the code.
+								</p>
+							</div>
+							<div class="row-card">
+								<h3>I'm signed in on another device that has Obsidian</h3>
+								<p>
+									On the new device, click <strong>Sign in with another device</strong>. On the old one,
+									run <strong>ArcaSync: Approve a device sign-in</strong> and enter the code.
+								</p>
+							</div>
+						</div>
+						<p class="callout callout--warn">
+							<strong>An invite works once.</strong> If you already used it, don't open it again; use a
+							sign-in code.
+						</p>
+					</section>
+
+					<section id="share" aria-labelledby="share-h">
+						<h2 id="share-h"><span class="guide__num">5</span>Share a folder</h2>
+						<ol class="steps">
+							<li>
+								Go to <strong>Settings → ArcaSync → Shared folders → Add folder</strong>.
+							</li>
+							<li>Pick or type a folder, choose the workspace, then click <strong>Connect</strong>.</li>
+						</ol>
+						<p>
+							One folder per workspace, and folders can't be inside each other. Notes already in the
+							folder upload. If a friend has a note at the same path, the texts are merged; when they
+							can't be merged cleanly, your version is kept as a local copy next to it, so nothing is
+							lost. To start fresh, use a new empty folder.
+						</p>
+					</section>
+
+					<section id="together" aria-labelledby="together-h">
+						<h2 id="together-h"><span class="guide__num">6</span>Working together</h2>
+						<ul>
+							<li>Coloured carets with names are live, and so are selections.</li>
+							<li>Avatars of who's here appear in the status bar and on the folder.</li>
+							<li>
+								<strong>ArcaSync: Jump to user…</strong> opens their note at their cursor.
+								<strong>ArcaSync: Follow user…</strong> keeps following them until you move.
+							</li>
+							<li>Attachments (images, PDFs, anything) sync too, up to 200 MB each.</li>
+							<li>Viewers can read but not edit.</li>
+						</ul>
+					</section>
+
+					<section id="trouble" aria-labelledby="trouble-h">
+						<h2 id="trouble-h"><span class="guide__num">7</span>Troubleshooting</h2>
+						<div class="faq">
+							<details>
+								<summary>“This link is not a valid ArcaSync invite”</summary>
+								<p>The link was cut off. Copy all of it, including everything after <code>invite=</code>.</p>
+							</details>
+							<details>
+								<summary>The invite page says “already used”</summary>
+								<p>Sign in with a code instead (the second or third row under <a href="#sign-in">Sign in</a>).</p>
+							</details>
+							<details>
+								<summary>The code expired</summary>
+								<p>Codes last 10 minutes. Click <strong>Sign in with another device</strong> again.</p>
+							</details>
+							<details>
+								<summary>“Session expired — connect again to sign in”</summary>
+								<p>Sessions last 90 days. <a href="#sign-in">Sign in</a> again.</p>
+							</details>
+							<details>
+								<summary>The connection status shows an error</summary>
+								<p>
+									Check the <strong>Server URL</strong>: it starts with <code>https://</code> and has no
+									path after it. Then click <strong>Disconnect</strong> and <strong>Connect</strong>.
+								</p>
+							</details>
+							<details>
+								<summary>Nothing syncs</summary>
+								<p>Is the folder mapped under <strong>Shared folders</strong>, and does the status bar show the workspace connected?</p>
+							</details>
+							<details>
+								<summary>On mobile</summary>
+								<p>Install BRAT the same way, then sign in with a code approved from your desktop.</p>
+							</details>
+							<details>
+								<summary>Updating</summary>
+								<p>BRAT updates on startup. For a manual install, replace the three files.</p>
+							</details>
+							<details>
+								<summary>Leaving</summary>
+								<p>Click <strong>Sign out</strong> in settings. The files in your folder stay.</p>
+							</details>
+						</div>
+					</section>
+				</article>
+			</div>
+		</main>
+		<!--@footer-->
+	</body>
+</html>

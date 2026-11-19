@@ -23,7 +23,7 @@ import {
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import type { z } from "zod";
-import type { ApiError, Result } from "./AccountsDO";
+import type { ApiError, LinkBase, Result } from "./AccountsDO";
 import { chunks } from "./chunks";
 import { configError } from "./config";
 import type { Env } from "./env";
@@ -40,8 +40,18 @@ const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Obsidian desktop is `app://obsidian.md`, mobile is `capacitor://localhost`. */
 const ALLOWED_ORIGINS = ["app://obsidian.md", "capacitor://localhost", "http://localhost"];
-function isAllowedOrigin(origin: string): boolean {
+
+/** `ARCASYNC_SITE_ORIGINS`: the website's origins (comma-separated), allowed to call `/api/*`. */
+export function siteOrigins(value: string | undefined): string[] {
+	return (value ?? "")
+		.split(",")
+		.map((o) => o.trim().replace(/\/+$/, ""))
+		.filter(Boolean);
+}
+
+function isAllowedOrigin(origin: string, env: Pick<Env, "ARCASYNC_SITE_ORIGINS">): boolean {
 	if (ALLOWED_ORIGINS.includes(origin)) return true;
+	if (siteOrigins(env.ARCASYNC_SITE_ORIGINS).includes(origin)) return true;
 	return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
@@ -57,11 +67,13 @@ const app = new Hono<{ Bindings: Env }>();
 app.use(
 	"*",
 	cors({
-		origin: (origin) => (origin && isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0]),
+		origin: (origin, c) => (origin && isAllowedOrigin(origin, c.env) ? origin : ALLOWED_ORIGINS[0]),
 		allowHeaders: ["Authorization", "Content-Type", "X-Workspace-Id"],
 		allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-		credentials: true,
-		maxAge: 600,
+		// Bearer tokens only, never cookies: no `Access-Control-Allow-Credentials`.
+		credentials: false,
+		// Preflights are Worker requests too: let browsers cache them as long as they will (2 h).
+		maxAge: 7200,
 	}),
 );
 
@@ -111,7 +123,13 @@ async function parseBody<T>(
 
 const badRequest = (c: Ctx) => c.json(errorBody("bad_request", "Invalid request"), 400);
 const bearer = (c: Ctx) => bearerToken(c.req.header("authorization"));
-const publicUrl = (c: Ctx) => c.env.ARCASYNC_PUBLIC_URL || new URL(c.req.url).origin;
+/** This relay's own origin (what the plugin's Server URL is set to). */
+const relayOrigin = (c: Ctx) => new URL(c.req.url).origin;
+/** Where invite and device-code links point: the website when `ARCASYNC_PUBLIC_URL` is set. */
+const links = (c: Ctx): LinkBase => ({
+	site: c.env.ARCASYNC_PUBLIC_URL?.trim() || null,
+	relay: relayOrigin(c),
+});
 
 const accounts = (env: Env) => env.ACCOUNTS.getByName(ACCOUNTS_NAME);
 /** Per isolate (D10); dropped for the caller on logout and invite redeem. */
@@ -120,7 +138,7 @@ const api = new Hono<{ Bindings: Env }>();
 
 api.get("/health", (c) => c.json({ ok: true, version: RELAY_VERSION }));
 
-api.get("/server-info", (c) => c.json(serverInfo(c.env, publicUrl(c))));
+api.get("/server-info", (c) => c.json(serverInfo(c.env, relayOrigin(c))));
 
 api.route("/chunks", chunks);
 
@@ -161,7 +179,7 @@ api.get("/workspaces", async (c) =>
 api.post("/auth/bootstrap", async (c) => {
 	const body = await parseBody(c, BootstrapRequest);
 	if (!body) return badRequest(c);
-	return reply(c, await accounts(c.env).bootstrap(bearer(c), body.workspaceName, publicUrl(c)));
+	return reply(c, await accounts(c.env).bootstrap(bearer(c), body.workspaceName, links(c)));
 });
 
 api.post("/auth/invite/accept", async (c) => {
@@ -193,10 +211,7 @@ api.get("/workspaces/:id/invites", async (c) =>
 api.post("/workspaces/:id/invites", async (c) => {
 	const body = await parseBody(c, InviteCreateRequest);
 	if (!body) return badRequest(c);
-	return reply(
-		c,
-		await accounts(c.env).createInvite(bearer(c), c.req.param("id"), body, publicUrl(c)),
-	);
+	return reply(c, await accounts(c.env).createInvite(bearer(c), c.req.param("id"), body, links(c)));
 });
 
 api.delete("/workspaces/:id/invites/:inviteId", async (c) =>
@@ -238,7 +253,7 @@ api.post("/admin/users/:id/:op{disable|enable}", async (c) => {
 	const { id, op } = c.req.param();
 	const a = accounts(c.env);
 	if (op === "disable") return reply(c, await a.disableUser(bearer(c), id));
-	return reply(c, await a.enableUser(bearer(c), id, publicUrl(c)));
+	return reply(c, await a.enableUser(bearer(c), id, links(c)));
 });
 
 const AUDIT_DEFAULT_LIMIT = 50;
@@ -261,7 +276,7 @@ api.get("/admin/audit", async (c) => {
 api.post("/auth/device/start", async (c) => {
 	const body = await parseBody(c, DeviceCodeStartRequest);
 	if (!body) return badRequest(c);
-	return reply(c, await accounts(c.env).deviceStart(body.device));
+	return reply(c, await accounts(c.env).deviceStart(body.device, links(c)));
 });
 
 api.post("/auth/device/poll", async (c) => {

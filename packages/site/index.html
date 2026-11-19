@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ArcaSync · One shared folder, everyone's cursor in it</title>
+		<meta name="description" content="ArcaSync keeps a folder of your Obsidian vault live between friends: live carets, presence, follow, and attachments. Invite-only." />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<script src="/theme.js"></script>
+		<script type="module" src="/src/pages/home.ts"></script>
+	</head>
+	<body class="home">
+		<!--@header-->
+		<main id="main" tabindex="-1">
+			<section class="hero" aria-labelledby="hero-title">
+				<div class="hero__art" aria-hidden="true" data-loom>
+					<!--@loom-static-->
+					<canvas class="hero__canvas" aria-hidden="true" data-loom-canvas></canvas>
+				</div>
+				<div class="wrap hero__grid">
+					<div class="hero__text">
+						<p class="kicker">an obsidian plugin · invite-only</p>
+						<h1 id="hero-title">One shared folder. <em>Everyone's cursor in it.</em></h1>
+						<p class="hero__lede">
+							ArcaSync keeps a folder of your vault live between friends. You see each other type, jump
+							to where someone is, follow along, and attachments come too.
+						</p>
+						<div class="btn-row hero__ctas">
+							<a class="btn btn--primary" href="/guide">Read the install guide</a>
+							<button
+								class="btn"
+								type="button"
+								aria-expanded="false"
+								aria-controls="invite-form"
+								data-invite-toggle
+							>
+								I have an invite
+							</button>
+						</div>
+						<form class="field hero__invite" id="invite-form" data-invite-form novalidate hidden>
+							<label for="invite-input">Paste your invite link</label>
+							<div class="inline-form">
+								<input
+									id="invite-input"
+									class="input input--mono"
+									type="text"
+									inputmode="url"
+									autocomplete="off"
+									spellcheck="false"
+									placeholder="https://…/join?invite=…"
+									aria-describedby="invite-error"
+								/>
+								<button class="btn btn--primary" type="submit">Continue</button>
+							</div>
+							<p class="field-error" id="invite-error" hidden></p>
+						</form>
+					</div>
+				</div>
+			</section>
+
+			<section class="wrap features" aria-labelledby="features-title">
+				<h2 id="features-title">What it does</h2>
+				<div class="feature-grid">
+					<article class="card card--ruled feature">
+						<svg class="feature__glyph" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M7 3v14" stroke="#E8534A" stroke-width="2"/><path d="M7 4h7.5a1.5 1.5 0 0 1 1.5 1.5v1A1.5 1.5 0 0 1 14.5 8H7" fill="#E8534A"/></svg>
+						<h3>Live carets</h3>
+						<p>Every collaborator's cursor and selection, in their colour, as they type.</p>
+					</article>
+					<article class="card card--ruled feature">
+						<svg class="feature__glyph" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="6" cy="7" r="3" stroke="#E88A34" stroke-width="1.8"/><circle cx="14" cy="7" r="3" stroke="#E88A34" stroke-width="1.8"/><path d="M2 17c1-3 3-4 4-4s3 1 4 4M10 17c1-3 3-4 4-4s3 1 4 4" stroke="#E88A34" stroke-width="1.8"/></svg>
+						<h3>Presence, jump and follow</h3>
+						<p>See who's in the folder. Jump to their cursor, or follow them around.</p>
+					</article>
+					<article class="card card--ruled feature">
+						<svg class="feature__glyph" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 2.5h6l4 4v11H5z" stroke="#2FAE8F" stroke-width="1.8"/><path d="M11 2.5v4h4M8 13l2-2.5 1.5 1.5L13 10" stroke="#2FAE8F" stroke-width="1.6"/></svg>
+						<h3>Files, not just notes</h3>
+						<p>Images, PDFs and other attachments sync too, up to 200 MB each.</p>
+					</article>
+					<article class="card card--ruled feature">
+						<svg class="feature__glyph" viewBox="0 0 20 20" width="20" height="20" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 5.5h15v9h-15z" stroke="#2F90D0" stroke-width="1.8"/><path d="m2.5 6 7.5 5 7.5-5" stroke="#2F90D0" stroke-width="1.8"/></svg>
+						<h3>Invites, not sign-ups</h3>
+						<p>Accounts only come from an invite. Sign-ins are approved with a code.</p>
+					</article>
+				</div>
+			</section>
+
+			<section class="wrap how" aria-labelledby="how-title">
+				<h2 id="how-title">How you get in</h2>
+				<ol class="how__steps">
+					<li class="how__step">
+						<span class="how__num">1</span>
+						<h3>Get an invite</h3>
+						<p>Whoever runs your server sends you a link. It usually works once.</p>
+						<a href="/guide#before">What you need</a>
+					</li>
+					<li class="how__step">
+						<span class="how__num">2</span>
+						<h3>Install with BRAT</h3>
+						<p>A beta-plugin installer for Obsidian adds ArcaSync and keeps it updated.</p>
+						<a href="/guide#brat">Install steps</a>
+					</li>
+					<li class="how__step">
+						<span class="how__num">3</span>
+						<h3>Pick a folder to share</h3>
+						<p>Map a folder to your workspace, connect, and everyone's notes meet there.</p>
+						<a href="/guide#share">Share a folder</a>
+					</li>
+				</ol>
+			</section>
+		</main>
+		<!--@footer-->
+	</body>
+</html>

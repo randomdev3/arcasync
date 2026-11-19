@@ -16,7 +16,33 @@
 			"!**/*.svelte"
 		]
 	},
-	"formatter": { "enabled": true, "indentStyle": "tab", "lineWidth": 100 },
-	"linter": { "enabled": true, "rules": { "recommended": true } },
-	"javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } }
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 100
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"semicolons": "always"
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/site/src/styles/**"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noImportantStyles": "off"
+					}
+				}
+			}
+		}
+	]
 }

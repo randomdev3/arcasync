@@ -522,7 +522,7 @@ export default class ArcaSyncPlugin extends Plugin {
 	async joinWithInvite(input: string, name = ""): Promise<boolean> {
 		const invite = parseInviteLink(input);
 		if (!invite) {
-			new Notice("ArcaSync: that is not a ArcaSync invite link or code");
+			new Notice("ArcaSync: that is not an ArcaSync invite link or code");
 			return false;
 		}
 		const sameRelay = !invite.server || sameServer(invite.server, this.settings.serverUrl);
@@ -599,7 +599,7 @@ export default class ArcaSyncPlugin extends Plugin {
 		// Never act on a link without asking: it may come from anyone.
 		this.openModal(
 			new ConfirmModal(this.app, {
-				title: "Join a ArcaSync server",
+				title: "Join an ArcaSync server",
 				message: signOutFirst
 					? `Join ${server}? You will be signed out of ${this.settings.serverUrl}.`
 					: `Join ${server}?`,

@@ -41,7 +41,11 @@
 			"vars": {
 				"ARCASYNC_DEV_OPEN_LOGIN": "0",
 				"ARCASYNC_DEBUG_STATS": "0",
-				"ARCASYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_MAX_FILE_BYTES": "209715200",
+				// The website on Cloudflare Pages (packages/site, docs/site.md): invite and device-code
+				// links point at it, and it may call /api/* cross-origin.
+				"ARCASYNC_PUBLIC_URL": "https://arca-sync.pages.dev",
+				"ARCASYNC_SITE_ORIGINS": "https://arca-sync.pages.dev"
 			},
 			"observability": { "enabled": true }
 		},
@@ -61,7 +65,14 @@
 				"ARCASYNC_BOOTSTRAP_TOKEN": "arcasync-local-dev-bootstrap-token-not-secret-0",
 				"ARCASYNC_DEV_OPEN_LOGIN": "1",
 				"ARCASYNC_DEBUG_STATS": "1",
-				"ARCASYNC_MAX_FILE_BYTES": "209715200"
+				"ARCASYNC_MAX_FILE_BYTES": "209715200",
+				// The website (packages/site; https://arca-sync.pages.dev in production): invite links
+				// are `<it>/join?invite=`, device codes `<it>/approve?code=`. Unset (top level, probe),
+				// links fall back to `obsidian://arcasync`.
+				"ARCASYNC_PUBLIC_URL": "http://localhost:5173",
+				// Website origins allowed to call /api/* (CORS): `vite dev` and `wrangler pages dev`.
+				// Unset at top level and in probe: no website may call the API cross-origin.
+				"ARCASYNC_SITE_ORIGINS": "http://localhost:5173,http://localhost:4173"
 			}
 		},
 		// Throwaway free-tier probe (R-9): open dev login and debug stats, secret via `wrangler

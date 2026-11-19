@@ -146,7 +146,7 @@ describe("ApiClient", () => {
 		const start = {
 			deviceCode: "dc",
 			userCode: "BCDF-GHJK",
-			verificationUri: "obsidian://arcasync?approve=BCDF-GHJK",
+			verificationUri: "https://relay.example.com/approve?code=BCDF-GHJK",
 			interval: 5,
 			expiresIn: 600,
 		};
@@ -217,7 +217,7 @@ describe("ApiClient", () => {
 		const created = {
 			id: "i1",
 			token: "tok",
-			url: "obsidian://arcasync?server=x&invite=tok",
+			url: "https://relay.example.com/join?invite=tok",
 			role: "editor",
 			admin: false,
 			maxUses: 3,

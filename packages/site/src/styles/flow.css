@@ -1,0 +1,146 @@
+/* Join, sign-in, approve, account and 404: one narrow column under a short ruled header. */
+
+.flow {
+	max-width: 720px;
+	padding-block: var(--s8) 0;
+}
+
+.flow--wide {
+	max-width: 980px;
+}
+
+.flow > section > * + * {
+	margin-top: var(--s5);
+}
+
+.flow h1 {
+	font-size: clamp(2.5rem, 4vw + 1rem, 3.75rem);
+}
+
+.flow .lede {
+	font-size: 1.1875rem;
+	color: var(--ink-2);
+}
+
+.flow-head {
+	position: relative;
+	display: grid;
+	gap: var(--s3);
+}
+
+/* The two threads under each heading, drawn once in SVG. */
+.flow-thread {
+	display: block;
+	width: min(260px, 70%);
+	height: 18px;
+	margin-top: var(--s2);
+}
+
+.choose-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+	gap: var(--s5);
+	align-items: start;
+}
+
+@media (max-width: 760px) {
+	.choose-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+.card__title {
+	font-family: var(--font-display);
+	font-size: 1.625rem;
+	font-weight: 400;
+	line-height: 1.15;
+}
+
+.card__eyebrow {
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	color: var(--ink-2);
+	letter-spacing: 0.04em;
+}
+
+.card--primary {
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--rule));
+}
+
+.code-card {
+	display: grid;
+	gap: var(--s4);
+	justify-items: start;
+}
+
+.code-card .code-display {
+	padding: var(--s3) var(--s4);
+	border: 1px dashed var(--rule);
+	border-radius: var(--r-sm);
+	background: var(--paper);
+}
+
+.meta-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s2) var(--s4);
+	color: var(--ink-2);
+	font-size: var(--step-small);
+}
+
+.meta-row .mono {
+	color: var(--ink);
+	font-variant-numeric: tabular-nums;
+}
+
+.options {
+	display: grid;
+	gap: var(--s3);
+	padding: 0;
+	list-style: none;
+}
+
+.options > li {
+	display: grid;
+	gap: var(--s2);
+	padding: var(--s4) var(--s5);
+	border: 1px solid var(--rule);
+	border-radius: var(--r-md);
+	background: var(--paper-2);
+}
+
+.options > li > :first-child {
+	font-weight: 600;
+}
+
+.options .btn {
+	justify-self: start;
+}
+
+.device-ask {
+	font-size: 1.1875rem;
+	line-height: 1.5;
+}
+
+.big-who {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s3);
+}
+
+.big-who .dot {
+	width: 14px;
+	height: 14px;
+}
+
+.notfound-art {
+	display: block;
+	width: min(100%, 520px);
+	height: auto;
+	margin-top: var(--s6);
+}
+
+.notfound-art .rules {
+	stroke: var(--rule);
+}

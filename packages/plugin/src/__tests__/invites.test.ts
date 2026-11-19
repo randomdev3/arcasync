@@ -17,6 +17,43 @@ describe("parseInviteLink", () => {
 		).toEqual({ server: "http://localhost:8787", token: TOKEN });
 	});
 
+	it("parses the website's https join link as an invite for the current server", () => {
+		for (const link of [
+			`https://arca.example.com/join?invite=${TOKEN}`,
+			`https://arca.example.com/join/?invite=${TOKEN}`,
+			`https://arca.example.com/join#invite=${TOKEN}`,
+			`http://localhost:5173/join?invite=${TOKEN}`,
+			` https://example.com/team/join?invite=${TOKEN}\n`,
+		]) {
+			expect(parseInviteLink(link), link).toEqual({ server: null, token: TOKEN });
+		}
+	});
+
+	it("takes the relay from a join link's server parameter, validated", () => {
+		const server = encodeURIComponent("https://relay.example.com/");
+		expect(
+			parseInviteLink(`https://arca.example.com/join?invite=${TOKEN}&server=${server}`),
+		).toEqual({ server: "https://relay.example.com", token: TOKEN });
+		const bad = encodeURIComponent("javascript:alert(1)");
+		expect(
+			parseInviteLink(`https://arca.example.com/join?invite=${TOKEN}&server=${bad}`),
+		).toBeNull();
+	});
+
+	it("rejects other https paths, missing tokens and credentials in a join link", () => {
+		for (const link of [
+			`https://relay.example.com/joinx?invite=${TOKEN}`,
+			`https://relay.example.com/join/more?invite=${TOKEN}`,
+			`https://relay.example.com/approve?invite=${TOKEN}`,
+			"https://relay.example.com/join",
+			"https://relay.example.com/join?invite=short",
+			`https://user:pw@relay.example.com/join?invite=${TOKEN}`,
+			`ftp://relay.example.com/join?invite=${TOKEN}`,
+		]) {
+			expect(parseInviteLink(link), link).toBeNull();
+		}
+	});
+
 	it("parses a bare token as an invite for the current server", () => {
 		expect(parseInviteLink(` ${TOKEN} `)).toEqual({ server: null, token: TOKEN });
 	});

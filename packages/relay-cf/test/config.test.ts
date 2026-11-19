@@ -73,6 +73,29 @@ describe("wrangler.jsonc", () => {
 		expect(resolved(undefined).observability?.enabled).toBe(false);
 	});
 
+	it("serves no static assets (the website is on Cloudflare Pages)", () => {
+		for (const env of [undefined, "production", "dev", "probe"]) {
+			expect(resolved(env).assets, `env ${env}`).toBeUndefined();
+		}
+	});
+
+	it("points links at the website and allows it cross-origin in dev and production", () => {
+		for (const env of [undefined, "probe"]) {
+			const vars = resolved(env).vars as Record<string, string>;
+			expect("ARCASYNC_PUBLIC_URL" in vars, `env ${env}`).toBe(false);
+			expect("ARCASYNC_SITE_ORIGINS" in vars, `env ${env}`).toBe(false);
+		}
+		const production = resolved("production").vars as Record<string, string>;
+		expect(production.ARCASYNC_PUBLIC_URL).toBe("https://arca-sync.pages.dev");
+		expect(production.ARCASYNC_SITE_ORIGINS).toBe("https://arca-sync.pages.dev");
+		const dev = resolved("dev").vars as Record<string, string>;
+		expect(dev.ARCASYNC_PUBLIC_URL).toBe("http://localhost:5173");
+		expect(dev.ARCASYNC_SITE_ORIGINS?.split(",")).toEqual([
+			"http://localhost:5173",
+			"http://localhost:4173",
+		]);
+	});
+
 	it("serves wrangler dev on 8789", () => {
 		expect(resolved("dev").dev.port).toBe(8789);
 	});
