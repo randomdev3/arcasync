@@ -12,6 +12,7 @@ import { DeviceLogin } from "./auth/DeviceLogin";
 import { inviteFromParams, parseInviteLink, sameServer } from "./auth/invites";
 import { CounterDebug } from "./debug/CounterDebug";
 import { editorExtensions } from "./editor";
+import { ChunkClient } from "./files/ChunkClient";
 import { ApiClient, ApiRequestError, type MeResult } from "./net/ApiClient";
 import { ConnectionManager, type ConnectionState } from "./net/ConnectionManager";
 import { TokenStore } from "./net/TokenStore";
@@ -37,7 +38,11 @@ import { MembersModal } from "./ui/MembersModal";
 import { TeamSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { containingRoot, foldersOverlap } from "./workspace/paths";
-import { type SessionUser, WorkspaceSession } from "./workspace/WorkspaceSession";
+import {
+	type BinaryOptions,
+	type SessionUser,
+	WorkspaceSession,
+} from "./workspace/WorkspaceSession";
 
 /**
  * Every live plugin instance. Obsidian reloads plugins in place; an instance
@@ -775,6 +780,7 @@ export default class TeamSyncPlugin extends Plugin {
 			root,
 			user,
 			vaultId: this.secrets.vaultId,
+			binaries: this.binaryOptions(workspaceId),
 		});
 		const started = session;
 		const offOnline = started.onOnlineChange(() => this.renderStatusBar());
@@ -791,6 +797,22 @@ export default class TeamSyncPlugin extends Plugin {
 			},
 		});
 		started.start();
+	}
+
+	/** Binary sync for a workspace when the relay has chunk storage (`features.chunks`). */
+	private binaryOptions(workspaceId: string): BinaryOptions | null {
+		const info = this.serverInfo;
+		if (!info?.features.chunks) return null;
+		return {
+			chunks: new ChunkClient({
+				auth: {
+					baseUrl: () => this.settings.serverUrl,
+					token: () => this.tokens.get(workspaceId),
+					invalidate: () => this.tokens.invalidate(workspaceId),
+				},
+			}),
+			maxBytes: Math.min(limits().maxBinaryBytes, info.limits.maxFileBytes),
+		};
 	}
 
 	/**

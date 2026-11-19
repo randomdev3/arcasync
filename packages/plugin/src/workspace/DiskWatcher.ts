@@ -1,8 +1,8 @@
 import { type EventRef, type TAbstractFile, TFile, type Vault } from "obsidian";
-import { isSyncedNote, toWs } from "./paths";
+import { syncKind, toWs } from "./paths";
 import type { SelfWriteRegistry } from "./SelfWriteRegistry";
 
-/** User-made changes to synced notes, as workspace paths. */
+/** User-made changes to synced files, as workspace paths. */
 export interface DiskEvents {
 	create(path: string): void;
 	delete(path: string): void;
@@ -17,7 +17,7 @@ export const CREATE_DEBOUNCE_MS = 500;
  * are consumed from the `SelfWriteRegistry` at event time and dropped. A new path is announced
  * only after it has existed for `debounceMs`, so editors' temp files and the instant rename of
  * "Untitled.md" never reach the index. Renames across the folder boundary become a create or a
- * delete; Obsidian's trash is outside it.
+ * delete; Obsidian's trash is outside it. Binaries are watched only when `binaries` is on.
  */
 export class DiskWatcher {
 	private refs: EventRef[] = [];
@@ -29,6 +29,7 @@ export class DiskWatcher {
 		private readonly selfWrites: SelfWriteRegistry,
 		private readonly events: DiskEvents,
 		private readonly debounceMs = CREATE_DEBOUNCE_MS,
+		private readonly binaries = false,
 	) {}
 
 	start(): void {
@@ -50,7 +51,8 @@ export class DiskWatcher {
 
 	private ws(vaultPath: string): string | null {
 		const ws = toWs(this.root, vaultPath);
-		return ws && isSyncedNote(ws) ? ws : null;
+		const kind = ws && syncKind(ws);
+		return kind === "md" || (kind === "binary" && this.binaries) ? ws : null;
 	}
 
 	private onCreate(file: TAbstractFile): void {

@@ -1,12 +1,13 @@
 import type { App } from "obsidian";
-import { isSyncedNote, toVault, toWs } from "./paths";
+import type { BinaryFiles, FileStat } from "../files/FileSyncer";
+import { syncKind, toVault, toWs } from "./paths";
 import type { SelfWriteRegistry } from "./SelfWriteRegistry";
 
-/** The synced notes on this device's disk, addressed by workspace path. */
+/** The synced files on this device's disk (notes, and binaries when on), by workspace path. */
 export interface LocalFiles {
 	list(): string[];
 	exists(path: string): boolean;
-	/** Create an empty note (its content arrives through the note doc). */
+	/** Create an empty note (its content arrives through the note doc). Binaries are downloaded. */
 	create(path: string): Promise<void>;
 	rename(from: string, to: string): Promise<void>;
 	/** Move to the trash the user configured in Obsidian. */
@@ -21,22 +22,51 @@ export interface KnownStore {
 
 /**
  * `LocalFiles` over the Obsidian vault, rooted at the shared folder. Every write registers a
- * self-write first, so the DiskWatcher drops the vault event it causes.
+ * self-write first, so the DiskWatcher drops the vault event it causes. Binaries are listed only
+ * when `binaries` is on (the relay has chunk storage).
  */
-export class ObsidianLocalFiles implements LocalFiles {
+export class ObsidianLocalFiles implements LocalFiles, BinaryFiles {
 	constructor(
 		private readonly app: App,
 		private readonly root: string,
 		private readonly selfWrites: SelfWriteRegistry,
+		private readonly binaries = false,
 	) {}
 
 	list(): string[] {
 		const out: string[] = [];
-		for (const file of this.app.vault.getMarkdownFiles()) {
+		const files = this.binaries ? this.app.vault.getFiles() : this.app.vault.getMarkdownFiles();
+		for (const file of files) {
 			const ws = toWs(this.root, file.path);
-			if (ws && isSyncedNote(ws)) out.push(ws);
+			const kind = ws && syncKind(ws);
+			if (ws && (kind === "md" || (kind === "binary" && this.binaries))) out.push(ws);
 		}
 		return out;
+	}
+
+	stat(path: string): FileStat | null {
+		const vp = toVault(this.root, path);
+		const file = vp === null ? null : this.app.vault.getFileByPath(vp);
+		return file ? { size: file.stat.size, mtime: file.stat.mtime } : null;
+	}
+
+	async readBinary(path: string): Promise<ArrayBuffer | null> {
+		const vp = toVault(this.root, path);
+		const file = vp === null ? null : this.app.vault.getFileByPath(vp);
+		return file ? this.app.vault.readBinary(file) : null;
+	}
+
+	async writeBinary(path: string, data: ArrayBuffer): Promise<void> {
+		const vp = this.vaultPath(path);
+		const file = this.app.vault.getFileByPath(vp);
+		if (file) {
+			this.selfWrites.expect(vp, { kind: "modify" });
+			await this.app.vault.modifyBinary(file, data);
+			return;
+		}
+		await this.ensureParent(vp);
+		this.selfWrites.expect(vp, { kind: "create" });
+		await this.app.vault.createBinary(vp, data);
 	}
 
 	exists(path: string): boolean {

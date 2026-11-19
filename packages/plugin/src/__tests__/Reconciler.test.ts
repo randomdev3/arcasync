@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clock, Device, exchange, settle, snapshot } from "./indexHarness";
+import { clock, Device, exchange, MemChunks, settle, snapshot } from "./indexHarness";
 
 beforeEach(() => {
 	clock.t = 1000;
@@ -169,5 +169,104 @@ describe("Reconciler remote apply", () => {
 		b.synced = true;
 		await b.reconciler.run();
 		expect(b.files.ops.at(-1)).toBe("trash d.md");
+	});
+});
+
+describe("Reconciler with binaries", () => {
+	const png = (n: number) => new Uint8Array([137, 80, 78, 71, n]);
+
+	/** A device with binary sync whose index already holds `entries` uploaded by a peer. */
+	async function binaryDevice(
+		chunks: MemChunks,
+		entries: Record<string, number>,
+		opts: { disk?: Record<string, number>; known?: Record<string, string> },
+	): Promise<Device> {
+		const peer = new Device("peer", { chunks });
+		await peer.reconciler.run();
+		for (const [path, n] of Object.entries(entries)) {
+			peer.files.edit(path, png(n));
+			await peer.reconciler.localCreate(path);
+		}
+		await peer.idle();
+		const d = new Device("me", { chunks, known: opts.known });
+		for (const [path, n] of Object.entries(opts.disk ?? {})) d.files.edit(path, png(n));
+		exchange(peer, d);
+		d.writes = 0;
+		return d;
+	}
+
+	it("applies the disk × index × known matrix to binaries", async () => {
+		const chunks = new MemChunks();
+		const d = await binaryDevice(
+			chunks,
+			{ "deleted.png": 1, "remote.png": 2 },
+			{ disk: { "new.png": 3, "gone.png": 4 }, known: { "gone.png": "G", "deleted.png": "peer1" } },
+		);
+		const puts = chunks.puts();
+		await d.reconciler.run();
+		await d.idle();
+
+		// add (after its upload) / trash / drop from index / download instead of an empty file.
+		expect(snapshot(d)).toEqual({ "new.png": "me1", "remote.png": "peer2" });
+		expect(d.index.get("new.png")).toMatchObject({ kind: "binary", mime: "image/png" });
+		expect(d.files.ops.sort()).toEqual(["trash gone.png", "write remote.png"]);
+		expect(d.files.bytes.get("remote.png")).toEqual(png(2));
+		expect(chunks.puts()).toBe(puts + 1);
+		expect(d.known.value).toEqual({ "new.png": "me1", "remote.png": "peer2" });
+	});
+
+	it("ignores binaries without chunk storage, as in P1", async () => {
+		const chunks = new MemChunks();
+		const d = await binaryDevice(chunks, { "remote.png": 2 }, {});
+		const p1 = new Device("p1", { disk: ["local.png", "n.md"] });
+		exchange(d, p1);
+		await p1.reconciler.run();
+		await p1.idle();
+		expect(p1.files.ops).toEqual([]);
+		expect(Object.keys(snapshot(p1)).sort()).toEqual(["n.md", "remote.png"]);
+	});
+
+	it("renames without chunk traffic, and syncs a modify after the rename", async () => {
+		const chunks = new MemChunks();
+		const a = new Device("a", { chunks });
+		const b = new Device("b", { chunks });
+		await a.reconciler.run();
+		await b.reconciler.run();
+		a.files.edit("img.png", png(1));
+		await a.reconciler.localCreate("img.png");
+		await settle([a, b]);
+		const before = chunks.log.length;
+
+		await b.files.rename("img.png", "pic.png");
+		await b.reconciler.localRename("img.png", "pic.png");
+		await settle([a, b]);
+		expect(a.files.list()).toEqual(["pic.png"]);
+		expect(a.index.get("pic.png")).toMatchObject({ kind: "binary", id: "a1" });
+		expect(chunks.log.length).toBe(before);
+
+		b.files.edit("pic.png", png(9));
+		await b.reconciler.localModify("pic.png");
+		await settle([a, b]);
+		expect(a.files.bytes.get("pic.png")).toEqual(png(9));
+		expect(a.files.list()).toEqual(["pic.png"]);
+		expect(b.files.list()).toEqual(["pic.png"]);
+	});
+
+	it("an offline edit is uploaded on the next run when the remote did not change", async () => {
+		const chunks = new MemChunks();
+		const a = new Device("a", { chunks });
+		const b = new Device("b", { chunks });
+		await a.reconciler.run();
+		await b.reconciler.run();
+		a.files.edit("doc.pdf", png(1));
+		await a.reconciler.localCreate("doc.pdf");
+		await settle([a, b]);
+
+		b.files.edit("doc.pdf", png(5));
+		await b.reconciler.run();
+		await settle([a, b]);
+		expect(a.files.bytes.get("doc.pdf")).toEqual(png(5));
+		expect(a.files.list()).toEqual(["doc.pdf"]);
+		expect(b.files.list()).toEqual(["doc.pdf"]);
 	});
 });

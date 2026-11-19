@@ -27,16 +27,23 @@ function file(path: string): TFile {
 	return f;
 }
 
-function setup() {
+function setup({ binaries = false } = {}) {
 	const vault = new FakeVault();
 	const selfWrites = new SelfWriteRegistry();
 	const log: string[] = [];
-	const watcher = new DiskWatcher(vault as unknown as Vault, "Shared", selfWrites, {
-		create: (p) => log.push(`create ${p}`),
-		delete: (p) => log.push(`delete ${p}`),
-		rename: (a, b) => log.push(`rename ${a} → ${b}`),
-		modify: (p) => log.push(`modify ${p}`),
-	});
+	const watcher = new DiskWatcher(
+		vault as unknown as Vault,
+		"Shared",
+		selfWrites,
+		{
+			create: (p) => log.push(`create ${p}`),
+			delete: (p) => log.push(`delete ${p}`),
+			rename: (a, b) => log.push(`rename ${a} → ${b}`),
+			modify: (p) => log.push(`modify ${p}`),
+		},
+		500,
+		binaries,
+	);
 	watcher.start();
 	return { vault, selfWrites, log, watcher };
 }
@@ -109,6 +116,34 @@ describe("DiskWatcher", () => {
 		vault.emit("modify", file("Shared/.hidden/a.md"));
 		vi.advanceTimersByTime(1000);
 		expect(log).toEqual([]);
+	});
+
+	it("passes binary events only when chunks are on; never canvas or Excalidraw", () => {
+		const off = setup();
+		off.vault.emit("create", file("Shared/img.png"));
+		off.vault.emit("modify", file("Shared/old.png"));
+		vi.advanceTimersByTime(1000);
+		expect(off.log).toEqual([]);
+
+		const on = setup({ binaries: true });
+		on.vault.emit("create", file("Shared/img.png"));
+		on.vault.emit("modify", file("Shared/old.png"));
+		on.vault.emit("rename", file("Shared/b.pdf"), "Shared/a.pdf");
+		on.vault.emit("delete", file("Shared/c.bin"));
+		on.vault.emit("create", file("Shared/x.canvas"));
+		on.vault.emit("create", file("Shared/d.excalidraw.md"));
+		vi.advanceTimersByTime(1000);
+		expect(on.log).toEqual([
+			"modify old.png",
+			"rename a.pdf → b.pdf",
+			"delete c.bin",
+			"create img.png",
+		]);
+
+		// TeamSync's own binary writes are dropped like note writes.
+		on.selfWrites.expect("Shared/old.png", { kind: "modify" });
+		on.vault.emit("modify", file("Shared/old.png"));
+		expect(on.log).toHaveLength(4);
 	});
 
 	it("stop() unregisters every handler and pending timer", () => {

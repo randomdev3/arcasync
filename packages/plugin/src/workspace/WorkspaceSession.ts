@@ -1,15 +1,16 @@
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { docName } from "@teamsync/shared";
-import type { App } from "obsidian";
+import { type App, Notice } from "obsidian";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { startNoteDocs } from "../doc";
+import { type ChunkTransfer, FileSyncer } from "../files/FileSyncer";
 import type { ConnectionManager, OpenDocHandle } from "../net/ConnectionManager";
 import { startPresence } from "../presence";
 import { DiskWatcher } from "./DiskWatcher";
 import { type IndexListener, IndexStore } from "./IndexStore";
 import { LocalStorageKnown, ObsidianLocalFiles } from "./LocalFiles";
-import { toVault, toWs } from "./paths";
+import { syncKind, toVault, toWs } from "./paths";
 import { Reconciler } from "./Reconciler";
 import { SelfWriteRegistry } from "./SelfWriteRegistry";
 import type { IDocManager, INavigator, IPresence } from "./types";
@@ -29,6 +30,14 @@ export interface WorkspaceSessionOptions {
 	user: SessionUser;
 	/** `app.appId`; keys per-vault local state (IndexedDB names, localStorage). */
 	vaultId: string;
+	/** Binary sync through R2 chunks (`features.chunks`); without it binaries are ignored. */
+	binaries?: BinaryOptions | null;
+}
+
+export interface BinaryOptions {
+	chunks: ChunkTransfer;
+	/** `limits().maxBinaryBytes`, capped by the server's `maxFileBytes`. */
+	maxBytes: number;
 }
 
 /**
@@ -40,8 +49,9 @@ export interface WorkspaceSessionOptions {
  * `indexDoc`, `awareness` or `index` must drop it on `stop()` and re-read it after `start()`;
  * the `on*` subscriptions survive a restart.
  *
- * With a mapped `root`, `start()` also keeps the folder's notes and the index `files` map in
- * step (DiskWatcher → Reconciler → IndexStore, and back on remote changes).
+ * With a mapped `root`, `start()` also keeps the folder's notes (and, with `binaries`, its other
+ * files through FileSyncer) and the index `files` map in step (DiskWatcher → Reconciler →
+ * IndexStore, and back on remote changes).
  */
 export class WorkspaceSession {
 	readonly app: App;
@@ -50,6 +60,7 @@ export class WorkspaceSession {
 	readonly root: string | null;
 	readonly user: SessionUser;
 	readonly vaultId: string;
+	readonly binaries: BinaryOptions | null;
 	readonly indexName: string;
 	readonly selfWrites = new SelfWriteRegistry();
 
@@ -62,6 +73,8 @@ export class WorkspaceSession {
 	private handle: OpenDocHandle | null = null;
 	private store: IndexStore | null = null;
 	private reconciler: Reconciler | null = null;
+	/** Binary content sync while started with a folder and `binaries`; e2e reads `idle()`. */
+	fileSyncer: FileSyncer | null = null;
 	private teardown: (() => void)[] = [];
 	private readonly indexListeners = new Set<IndexListener>();
 	private readonly modifyListeners = new Set<(vaultPath: string) => void>();
@@ -77,6 +90,7 @@ export class WorkspaceSession {
 		this.root = options.root;
 		this.user = options.user;
 		this.vaultId = options.vaultId;
+		this.binaries = options.binaries ?? null;
 		this.indexName = docName({ workspaceId: options.workspaceId, kind: "index" });
 	}
 
@@ -104,10 +118,11 @@ export class WorkspaceSession {
 		return this.store;
 	}
 
-	/** File id of a synced note at `vaultPath`, or null. */
+	/** File id of a synced note at `vaultPath`, or null (also for binaries). */
 	fileIdOf(vaultPath: string): string | null {
 		const ws = this.root === null ? null : toWs(this.root, vaultPath);
-		return (ws && this.store?.get(ws)?.id) ?? null;
+		const meta = ws ? this.store?.get(ws) : null;
+		return meta?.kind === "md" ? meta.id : null;
 	}
 
 	/** Vault path of the note with `fileId`, or null when it is not indexed. */
@@ -169,24 +184,54 @@ export class WorkspaceSession {
 	}
 
 	private syncFolder(root: string, index: IndexStore, provider: HocuspocusProvider): void {
+		const binaries = this.binaries;
+		const files = new ObsidianLocalFiles(this.app, root, this.selfWrites, binaries !== null);
+		const fileSyncer = binaries
+			? new FileSyncer({
+					files,
+					chunks: binaries.chunks,
+					storage: window.localStorage,
+					storageKey: `teamsync:${this.vaultId}:${this.workspaceId}:binhash`,
+					userId: this.user.id,
+					device: this.app.vault.getName(),
+					maxBytes: binaries.maxBytes,
+					isReadonly: () => provider.authorizedScope === "readonly",
+					whenIndexAcked: () => untilAcked(provider),
+					current: (path) => index.get(path),
+					notify: (message) => new Notice(message, 15000),
+				})
+			: null;
+		this.fileSyncer = fileSyncer;
 		const reconciler = new Reconciler({
 			index,
-			files: new ObsidianLocalFiles(this.app, root, this.selfWrites),
+			files,
 			known: new LocalStorageKnown(`teamsync:${this.vaultId}:${this.workspaceId}:known`, root),
 			userId: this.user.id,
 			isSynced: () => provider.synced,
 			isAcked: () => !provider.hasUnsyncedChanges,
+			binaries: fileSyncer,
 		});
 		this.reconciler = reconciler;
-		const watcher = new DiskWatcher(this.app.vault, root, this.selfWrites, {
-			create: (path) => void reconciler.localCreate(path),
-			delete: (path) => void reconciler.localDelete(path),
-			rename: (from, to) => void reconciler.localRename(from, to),
-			modify: (path) => {
-				const vaultPath = toVault(root, path);
-				if (vaultPath) for (const listener of this.modifyListeners) listener(vaultPath);
+		const watcher = new DiskWatcher(
+			this.app.vault,
+			root,
+			this.selfWrites,
+			{
+				create: (path) => void reconciler.localCreate(path),
+				delete: (path) => void reconciler.localDelete(path),
+				rename: (from, to) => void reconciler.localRename(from, to),
+				modify: (path) => {
+					if (syncKind(path) === "binary") {
+						void reconciler.localModify(path);
+						return;
+					}
+					const vaultPath = toVault(root, path);
+					if (vaultPath) for (const listener of this.modifyListeners) listener(vaultPath);
+				},
 			},
-		});
+			undefined,
+			binaries !== null,
+		);
 		watcher.start();
 		const onSynced = () => void reconciler.run();
 		const onUnsynced = ({ number }: { number: number }) => {
@@ -199,6 +244,7 @@ export class WorkspaceSession {
 			provider.off("unsyncedChanges", onUnsynced);
 			watcher.stop();
 			reconciler.dispose();
+			fileSyncer?.dispose();
 		});
 		if (provider.synced) onSynced();
 	}
@@ -206,6 +252,7 @@ export class WorkspaceSession {
 	stop(): void {
 		for (const fn of this.teardown.splice(0)) fn();
 		this.reconciler = null;
+		this.fileSyncer = null;
 		this.store = null;
 		this.selfWrites.clear();
 		this.docAwareness?.off("change", this.emitOnline);
@@ -217,4 +264,20 @@ export class WorkspaceSession {
 		this.doc = null;
 		this.emitOnline();
 	}
+}
+
+/** Resolves once the provider has no unacked local changes. */
+function untilAcked(provider: HocuspocusProvider): Promise<void> {
+	return new Promise((resolve) => {
+		if (!provider.hasUnsyncedChanges) {
+			resolve();
+			return;
+		}
+		const onChange = ({ number }: { number: number }) => {
+			if (number > 0) return;
+			provider.off("unsyncedChanges", onChange);
+			resolve();
+		};
+		provider.on("unsyncedChanges", onChange);
+	});
 }
