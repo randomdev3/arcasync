@@ -18,7 +18,12 @@ const M = `${DIR}/m.md`;
 const BIG = `${DIR}/big.md`;
 const SEED = "Mobile line\n";
 const NOTES = Array.from({ length: 30 }, (_, i) => `${DIR}/n/n${String(i).padStart(2, "0")}.md`);
-const MOBILE_LIMITS = { warmDocs: 5, bgConcurrency: 1, maxMdBytes: 2 * 1024 * 1024 };
+const MOBILE_LIMITS = {
+	warmDocs: 5,
+	bgConcurrency: 1,
+	maxMdBytes: 2 * 1024 * 1024,
+	maxBaseBytes: 256 * 1024,
+};
 /** Over the 2 MiB mobile limit. */
 const BIG_BYTES = 2.5 * 1024 * 1024;
 
