@@ -254,4 +254,61 @@ describe("ApiClient", () => {
 			code: "forbidden",
 		});
 	});
+
+	it("sends sign-in, password and PIN requests to their routes", async () => {
+		const user = {
+			id: "u1",
+			name: "pia",
+			email: null,
+			color: "#fff",
+			avatarUrl: null,
+			isAdmin: false,
+		};
+		const device = { name: "vault", platform: "macos", vaultId: "v1" } as const;
+		let calls = respond(200, { sessionToken: "t", user, workspaces: [] });
+		await api(null).login("Pia", "correct horse battery", device);
+		expect(calls[0]?.url).toBe("http://relay.test/api/auth/login");
+		expect(calls[0]?.headers?.Authorization).toBeUndefined();
+		expect(JSON.parse(calls[0]?.body as string)).toEqual({
+			name: "Pia",
+			password: "correct horse battery",
+			device,
+		});
+		await api(null).acceptPin("0420", "pia", "correct horse battery", device);
+		expect(calls[1]?.url).toBe("http://relay.test/api/auth/pin/accept");
+		expect(JSON.parse(calls[1]?.body as string)).toMatchObject({ pin: "0420", name: "pia" });
+
+		calls = respond(200, { ok: true });
+		await api().setPassword("new password 1");
+		await api().setPassword("new password 2", "old password");
+		expect(calls.map((c) => JSON.parse(c.body as string))).toEqual([
+			{ new: "new password 1" },
+			{ current: "old password", new: "new password 2" },
+		]);
+		expect(calls[0]?.url).toBe("http://relay.test/api/auth/password");
+		await api().revokePin("w 1", "p1");
+		expect(calls[2]?.url).toBe("http://relay.test/api/workspaces/w%201/pins/p1");
+		expect(calls[2]?.method).toBe("DELETE");
+		await api().unlockPins();
+		expect(calls[3]?.url).toBe("http://relay.test/api/admin/pins/unlock");
+
+		const pin = {
+			id: "p1",
+			pin: "0420",
+			workspaceId: "w1",
+			role: "editor",
+			admin: false,
+			createdAt: 1,
+			createdBy: "u1",
+			expiresAt: 2,
+			usedAt: null,
+			usedBy: null,
+			revoked: false,
+		};
+		calls = respond(200, pin);
+		expect(await api().createPin("w1", { role: "editor" })).toEqual(pin);
+		expect(JSON.parse(calls[0]?.body as string)).toEqual({ role: "editor" });
+		respond(200, { pins: [pin], locked: true, lockedUntil: 5 });
+		expect(await api().listPins("w1")).toEqual({ pins: [pin], locked: true, lockedUntil: 5 });
+	});
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inviteFromParams, parseInviteLink, sameServer } from "../auth/invites";
+import { inviteFromParams, parseInviteLink, parsePin, sameServer } from "../auth/invites";
 
 const TOKEN = "Qm9vdHN0cmFwLWludml0ZS10b2tlbi0wMTIzNDU2Nzg5YWI";
 
@@ -99,5 +99,18 @@ describe("sameServer", () => {
 		expect(sameServer("http://relay.example.com", "https://relay.example.com")).toBe(false);
 		expect(sameServer("https://a.example.com/x", "https://a.example.com/y")).toBe(false);
 		expect(sameServer("nonsense", "nonsense")).toBe(false);
+	});
+});
+
+describe("parsePin", () => {
+	it("accepts four digits, ignoring spaces and dashes", () => {
+		expect(parsePin("0420")).toBe("0420");
+		expect(parsePin(" 04 20\n")).toBe("0420");
+		expect(parsePin("04-20")).toBe("0420");
+	});
+
+	it("rejects anything else, and is never an invite token", () => {
+		for (const input of ["042", "04201", "o420", "", TOKEN]) expect(parsePin(input)).toBeNull();
+		expect(parseInviteLink("0420")).toBeNull();
 	});
 });

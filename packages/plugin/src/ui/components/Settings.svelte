@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { Readable } from "svelte/store";
+import { parsePin } from "../../auth/invites";
 import type { SettingsViewProps } from "./settingsProps";
 
 const { vm }: { vm: Readable<SettingsViewProps> } = $props();
@@ -37,11 +38,26 @@ const newWorkspace = $derived(
 
 let inviteLink = $state("");
 let inviteName = $state("");
+let invitePassword = $state("");
+let inviteConfirm = $state("");
+/** A PIN was typed where a link goes: signed out, it needs a password for the new account. */
+const isPin = $derived($vm.pins && parsePin(inviteLink) !== null);
 
 function join() {
 	if (!inviteLink.trim()) return;
-	$vm.onJoinInvite(inviteLink, inviteName);
+	$vm.onJoinInvite(inviteLink, inviteName, invitePassword, inviteConfirm);
 	inviteLink = "";
+	invitePassword = "";
+	inviteConfirm = "";
+}
+
+let signInName = $state("");
+let signInPassword = $state("");
+
+function signIn() {
+	if (!signInName.trim() || !signInPassword) return;
+	$vm.onPasswordSignIn(signInName, signInPassword);
+	signInPassword = "";
 }
 
 function addMapping(path: string) {
@@ -85,19 +101,58 @@ function addMapping(path: string) {
 	{/if}
 
 	{#if $vm.accounts}
+		{#if $vm.passwords && !$vm.signedIn}
+			<div class="arcasync-row">
+				<div class="arcasync-row-info">
+					<div class="arcasync-row-name">Sign in</div>
+					<div class="arcasync-row-desc">With the name and password of your account.</div>
+				</div>
+				<div class="arcasync-invite">
+					<input
+						type="text"
+						class="arcasync-signin-name"
+						spellcheck="false"
+						autocomplete="username"
+						placeholder="Name"
+						bind:value={signInName}
+					/>
+					<input
+						type="password"
+						class="arcasync-signin-password"
+						autocomplete="current-password"
+						placeholder="Password"
+						bind:value={signInPassword}
+						onkeydown={(event) => {
+							if (event.key === "Enter") signIn();
+						}}
+					/>
+					<button class="mod-cta arcasync-signin-submit" disabled={$vm.busy} onclick={signIn}>
+						Sign in
+					</button>
+				</div>
+			</div>
+		{/if}
+
 		<div class="arcasync-row">
 			<div class="arcasync-row-info">
 				<div class="arcasync-row-name">
 					{$vm.signedIn ? "Join another workspace" : "Join with an invite"}
 				</div>
-				<div class="arcasync-row-desc">Paste the invite link or code you were sent.</div>
+				<div class="arcasync-row-desc">
+					{$vm.pins
+						? "Paste the invite link you were sent, or type the 4-digit PIN."
+						: "Paste the invite link or code you were sent."}
+					{#if isPin && !$vm.signedIn}
+						Pick a password: you sign in with your name and it from now on.
+					{/if}
+				</div>
 			</div>
 			<div class="arcasync-invite">
 				<input
 					type="text"
 					class="arcasync-invite-input"
 					spellcheck="false"
-					placeholder="https://…/join?invite=…"
+					placeholder={$vm.pins ? "Invite link or PIN" : "https://…/join?invite=…"}
 					bind:value={inviteLink}
 				/>
 				{#if !$vm.signedIn}
@@ -108,12 +163,44 @@ function addMapping(path: string) {
 						placeholder="Your name"
 						bind:value={inviteName}
 					/>
+					{#if isPin}
+						<input
+							type="password"
+							class="arcasync-invite-password"
+							autocomplete="new-password"
+							placeholder="Password (10+ characters)"
+							bind:value={invitePassword}
+						/>
+						<input
+							type="password"
+							class="arcasync-invite-password-confirm"
+							autocomplete="new-password"
+							placeholder="Repeat the password"
+							bind:value={inviteConfirm}
+						/>
+					{/if}
 				{/if}
 				<button class="mod-cta arcasync-invite-join" disabled={$vm.busy} onclick={join}>
 					Join
 				</button>
 			</div>
 		</div>
+
+		{#if $vm.passwords && $vm.signedIn}
+			<div class="arcasync-row">
+				<div class="arcasync-row-info">
+					<div class="arcasync-row-name">Password</div>
+					<div class="arcasync-row-desc">
+						{$vm.hasPassword
+							? "Changing it signs your other devices out."
+							: "Set one to sign in on other devices with your name and password."}
+					</div>
+				</div>
+				<button class="arcasync-password-open" onclick={() => $vm.onSetPassword()}>
+					{$vm.hasPassword ? "Change password…" : "Set password…"}
+				</button>
+			</div>
+		{/if}
 
 		<div class="arcasync-row">
 			<div class="arcasync-row-info">

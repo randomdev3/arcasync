@@ -11,6 +11,12 @@ export type SettingsViewProps = {
 	devOpenLogin: boolean;
 	/** `server-info.features.accounts`; shows the invite and device sign-in rows. */
 	accounts: boolean;
+	/** `server-info.features.passwords`: name + password sign-in and the password row. */
+	passwords: boolean;
+	/** `server-info.features.pins`: a 4-digit PIN works where an invite link does. */
+	pins: boolean;
+	/** The signed-in account has a password (`me.hasPassword`); null while unknown. */
+	hasPassword: boolean | null;
 	/** A session token is stored for this vault. */
 	signedIn: boolean;
 	/** Non-null when `GET /api/server-info` failed. */
@@ -38,8 +44,15 @@ export type SettingsViewProps = {
 	onWorkspaceChange(workspaceId: string): void;
 	/** Attaches the vault-folder autocomplete to a folder input; returns its cleanup. */
 	onFolderInputMount(input: HTMLInputElement, onPick: (path: string) => void): () => void;
-	/** Joins with an invite link or code; `name` is used only when signed out. */
-	onJoinInvite(link: string, name: string): void;
+	/**
+	 * Joins with an invite link, code or PIN. Signed out, `name` names the new account, and a PIN
+	 * also needs `password` (typed twice: `confirm`).
+	 */
+	onJoinInvite(link: string, name: string, password: string, confirm: string): void;
+	/** Signed out: name + password sign-in. */
+	onPasswordSignIn(name: string, password: string): void;
+	/** Signed in: opens the set/change password modal. */
+	onSetPassword(): void;
 	/** Opens the device-code sign-in. */
 	onDeviceSignIn(): void;
 	/** Opens the approve-a-device modal. */

@@ -32,7 +32,8 @@
 	font-size: var(--font-ui-smaller);
 }
 
-.arcasync-settings input[type="text"] {
+.arcasync-settings input[type="text"],
+.arcasync-settings input[type="password"] {
 	min-width: 18em;
 }
 
@@ -119,4 +120,14 @@
 .cm-editor.arcasync-carets-pending .cm-content .cm-yLineSelection {
 	/* biome-ignore lint/complexity/noImportantStyles: the selection colour is an inline style. */
 	background-color: transparent !important;
+}
+
+.arcasync-pins-locked {
+	color: var(--text-error);
+}
+
+.arcasync-pin-value {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-large);
+	letter-spacing: 0.2em;
 }

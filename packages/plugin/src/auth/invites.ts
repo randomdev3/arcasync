@@ -74,3 +74,9 @@ function joinPageInvite(url: URL): InviteLink | null {
 		invite: url.searchParams.get("invite") ?? hash.get("invite"),
 	});
 }
+
+/** A 4-digit invite PIN (spaces and dashes ignored), or null. */
+export function parsePin(input: string): string | null {
+	const digits = input.replace(/[\s-]/g, "");
+	return /^[0-9]{4}$/.test(digits) ? digits : null;
+}

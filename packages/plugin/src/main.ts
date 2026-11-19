@@ -1,5 +1,5 @@
 import type { DeviceInfo, ServerInfo, SessionResponse, WorkspaceSummary } from "@arcasync/shared";
-import { WS_PATH } from "@arcasync/shared";
+import { passwordProblem, WS_PATH } from "@arcasync/shared";
 import {
 	type Modal,
 	Notice,
@@ -9,7 +9,7 @@ import {
 	Plugin,
 } from "obsidian";
 import { DeviceLogin } from "./auth/DeviceLogin";
-import { inviteFromParams, parseInviteLink, sameServer } from "./auth/invites";
+import { inviteFromParams, parseInviteLink, parsePin, sameServer } from "./auth/invites";
 import { CounterDebug } from "./debug/CounterDebug";
 import { editorExtensions } from "./editor";
 import { ChunkClient } from "./files/ChunkClient";
@@ -37,6 +37,7 @@ import { DeviceCodeModal } from "./ui/DeviceCodeModal";
 import { FolderSuggest } from "./ui/FolderSuggest";
 import { InviteModal } from "./ui/InviteModal";
 import { MembersModal } from "./ui/MembersModal";
+import { PasswordModal } from "./ui/PasswordModal";
 import { ArcaSyncSettingsTab } from "./ui/SettingsTab";
 import { StatusBar } from "./ui/StatusBar";
 import { containingRoot, foldersOverlap } from "./workspace/paths";
@@ -82,10 +83,27 @@ function cleanFolder(value: string): string {
 	return path === "/" ? "" : path;
 }
 
-/** A user-facing sentence for a failed invite accept or redeem. */
+/** "in 12 min" / "in 3 h" from an error's `details.retryAfter` (seconds), or "later". */
+function retryWhen(error: ApiRequestError): string {
+	const seconds = (error.details as { retryAfter?: unknown } | undefined)?.retryAfter;
+	if (typeof seconds !== "number") return "later";
+	if (seconds < 90) return `in ${Math.max(1, Math.round(seconds))} s`;
+	if (seconds < 5400) return `in ${Math.round(seconds / 60)} min`;
+	return `in ${Math.round(seconds / 3600)} h`;
+}
+
+/** A user-facing sentence for a failed invite or PIN accept or redeem. */
 function inviteErrorMessage(error: unknown): string {
 	if (error instanceof ApiRequestError) {
 		switch (error.code) {
+			case "invalid_pin":
+				return "That PIN is wrong, used or expired";
+			case "rate_limited":
+				return `Too many wrong PINs; try again ${retryWhen(error)}`;
+			case "pins_locked":
+				return "PIN entry is locked after too many wrong PINs; ask an admin";
+			case "weak_password":
+				return error.message;
 			case "not_found":
 				return "This invite does not exist or was revoked";
 			case "invite_expired":
@@ -381,6 +399,9 @@ export default class ArcaSyncPlugin extends Plugin {
 			devLoginName: this.settings.devLoginName,
 			devOpenLogin: this.serverInfo?.features.devOpenLogin ?? false,
 			accounts: this.serverInfo?.features.accounts ?? false,
+			passwords: this.serverInfo?.features.passwords ?? false,
+			pins: this.serverInfo?.features.pins ?? false,
+			hasPassword: this.me?.hasPassword ?? null,
 			signedIn: this.signedIn,
 			serverError: this.serverError,
 			status: this.connection.status,
@@ -472,7 +493,11 @@ export default class ArcaSyncPlugin extends Plugin {
 		const name = this.settings.devLoginName.trim();
 		if (!info.features.devOpenLogin || !name) {
 			if (info.features.accounts) {
-				throw new Error("Not signed in — paste an invite link or sign in from another device");
+				throw new Error(
+					info.features.passwords
+						? "Not signed in — sign in with your name and password, an invite or another device"
+						: "Not signed in — paste an invite link or sign in from another device",
+				);
 			}
 			if (!info.features.devOpenLogin) {
 				throw new Error("Not signed in, and this server does not allow open login");
@@ -516,10 +541,13 @@ export default class ArcaSyncPlugin extends Plugin {
 	}
 
 	/**
-	 * Joins with an invite link or bare token. Signed out, it creates the account `name` and
-	 * connects; signed in, it adds the invite's workspace. Returns whether it joined.
+	 * Joins with an invite link, bare token or (relay with `features.pins`) 4-digit PIN. Signed
+	 * out, it creates the account `name` (with `password` for a PIN) and connects; signed in, it
+	 * adds the workspace. Returns whether it joined.
 	 */
-	async joinWithInvite(input: string, name = ""): Promise<boolean> {
+	async joinWithInvite(input: string, name = "", password = "", confirm = ""): Promise<boolean> {
+		const pin = this.serverInfo?.features.pins ? parsePin(input) : null;
+		if (pin) return this.joinWithPin(pin, name, password, confirm);
 		const invite = parseInviteLink(input);
 		if (!invite) {
 			new Notice("ArcaSync: that is not an ArcaSync invite link or code");
@@ -556,6 +584,86 @@ export default class ArcaSyncPlugin extends Plugin {
 			new Notice(`ArcaSync: ${inviteErrorMessage(error)}`);
 			return false;
 		}
+	}
+
+	private async joinWithPin(
+		pin: string,
+		name: string,
+		password: string,
+		confirm: string,
+	): Promise<boolean> {
+		try {
+			if (this.signedIn) {
+				const before = new Set(this.settings.workspaces.map((w) => w.id));
+				const workspaces = await this.api.redeemPin(pin);
+				await this.updateSettings({ workspaces });
+				const joined = workspaces.filter((w) => !before.has(w.id)).map((w) => w.name);
+				new Notice(
+					joined.length > 0 ? `ArcaSync: joined ${joined.join(", ")}` : "ArcaSync: PIN redeemed",
+				);
+				return true;
+			}
+			const displayName = name.trim();
+			if (!displayName) {
+				new Notice("ArcaSync: enter your name to join");
+				return false;
+			}
+			const problem = passwordProblem(password);
+			if (problem) {
+				new Notice(`ArcaSync: ${problem}`);
+				return false;
+			}
+			if (password !== confirm) {
+				new Notice("ArcaSync: the two passwords differ");
+				return false;
+			}
+			const session = await this.api.acceptPin(pin, displayName, password, this.deviceInfo());
+			await this.completeSignIn(session);
+			return true;
+		} catch (error) {
+			new Notice(`ArcaSync: ${inviteErrorMessage(error)}`);
+			return false;
+		}
+	}
+
+	/** Signed out: name + password sign-in (relay with `features.passwords`). */
+	async signInWithPassword(name: string, password: string): Promise<boolean> {
+		if (this.signedIn) {
+			new Notice("ArcaSync: already signed in");
+			return false;
+		}
+		try {
+			const session = await this.api.login(name.trim(), password, this.deviceInfo());
+			await this.completeSignIn(session);
+			return true;
+		} catch (error) {
+			let message = error instanceof Error ? error.message : String(error);
+			if (error instanceof ApiRequestError && error.code === "invalid_credentials") {
+				message = "Wrong name or password";
+			} else if (error instanceof ApiRequestError && error.code === "rate_limited") {
+				message = `Too many failed sign-ins; try again ${retryWhen(error)}`;
+			}
+			new Notice(`ArcaSync: ${message}`);
+			return false;
+		}
+	}
+
+	/** Signed in: "Set password" or "Change password". */
+	setPassword(): void {
+		if (!this.signedIn) {
+			new Notice("ArcaSync: sign in first");
+			return;
+		}
+		this.openModal(
+			new PasswordModal(this.app, {
+				hasPassword: this.me?.hasPassword ?? false,
+				submit: async (next, current) => {
+					await this.api.setPassword(next, current);
+					if (this.me) this.me = { ...this.me, hasPassword: true };
+					this.notifyView();
+				},
+			}),
+		);
 	}
 
 	/** Opens the device-code sign-in ("Sign in with another device"). */
@@ -660,7 +768,14 @@ export default class ArcaSyncPlugin extends Plugin {
 	createInvite(): void {
 		const target = this.ownerToolTarget();
 		if (!target) return;
-		this.openModal(new CreateInviteModal(this.app, { api: this.api, ...target }));
+		this.openModal(
+			new CreateInviteModal(this.app, {
+				api: this.api,
+				...target,
+				pins: this.serverInfo?.features.pins ?? false,
+				isAdmin: this.me?.user.isAdmin ?? false,
+			}),
+		);
 	}
 
 	private openModal(modal: Modal): void {

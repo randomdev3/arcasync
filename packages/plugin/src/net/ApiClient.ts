@@ -11,6 +11,9 @@ import {
 	type Member,
 	MembersResponse,
 	MeResponse,
+	type PinCreateRequest,
+	PinSummary,
+	PinsResponse,
 	type Role,
 	ServerInfo,
 	SessionResponse,
@@ -144,6 +147,84 @@ export class ApiClient {
 			schema: SessionResponse,
 			auth: false,
 		});
+	}
+
+	/** Signed out: name (any case) + password → a session on this device. */
+	login(name: string, password: string, device: DeviceInfo): Promise<SessionResponse> {
+		return this.request("/auth/login", {
+			method: "POST",
+			body: { name, password, device },
+			schema: SessionResponse,
+			auth: false,
+		});
+	}
+
+	/**
+	 * Sets a first password (no `current`) or changes it; the account's other sessions are
+	 * signed out. A wrong `current` rejects with 403 `invalid_credentials`.
+	 */
+	async setPassword(next: string, current?: string): Promise<void> {
+		await this.request("/auth/password", {
+			method: "POST",
+			body: current === undefined ? { new: next } : { current, new: next },
+			schema: OkResponse,
+		});
+	}
+
+	/** Signed out: joins with a 4-digit PIN as the new user `name`, with a password. */
+	acceptPin(
+		pin: string,
+		name: string,
+		password: string,
+		device: DeviceInfo,
+	): Promise<SessionResponse> {
+		return this.request("/auth/pin/accept", {
+			method: "POST",
+			body: { pin, name, password, device },
+			schema: SessionResponse,
+			auth: false,
+		});
+	}
+
+	/** Signed in: joins the PIN's workspace; returns every workspace of this account. */
+	async redeemPin(pin: string): Promise<WorkspaceSummary[]> {
+		const response = await this.request("/invites/redeem-pin", {
+			method: "POST",
+			body: { pin },
+			schema: WorkspacesResponse,
+		});
+		return response.workspaces;
+	}
+
+	/** Owner or admin; `admin` only for server admins. */
+	createPin(
+		workspaceId: string,
+		pin: { role: Role } & Partial<Omit<PinCreateRequest, "role">>,
+	): Promise<PinSummary> {
+		return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/pins`, {
+			method: "POST",
+			body: pin,
+			schema: PinSummary,
+		});
+	}
+
+	/** The workspace's PINs and whether PIN entry is locked server-wide. */
+	listPins(workspaceId: string): Promise<PinsResponse> {
+		return this.request(`/workspaces/${encodeURIComponent(workspaceId)}/pins`, {
+			schema: PinsResponse,
+		});
+	}
+
+	async revokePin(workspaceId: string, pinId: string): Promise<void> {
+		await this.request(
+			`/workspaces/${encodeURIComponent(workspaceId)}/pins/${encodeURIComponent(pinId)}`,
+			{ method: "DELETE", schema: OkResponse },
+		);
+	}
+
+	/** Admin only: lifts the server-wide PIN lock. */
+	async unlockPins(): Promise<void> {
+		await this.request("/admin/pins/unlock", { method: "POST", schema: OkResponse });
 	}
 
 	/** Signed in: joins the invite's workspace; returns every workspace of this account. */

@@ -63,9 +63,13 @@ export class ArcaSyncSettingsTab extends PluginSettingTab {
 				void this.plugin.setWorkspace(workspaceId);
 			},
 			onFolderInputMount: (input, onPick) => this.plugin.attachFolderSuggest(input, onPick),
-			onJoinInvite: (link, name) => {
-				void this.plugin.joinWithInvite(link, name);
+			onJoinInvite: (link, name, password, confirm) => {
+				void this.plugin.joinWithInvite(link, name, password, confirm);
 			},
+			onPasswordSignIn: (name, password) => {
+				void this.plugin.signInWithPassword(name, password);
+			},
+			onSetPassword: () => this.plugin.setPassword(),
 			onDeviceSignIn: () => this.plugin.signInWithDevice(),
 			onApproveDevice: () => this.plugin.approveDevice(),
 			onConnect: () => {
