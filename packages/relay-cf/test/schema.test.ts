@@ -183,4 +183,22 @@ describe("migrateTeams + backfillTeams", () => {
 			{ slug: "work" },
 		]);
 	});
+
+	it("rebuilds teams after the strip the integration test applies to a migrated database", () => {
+		const sql = preTeams();
+		migrate(sql);
+		// The same statements as teams.integration.test.ts ("pre-team migration").
+		sql.exec("DROP INDEX IF EXISTS workspaces_team");
+		for (const table of ["workspaces", "invites", "invite_pins"]) {
+			sql.exec(`ALTER TABLE ${table} DROP COLUMN team_id`);
+		}
+		sql.exec("DROP TABLE teams");
+		sql.exec("DROP TABLE team_members");
+		migrate(sql);
+		expect(sql.exec("SELECT COUNT(*) AS n FROM teams").toArray()).toEqual([{ n: 2 }]);
+		expect(
+			sql.exec("SELECT COUNT(*) AS n FROM workspaces WHERE team_id IS NOT NULL").toArray(),
+		).toEqual([{ n: 2 }]);
+		expect(sql.exec("SELECT COUNT(*) AS n FROM team_members").toArray()).toEqual([{ n: 3 }]);
+	});
 });

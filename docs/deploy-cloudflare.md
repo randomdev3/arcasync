@@ -118,8 +118,10 @@ most), and at most 10 are usable per team (`409 too_many_pins`). 4-digit PINs is
 stay valid until they expire. They are stored in plaintext so owners can list them; the audit log
 names PINs by id only. Whoever has a PIN joins its team with it plus a name and a password
 (`/api/auth/pin/accept`), or, already signed in, with `redeem-pin`. Every wrong, used, revoked or
-expired PIN is the same `404 invalid_pin`. The 0.2.0 plugin's PIN box takes 4 digits only, so
-people on it enter a 6-digit PIN on the website's `/join` page instead.
+expired PIN is the same `404 invalid_pin`. The 0.2.0 plugin knows 4-digit PINs only: its PIN box
+refuses 6 digits (enter those on the website's `/join` page instead), and its invite modal's PIN
+list and "Create PIN" fail with "Unexpected response" once the team has a 6-digit PIN (manage
+PINs on the website's `/account`, or update the plugin).
 
 **PIN brute-force limits.** Per client IP (`CF-Connecting-IP`), 5 wrong PINs per 15 min, then
 `429 rate_limited` with `Retry-After`. Server-wide, 500 wrong PINs in a rolling 24 h lock all PIN
