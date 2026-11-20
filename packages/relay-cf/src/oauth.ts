@@ -6,13 +6,17 @@
  */
 import type { AuthProvider } from "@arcasync/shared";
 
-export interface OAuthEnv {
-	ARCASYNC_DEBUG_STATS: string;
-	ARCASYNC_OAUTH_TEST_BASE?: string;
+/** The OAuth apps' secrets; a provider is on only when both of its values are set. */
+export interface OAuthCredentialsEnv {
 	GOOGLE_CLIENT_ID?: string;
 	GOOGLE_CLIENT_SECRET?: string;
 	GITHUB_CLIENT_ID?: string;
 	GITHUB_CLIENT_SECRET?: string;
+}
+
+export interface OAuthEnv extends OAuthCredentialsEnv {
+	ARCASYNC_DEBUG_STATS: string;
+	ARCASYNC_OAUTH_TEST_BASE?: string;
 }
 
 /** What the relay keeps from a provider account. */
@@ -58,14 +62,14 @@ function endpoints(env: OAuthEnv, provider: AuthProvider): Endpoints {
 	};
 }
 
-function credentials(env: OAuthEnv, provider: AuthProvider) {
+function credentials(env: OAuthCredentialsEnv, provider: AuthProvider) {
 	const id = provider === "google" ? env.GOOGLE_CLIENT_ID : env.GITHUB_CLIENT_ID;
 	const secret = provider === "google" ? env.GOOGLE_CLIENT_SECRET : env.GITHUB_CLIENT_SECRET;
 	return id?.trim() && secret?.trim() ? { id: id.trim(), secret: secret.trim() } : null;
 }
 
 /** Providers with both a client id and a secret configured. */
-export function enabledProviders(env: OAuthEnv): AuthProvider[] {
+export function enabledProviders(env: OAuthCredentialsEnv): AuthProvider[] {
 	return (["google", "github"] as const).filter((p) => credentials(env, p) !== null);
 }
 

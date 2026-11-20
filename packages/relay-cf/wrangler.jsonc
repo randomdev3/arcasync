@@ -45,7 +45,10 @@
 				// The website on Cloudflare Pages (packages/site, docs/site.md): invite and device-code
 				// links point at it, and it may call /api/* cross-origin.
 				"ARCASYNC_PUBLIC_URL": "https://arca-sync.pages.dev",
-				"ARCASYNC_SITE_ORIGINS": "https://arca-sync.pages.dev"
+				"ARCASYNC_SITE_ORIGINS": "https://arca-sync.pages.dev",
+				// Anyone may create an account with Google/GitHub (unset means invite only). The
+				// OAuth apps are `wrangler secret`s: GOOGLE_CLIENT_ID/SECRET, GITHUB_CLIENT_ID/SECRET.
+				"ARCASYNC_SIGNUPS": "open"
 			},
 			"observability": { "enabled": true }
 		},
@@ -72,7 +75,8 @@
 				"ARCASYNC_PUBLIC_URL": "http://localhost:5173",
 				// Website origins allowed to call /api/* (CORS): `vite dev` and `wrangler pages dev`.
 				// Unset at top level and in probe: no website may call the API cross-origin.
-				"ARCASYNC_SITE_ORIGINS": "http://localhost:5173,http://localhost:4173"
+				"ARCASYNC_SITE_ORIGINS": "http://localhost:5173,http://localhost:4173",
+				"ARCASYNC_SIGNUPS": "open"
 			}
 		},
 		// Throwaway free-tier probe (R-9): open dev login and debug stats, secret via `wrangler

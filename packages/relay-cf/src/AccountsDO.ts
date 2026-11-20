@@ -74,7 +74,7 @@ import {
 } from "./accounts/tokens";
 import type { Env } from "./env";
 import { signWsToken } from "./jwt";
-import type { OAuthProfile } from "./oauth";
+import { type OAuthProfile, s256 } from "./oauth";
 
 export const SESSION_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DEV_WORKSPACE_SLUG = "dev";
@@ -201,6 +201,16 @@ interface TeamRow extends Record<string, SqlStorageValue> {
 	created_by: string | null;
 	created_at: number;
 	deleted_at: number | null;
+}
+
+/** A used OAuth state, as the callback needs it. */
+export interface OAuthStateTaken {
+	expired: boolean;
+	intent: "signin" | "link";
+	userId: string | null;
+	next: string | null;
+	verifierHash: string;
+	codeVerifier: string;
 }
 
 /** A membership whose role changed or that was removed: its sockets must be revoked. */
@@ -1794,7 +1804,8 @@ export class AccountsDO extends DurableObject<Env> {
 				.exec<{ actor_id: string; at: number }>(
 					`SELECT actor_id, MAX(at) AS at FROM audit_log
 					WHERE action IN ('user.login', 'pin.accept', 'invite.accept', 'user.reenter',
-						'device.approve', 'user.password.reset') AND actor_id IS NOT NULL GROUP BY actor_id`,
+						'device.approve', 'user.password.reset', 'user.oauth.login')
+						AND actor_id IS NOT NULL GROUP BY actor_id`,
 				)
 				.toArray()
 				.map((r) => [r.actor_id, r.at]),
@@ -2392,10 +2403,513 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ ok: true });
 	}
 
+	// --- teams (`/api/teams…`, see teams.ts) ---
+
+	private teamSummary(team: TeamRow, role: Role): TeamSummary {
+		const folders = this.sql
+			.exec<{ id: string; slug: string; name: string }>(
+				`SELECT id, slug, name FROM workspaces WHERE team_id = ? AND deleted_at IS NULL
+				 ORDER BY name COLLATE NOCASE`,
+				team.id,
+			)
+			.toArray()
+			.map((f) => ({ id: f.id, slug: f.slug, name: f.name }));
+		return {
+			id: team.id,
+			slug: team.slug,
+			name: team.name,
+			role,
+			memberCount: this.teamMemberCount(team.id),
+			folders,
+		};
+	}
+
+	/** A live team the caller may see (member or server admin), with the caller's role. */
+	private visibleTeam(user: UserRow, teamId: string): Result<{ team: TeamRow; role?: Role }> {
+		const team = this.liveTeam(teamId);
+		const role = team ? this.teamRole(user.id, team.id) : undefined;
+		if (!team || (!role && user.is_admin !== 1)) return fail(404, "not_found", "Unknown team");
+		return ok({ team, role });
+	}
+
+	async teams(token: string | null): Promise<Result<TeamsResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const rows = this.sql
+			.exec<TeamRow & { my_role: string }>(
+				`SELECT t.*, m.role AS my_role FROM team_members m JOIN teams t ON t.id = m.team_id
+				 WHERE m.user_id = ? AND t.deleted_at IS NULL ORDER BY t.name COLLATE NOCASE`,
+				s.value.user.id,
+			)
+			.toArray();
+		return ok({ teams: rows.map((r) => this.teamSummary(r, r.my_role as Role)) });
+	}
+
+	/** The caller owns the new team; at most `teamsPerUser` owned teams (admins exempt). */
+	async createTeam(token: string | null, name: string): Promise<Result<TeamSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) {
+			const max = caps(this.env).teamsPerUser;
+			const owned = this.sql
+				.exec<{ n: number }>(
+					`SELECT COUNT(*) AS n FROM team_members m JOIN teams t ON t.id = m.team_id
+					 WHERE m.user_id = ? AND m.role = 'owner' AND t.deleted_at IS NULL`,
+					user.id,
+				)
+				.one().n;
+			if (owned >= max) return limitReached(`You can own at most ${max} teams`);
+		}
+		const team = this.createTeamRow(name, user.id);
+		this.setTeamMember(team.id, user.id, "owner");
+		this.audit(user.id, "team.create", team.id, { name, slug: team.slug });
+		return ok(this.teamSummary(team, "owner"));
+	}
+
+	async renameTeam(
+		token: string | null,
+		teamId: string,
+		name: string,
+	): Promise<Result<TeamSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		this.sql.exec("UPDATE teams SET name = ? WHERE id = ?", name, teamId);
+		this.audit(user.id, "team.rename", teamId, { name, previousName: seen.value.team.name });
+		return ok(
+			this.teamSummary({ ...seen.value.team, name }, seen.value.role ?? ("owner" as const)),
+		);
+	}
+
+	/** Owner or admin: deletes the team and every folder of it for everyone. */
+	async deleteTeam(token: string | null, teamId: string): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		const now = Date.now();
+		this.sql.exec("UPDATE teams SET deleted_at = ? WHERE id = ?", now, teamId);
+		this.sql.exec(
+			"UPDATE workspaces SET deleted_at = ? WHERE team_id = ? AND deleted_at IS NULL",
+			now,
+			teamId,
+		);
+		this.sql.exec("DELETE FROM team_members WHERE team_id = ?", teamId);
+		const changes = this.syncTeam(teamId);
+		this.audit(user.id, "team.delete", teamId, { name: seen.value.team.name });
+		await this.revokeChanges(changes);
+		return ok({ ok: true });
+	}
+
+	async teamMembers(token: string | null, teamId: string): Promise<Result<TeamMembersResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const seen = this.visibleTeam(s.value.user, teamId);
+		if (!seen.ok) return seen;
+		const members = this.sql
+			.exec<UserRow & { role: string }>(
+				`SELECT u.*, m.role FROM team_members m JOIN users u ON u.id = m.user_id
+				 WHERE m.team_id = ? ORDER BY u.name COLLATE NOCASE`,
+				teamId,
+			)
+			.toArray()
+			.map((r) => ({
+				user: {
+					id: r.id,
+					name: r.name,
+					email: r.email,
+					color: r.color,
+					avatarUrl: r.avatar_url,
+				},
+				role: r.role as Role,
+			}));
+		return ok({ members });
+	}
+
+	async setTeamRole(
+		token: string | null,
+		teamId: string,
+		userId: string,
+		role: Role,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return this.changeRole(s.value.user, this.liveTeam(teamId)?.id, userId, role);
+	}
+
+	async removeTeamMember(
+		token: string | null,
+		teamId: string,
+		userId: string,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return this.dropMember(s.value.user, this.liveTeam(teamId)?.id, userId);
+	}
+
+	/** Owners, editors and admins add a folder; at most `foldersPerTeam`. */
+	async createFolder(
+		token: string | null,
+		teamId: string,
+		name: string,
+	): Promise<Result<SharedFolderSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (user.is_admin !== 1 && seen.value.role === "viewer") {
+			return fail(403, "forbidden", "Owners and editors only");
+		}
+		const max = caps(this.env).foldersPerTeam;
+		const folders = this.sql
+			.exec<{ n: number }>(
+				"SELECT COUNT(*) AS n FROM workspaces WHERE team_id = ? AND deleted_at IS NULL",
+				teamId,
+			)
+			.one().n;
+		if (folders >= max) return limitReached(`A team can share at most ${max} folders`);
+		const folder = this.createFolderRow(teamId, name);
+		this.syncTeam(teamId);
+		this.audit(user.id, "folder.create", folder.id, { teamId, name, slug: folder.slug });
+		return ok(folder);
+	}
+
+	/** Owner or admin: deletes the folder for everyone. */
+	async deleteFolder(
+		token: string | null,
+		teamId: string,
+		folderId: string,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		const folder = this.sql
+			.exec<{ name: string }>(
+				"SELECT name FROM workspaces WHERE id = ? AND team_id = ? AND deleted_at IS NULL",
+				folderId,
+				teamId,
+			)
+			.toArray()[0];
+		if (!folder) return fail(404, "not_found", "Unknown folder");
+		this.sql.exec("UPDATE workspaces SET deleted_at = ? WHERE id = ?", Date.now(), folderId);
+		const changes = this.syncTeam(teamId);
+		this.audit(user.id, "folder.delete", folderId, { teamId, name: folder.name });
+		await this.revokeChanges(changes);
+		return ok({ ok: true });
+	}
+
+	// --- OAuth sign-in (the Worker talks to Google/GitHub; src/oauth.ts) ---
+
+	/** A state row for 10 min; `link` needs a session (the account the identity joins). */
+	async oauthStart(
+		token: string | null,
+		provider: AuthProvider,
+		req: OAuthStartRequest,
+	): Promise<Result<{ state: string; codeVerifier: string }>> {
+		this.calls += 1;
+		let userId: string | null = null;
+		if (req.intent === "link") {
+			const s = await this.session(token);
+			if (!s.ok) return s;
+			userId = s.value.user.id;
+		}
+		const state = newOpaqueToken();
+		const codeVerifier = newOpaqueToken();
+		const id = await this.hashToken(state);
+		const now = Date.now();
+		this.sql.exec("DELETE FROM oauth_states WHERE expires_at <= ?", now);
+		this.sql.exec("DELETE FROM oauth_handoffs WHERE expires_at <= ?", now);
+		this.sql.exec(
+			`INSERT INTO oauth_states (id, provider, intent, user_id, next, verifier_hash,
+			 code_verifier, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id,
+			provider,
+			req.intent,
+			userId,
+			req.next ?? null,
+			req.verifierHash,
+			codeVerifier,
+			now + OAUTH_STATE_TTL_MS,
+		);
+		return ok({ state, codeVerifier });
+	}
+
+	/** Uses up a state (single use, whatever happens next); null when unknown. */
+	async oauthTakeState(provider: AuthProvider, state: string): Promise<OAuthStateTaken | null> {
+		this.calls += 1;
+		const id = await this.hashToken(state);
+		const row = this.sql
+			.exec<{
+				provider: string;
+				intent: string;
+				user_id: string | null;
+				next: string | null;
+				verifier_hash: string;
+				code_verifier: string;
+				expires_at: number;
+			}>("DELETE FROM oauth_states WHERE id = ? RETURNING *", id)
+			.toArray()[0];
+		if (!row || row.provider !== provider) return null;
+		return {
+			expired: row.expires_at <= Date.now(),
+			intent: row.intent === "link" ? "link" : "signin",
+			userId: row.user_id,
+			next: row.next,
+			verifierHash: row.verifier_hash,
+			codeVerifier: row.code_verifier,
+		};
+	}
+
+	/** The name itself, else `Name 2`, `Name 3`… that no account has (case-insensitively). */
+	private freeName(raw: string): string {
+		const base = raw.normalize("NFC").replace(/\s+/g, " ").trim().slice(0, NAME_MAX) || "user";
+		for (let n = 1; ; n++) {
+			const suffix = n === 1 ? "" : ` ${n}`;
+			const name = `${base.slice(0, NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+			if (!this.nameTaken(name)) return name;
+		}
+	}
+
+	/**
+	 * Signs in, signs up (open signups only) or links with a verified provider profile, then
+	 * stores a 60 s single-use handoff bound to the starting browser's `verifierHash`. Errors
+	 * carry the redirect's `error` code. Never matches accounts by email.
+	 */
+	async oauthFinish(
+		provider: AuthProvider,
+		taken: OAuthStateTaken,
+		profile: OAuthProfile,
+	): Promise<Result<{ handoff: string }>> {
+		this.calls += 1;
+		const handoff = newOpaqueToken();
+		const handoffHash = await this.hashToken(handoff);
+		const color = await userColor(profile.name);
+
+		// Synchronous from here.
+		const now = Date.now();
+		const linked = this.sql
+			.exec<{ user_id: string }>(
+				"SELECT user_id FROM identities WHERE provider = ? AND subject = ?",
+				provider,
+				profile.subject,
+			)
+			.toArray()[0];
+		const insertIdentity = (userId: string) =>
+			this.sql.exec(
+				`INSERT INTO identities (provider, subject, user_id, email, linked_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+				provider,
+				profile.subject,
+				userId,
+				profile.email,
+				now,
+			);
+		let userId: string;
+		let created = false;
+		if (taken.intent === "link") {
+			const user = taken.userId ? this.userById(taken.userId) : undefined;
+			if (!user || user.disabled_at) return fail(403, "oauth_failed", "Account unavailable");
+			if (linked && linked.user_id !== user.id) {
+				return fail(409, "identity_in_use", "That account is linked to someone else");
+			}
+			if (!linked) {
+				const other = this.sql
+					.exec("SELECT 1 FROM identities WHERE user_id = ? AND provider = ?", user.id, provider)
+					.toArray()[0];
+				if (other) {
+					return fail(409, "identity_in_use", "Unlink your other account of this provider first");
+				}
+				insertIdentity(user.id);
+				this.audit(user.id, "identity.link", user.id, { provider, email: profile.email });
+			}
+			userId = user.id;
+		} else if (linked) {
+			const user = this.userById(linked.user_id);
+			if (!user || user.disabled_at) return fail(403, "oauth_failed", "Account disabled");
+			this.sql.exec(
+				"UPDATE identities SET email = ? WHERE provider = ? AND subject = ?",
+				profile.email,
+				provider,
+				profile.subject,
+			);
+			userId = user.id;
+		} else {
+			if (signupPolicy(this.env) !== "open") {
+				return fail(403, "signup_closed", "New accounts need an invite on this server");
+			}
+			const room = this.userCap();
+			if (!room.ok) return room;
+			userId = crypto.randomUUID();
+			const name = this.freeName(profile.name);
+			this.sql.exec(
+				"INSERT INTO users (id, name, email, color, avatar_url) VALUES (?, ?, ?, ?, ?)",
+				userId,
+				name,
+				profile.email,
+				color,
+				profile.avatarUrl,
+			);
+			insertIdentity(userId);
+			this.audit(userId, "user.oauth.signup", userId, { provider, name });
+			created = true;
+		}
+		this.sql.exec(
+			`INSERT INTO oauth_handoffs (id, user_id, verifier_hash, created, expires_at)
+			 VALUES (?, ?, ?, ?, ?)`,
+			handoffHash,
+			userId,
+			taken.verifierHash,
+			created ? 1 : 0,
+			now + OAUTH_HANDOFF_TTL_MS,
+		);
+		return ok({ handoff });
+	}
+
+	/** The website trades a handoff (once, within 60 s, same browser) for a session. */
+	async oauthExchange(
+		req: OAuthExchangeRequest,
+	): Promise<Result<SessionResponse & { created: boolean }>> {
+		this.calls += 1;
+		const id = await this.hashToken(req.handoff);
+		const [given, sessionToken] = [await s256(req.verifier), newOpaqueToken()];
+		const sessionHash = await this.hashToken(sessionToken);
+
+		// Synchronous: the handoff is gone after this, whatever the outcome.
+		const row = this.sql
+			.exec<{ user_id: string; verifier_hash: string; created: number; expires_at: number }>(
+				"DELETE FROM oauth_handoffs WHERE id = ? RETURNING *",
+				id,
+			)
+			.toArray()[0];
+		if (!row || row.expires_at <= Date.now()) {
+			return fail(400, "oauth_failed", "This sign-in expired or was already used; start again");
+		}
+		const enc = new TextEncoder();
+		if (!constantTimeEqual(enc.encode(row.verifier_hash), enc.encode(given))) {
+			return fail(400, "oauth_failed", "This sign-in was started in another browser");
+		}
+		const user = this.userById(row.user_id);
+		if (!user) return fail(400, "oauth_failed", "Unknown account");
+		if (user.disabled_at) return fail(403, "forbidden", "Account disabled");
+		this.insertSession(user.id, this.deviceFor(user.id, req.device), sessionHash);
+		this.audit(user.id, "user.oauth.login", user.id, {
+			created: row.created === 1,
+			device: { name: req.device.name, platform: req.device.platform },
+		});
+		return ok({
+			sessionToken,
+			user: toApiUser(user),
+			workspaces: this.workspacesFor(user.id),
+			created: row.created === 1,
+		});
+	}
+
+	private identitiesOf(userId: string): IdentitiesResponse {
+		const identities = this.sql
+			.exec<{ provider: string; email: string | null; linked_at: number }>(
+				"SELECT provider, email, linked_at FROM identities WHERE user_id = ? ORDER BY provider",
+				userId,
+			)
+			.toArray()
+			.map((r) => ({
+				provider: r.provider as AuthProvider,
+				email: r.email,
+				linkedAt: r.linked_at,
+			}));
+		return { identities, hasPassword: this.passwordOf(userId) !== undefined };
+	}
+
+	async identities(token: string | null): Promise<Result<IdentitiesResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return ok(this.identitiesOf(s.value.user.id));
+	}
+
+	/** Unlinks a provider unless it is the account's last way to sign in (no password either). */
+	async unlinkIdentity(
+		token: string | null,
+		provider: AuthProvider,
+	): Promise<Result<IdentitiesResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const current = this.identitiesOf(user.id);
+		if (!current.identities.some((i) => i.provider === provider)) {
+			return fail(404, "not_found", "That provider is not linked");
+		}
+		const others = current.identities.filter((i) => i.provider !== provider).length;
+		if (!current.hasPassword && others === 0) {
+			return fail(
+				409,
+				"last_sign_in_method",
+				"Set a password or link another account before unlinking this one",
+			);
+		}
+		this.sql.exec("DELETE FROM identities WHERE user_id = ? AND provider = ?", user.id, provider);
+		this.audit(user.id, "identity.unlink", user.id, { provider });
+		return ok(this.identitiesOf(user.id));
+	}
+
+	/** Renames the caller; names stay unique case-insensitively (409 `name_taken`). */
+	async updateProfile(token: string | null, name: string): Promise<Result<{ user: User }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const next = name.normalize("NFC").replace(/\s+/g, " ").trim();
+		if (!next || next.length > NAME_MAX) return fail(400, "bad_request", "Invalid name");
+		const key = nameKey(next);
+		const clash = this.sql
+			.exec<{ id: string; name: string }>("SELECT id, name FROM users")
+			.toArray()
+			.some((u) => u.id !== user.id && nameKey(u.name) === key);
+		if (clash) return fail(409, "name_taken", "That name is taken");
+		if (next !== user.name) {
+			this.sql.exec("UPDATE users SET name = ? WHERE id = ?", next, user.id);
+			this.audit(user.id, "user.rename", user.id, { name: next, previousName: user.name });
+		}
+		const updated = this.userById(user.id);
+		if (!updated) return fail(404, "not_found", "Unknown user");
+		return ok({ user: toApiUser(updated) });
+	}
+
 	// --- dev-only (worker gates these on ARCASYNC_DEBUG_STATS) ---
 
 	async debugAccounts(): Promise<{ calls: number }> {
 		return { calls: this.calls };
+	}
+
+	/** Strips all team data, as on a database from before teams; the next wake migrates it. */
+	async debugUnmigrateTeams(): Promise<{ ok: true }> {
+		this.ctx.storage.transactionSync(() => {
+			this.sql.exec("DELETE FROM teams");
+			this.sql.exec("DELETE FROM team_members");
+			for (const table of ["workspaces", "invites", "invite_pins"]) {
+				this.sql.exec(`UPDATE ${table} SET team_id = NULL`);
+			}
+		});
+		return { ok: true };
 	}
 
 	/** Moves every limit row and the PIN lock `ms` into the past, as if that much time passed. */

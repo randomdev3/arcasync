@@ -4,11 +4,13 @@
  */
 import {
 	API_PREFIX,
+	AuthProvider,
 	BootstrapRequest,
 	DeviceApproveRequest,
 	DeviceCodePollRequest,
 	DeviceCodeStartRequest,
 	DevLoginRequest,
+	FolderCreateRequest,
 	InviteAcceptRequest,
 	InviteCreateRequest,
 	InviteRedeemRequest,
@@ -16,12 +18,16 @@ import {
 	ME_CACHE_TTL_MS,
 	MemberUpdateRequest,
 	type MeResponse,
+	OAuthExchangeRequest,
+	OAuthStartRequest,
 	PasswordChangeRequest,
 	PasswordResetRequest,
 	PinAcceptRequest,
 	PinCreateRequest,
 	PinRedeemRequest,
+	ProfileUpdateRequest,
 	parseDocName,
+	TeamCreateRequest,
 	WorkspaceCreateRequest,
 	WS_PATH,
 	WsTokenRequest,
@@ -35,6 +41,7 @@ import { configError } from "./config";
 import type { Env } from "./env";
 import { errorBody } from "./errors";
 import { cachedResult, createMeCache } from "./meCache";
+import { authorizeUrl, enabledProviders, fetchProfile } from "./oauth";
 import { RELAY_VERSION, serverInfo } from "./serverInfo";
 import { chunkPrefix } from "./wsAuth";
 
@@ -393,6 +400,186 @@ api.post("/auth/device/approve", async (c) => {
 	return reply(c, await accounts(c.env).deviceApprove(bearer(c), body.userCode, body.approve));
 });
 
+// --- OAuth sign-in (teams.ts) ---
+
+/** The provider's redirect target; register exactly this URL with Google and GitHub. */
+const oauthCallbackUrl = (c: Ctx, provider: AuthProvider) =>
+	`${relayOrigin(c)}${API_PREFIX}/auth/oauth/${provider}/callback`;
+
+/** An enabled provider named by `:provider`, or null. */
+function providerParam(c: Ctx): AuthProvider | null {
+	const parsed = AuthProvider.safeParse(c.req.param("provider"));
+	return parsed.success && enabledProviders(c.env).includes(parsed.data) ? parsed.data : null;
+}
+
+/** Back to the website's `/auth/callback` (the relay itself without a website). */
+function toSiteCallback(c: Ctx, params: Record<string, string | null | undefined>) {
+	const site = (c.env.ARCASYNC_PUBLIC_URL?.trim() || relayOrigin(c)).replace(/\/+$/, "");
+	const url = new URL(`${site}/auth/callback`);
+	for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
+	return c.redirect(url.toString(), 302);
+}
+
+api.post("/auth/oauth/:provider/start", async (c) => {
+	const provider = providerParam(c);
+	if (!provider) return c.json(errorBody("not_found", "That sign-in provider is not enabled"), 404);
+	const body = await parseBody(c, OAuthStartRequest);
+	if (!body) return badRequest(c);
+	const started = await accounts(c.env).oauthStart(bearer(c), provider, body);
+	if (!started.ok) return reply(c, started);
+	const url = await authorizeUrl(c.env, provider, {
+		redirectUri: oauthCallbackUrl(c, provider),
+		state: started.value.state,
+		codeVerifier: started.value.codeVerifier,
+	});
+	if (!url) return c.json(errorBody("not_found", "That sign-in provider is not enabled"), 404);
+	return c.json({ url });
+});
+
+api.get("/auth/oauth/:provider/callback", async (c) => {
+	const provider = providerParam(c);
+	const state = c.req.query("state");
+	const taken = provider && state ? await accounts(c.env).oauthTakeState(provider, state) : null;
+	if (!provider || !taken || taken.expired) {
+		return toSiteCallback(c, { error: "state_expired", next: taken?.next });
+	}
+	const { next } = taken;
+	const code = c.req.query("code");
+	if (c.req.query("error") || !code) return toSiteCallback(c, { error: "oauth_denied", next });
+	let profile = null;
+	try {
+		profile = await fetchProfile(c.env, provider, {
+			code,
+			redirectUri: oauthCallbackUrl(c, provider),
+			codeVerifier: taken.codeVerifier,
+		});
+	} catch (err) {
+		console.error(`oauth: ${provider} profile fetch failed`, err);
+	}
+	if (!profile) return toSiteCallback(c, { error: "oauth_failed", next });
+	const done = await accounts(c.env).oauthFinish(provider, taken, profile);
+	if (!done.ok) return toSiteCallback(c, { error: done.error.code, next });
+	return toSiteCallback(c, { handoff: done.value.handoff, next });
+});
+
+api.post("/auth/oauth/exchange", async (c) => {
+	const body = await parseBody(c, OAuthExchangeRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).oauthExchange(body));
+});
+
+api.get("/auth/identities", async (c) => reply(c, await accounts(c.env).identities(bearer(c))));
+
+api.delete("/auth/identities/:provider", async (c) => {
+	const provider = AuthProvider.safeParse(c.req.param("provider"));
+	if (!provider.success) return c.json(errorBody("not_found", "Unknown provider"), 404);
+	return reply(c, await accounts(c.env).unlinkIdentity(bearer(c), provider.data));
+});
+
+api.patch("/auth/profile", async (c) => {
+	const body = await parseBody(c, ProfileUpdateRequest);
+	if (!body) return badRequest(c);
+	const result = await accounts(c.env).updateProfile(bearer(c), body.name);
+	if (result.ok) {
+		const userId = result.value.user.id;
+		meCache.dropWhere((me) => me.user.id === userId);
+	}
+	return reply(c, result);
+});
+
+// --- teams (teams.ts); changes to the caller's folders drop the caller's cached `/me` ---
+
+const dropCallerMe = (c: Ctx) => {
+	const token = bearer(c);
+	if (token) meCache.drop(token);
+};
+
+api.get("/teams", async (c) => reply(c, await accounts(c.env).teams(bearer(c))));
+
+api.post("/teams", async (c) => {
+	const body = await parseBody(c, TeamCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).createTeam(bearer(c), body.name));
+});
+
+api.patch("/teams/:id", async (c) => {
+	const body = await parseBody(c, TeamCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).renameTeam(bearer(c), c.req.param("id"), body.name));
+});
+
+api.delete("/teams/:id", async (c) => {
+	const result = await accounts(c.env).deleteTeam(bearer(c), c.req.param("id"));
+	dropCallerMe(c);
+	return reply(c, result);
+});
+
+api.get("/teams/:id/members", async (c) =>
+	reply(c, await accounts(c.env).teamMembers(bearer(c), c.req.param("id"))),
+);
+
+api.patch("/teams/:id/members/:userId", async (c) => {
+	const body = await parseBody(c, MemberUpdateRequest);
+	if (!body) return badRequest(c);
+	const { id, userId } = c.req.param();
+	return reply(c, await accounts(c.env).setTeamRole(bearer(c), id, userId, body.role));
+});
+
+api.delete("/teams/:id/members/:userId", async (c) => {
+	const { id, userId } = c.req.param();
+	const result = await accounts(c.env).removeTeamMember(bearer(c), id, userId);
+	dropCallerMe(c);
+	return reply(c, result);
+});
+
+api.post("/teams/:id/folders", async (c) => {
+	const body = await parseBody(c, FolderCreateRequest);
+	if (!body) return badRequest(c);
+	const result = await accounts(c.env).createFolder(bearer(c), c.req.param("id"), body.name);
+	dropCallerMe(c);
+	return reply(c, result);
+});
+
+api.delete("/teams/:id/folders/:folderId", async (c) => {
+	const { id, folderId } = c.req.param();
+	const result = await accounts(c.env).deleteFolder(bearer(c), id, folderId);
+	dropCallerMe(c);
+	return reply(c, result);
+});
+
+api.get("/teams/:id/invites", async (c) =>
+	reply(c, await accounts(c.env).listTeamInvites(bearer(c), c.req.param("id"))),
+);
+
+api.post("/teams/:id/invites", async (c) => {
+	const body = await parseBody(c, InviteCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(
+		c,
+		await accounts(c.env).createTeamInvite(bearer(c), c.req.param("id"), body, links(c)),
+	);
+});
+
+api.delete("/teams/:id/invites/:inviteId", async (c) => {
+	const { id, inviteId } = c.req.param();
+	return reply(c, await accounts(c.env).revokeTeamInvite(bearer(c), id, inviteId));
+});
+
+api.get("/teams/:id/pins", async (c) =>
+	reply(c, await accounts(c.env).listTeamPins(bearer(c), c.req.param("id"))),
+);
+
+api.post("/teams/:id/pins", async (c) => {
+	const body = await parseBody(c, PinCreateRequest);
+	if (!body) return badRequest(c);
+	return reply(c, await accounts(c.env).createTeamPin(bearer(c), c.req.param("id"), body));
+});
+
+api.delete("/teams/:id/pins/:pinId", async (c) => {
+	const { id, pinId } = c.req.param();
+	return reply(c, await accounts(c.env).revokeTeamPin(bearer(c), id, pinId));
+});
+
 /** Dev-only: AccountsDO RPC calls since its last wake (the `me` cache test reads it). */
 api.get("/debug/accounts", async (c) => {
 	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
@@ -411,6 +598,12 @@ api.post("/debug/accounts/age-limits", async (c) => {
 	const ms = Number(c.req.query("ms"));
 	if (!(Number.isSafeInteger(ms) && ms >= 0)) return badRequest(c);
 	return c.json(await accounts(c.env).debugAgeLimits(ms));
+});
+
+/** Dev-only: strip team data as before teams existed; the AccountsDO's next wake migrates it. */
+api.post("/debug/accounts/unmigrate-teams", async (c) => {
+	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
+	return c.json(await accounts(c.env).debugUnmigrateTeams());
 });
 
 /** Dev-only: expire a PIN now. */
