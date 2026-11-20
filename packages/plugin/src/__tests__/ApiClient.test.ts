@@ -311,4 +311,57 @@ describe("ApiClient", () => {
 		respond(200, { pins: [pin], locked: true, lockedUntil: 5 });
 		expect(await api().listPins("w1")).toEqual({ pins: [pin], locked: true, lockedUntil: 5 });
 	});
+
+	it("talks to the team routes", async () => {
+		const team = {
+			id: "t1",
+			slug: "team",
+			name: "Team",
+			role: "owner",
+			memberCount: 1,
+			folders: [{ id: "ws1", slug: "notes", name: "Notes" }],
+		};
+		let calls = respond(200, { teams: [team] });
+		expect(await api().teams()).toEqual([team]);
+		expect(calls[0]?.url).toBe("http://relay.test/api/teams");
+
+		calls = respond(200, { id: "ws2", slug: "b", name: "B" });
+		expect(await api().createTeamFolder("t 1", "B")).toEqual({ id: "ws2", slug: "b", name: "B" });
+		expect(calls[0]?.url).toBe("http://relay.test/api/teams/t%201/folders");
+		expect(JSON.parse(calls[0]?.body as string)).toEqual({ name: "B" });
+
+		const member = {
+			user: { id: "u1", name: "alice", email: null, color: "#f00", avatarUrl: null },
+			role: "owner",
+		};
+		respond(200, { members: [member] });
+		expect(await api().teamMembers("t1")).toEqual([member]);
+	});
+
+	it("accepts any 2xx body, even an empty one, for team mutations", async () => {
+		const calls: RequestUrlParam[] = [];
+		requestUrlMock.impl = async (param): Promise<RequestUrlResponse> => {
+			calls.push(param);
+			return {
+				status: 204,
+				headers: {},
+				arrayBuffer: new ArrayBuffer(0),
+				get json(): unknown {
+					throw new SyntaxError("Unexpected end of JSON input");
+				},
+				text: "",
+			};
+		};
+		await api().renameTeam("t1", "New");
+		await api().setTeamRole("t1", "u2", "viewer");
+		await api().removeTeamMember("t1", "u2");
+		await api().revokeTeamPin("t1", "p1");
+		expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+			"PATCH http://relay.test/api/teams/t1",
+			"PATCH http://relay.test/api/teams/t1/members/u2",
+			"DELETE http://relay.test/api/teams/t1/members/u2",
+			"DELETE http://relay.test/api/teams/t1/pins/p1",
+		]);
+		expect(JSON.parse(calls[1]?.body as string)).toEqual({ role: "viewer" });
+	});
 });

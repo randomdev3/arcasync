@@ -103,14 +103,17 @@ describe("sameServer", () => {
 });
 
 describe("parsePin", () => {
-	it("accepts four digits, ignoring spaces and dashes", () => {
+	it("accepts six or four digits, ignoring spaces and dashes", () => {
+		expect(parsePin("042 017")).toBe("042017");
+		expect(parsePin("042-017")).toBe("042017");
 		expect(parsePin("0420")).toBe("0420");
 		expect(parsePin(" 04 20\n")).toBe("0420");
 		expect(parsePin("04-20")).toBe("0420");
 	});
 
 	it("rejects anything else, and is never an invite token", () => {
-		for (const input of ["042", "04201", "o420", "", TOKEN]) expect(parsePin(input)).toBeNull();
+		for (const input of ["042", "04201", "0420171", "o420", "", TOKEN])
+			expect(parsePin(input)).toBeNull();
 		expect(parseInviteLink("0420")).toBeNull();
 	});
 });
