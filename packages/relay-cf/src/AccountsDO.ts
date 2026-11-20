@@ -1,16 +1,19 @@
 /**
- * Accounts, devices, sessions, workspaces and memberships for the whole deployment, in one
+ * Accounts, devices, sessions, teams, workspaces and memberships for the whole deployment, in one
  * SQLite Durable Object (singleton by name). Mirrors the behaviour of the Node server's
  * `routes/auth.ts`, `routes/workspaces.ts` and `seed.ts`; responses use the shared zod shapes.
+ * Team membership is the source of truth; `syncTeam` mirrors it into each folder's memberships.
  */
 
 import { DurableObject } from "cloudflare:workers";
 import type {
 	AuditResponse,
+	AuthProvider,
 	BootstrapResponse,
 	DeviceCodeResponse,
 	DeviceInfo,
 	DeviceLookupResponse,
+	IdentitiesResponse,
 	InviteAcceptRequest,
 	InviteCreated,
 	InviteCreateRequest,
@@ -18,6 +21,8 @@ import type {
 	LoginRequest,
 	MembersResponse,
 	MeResponse,
+	OAuthExchangeRequest,
+	OAuthStartRequest,
 	PasswordResetRequest,
 	PinAcceptRequest,
 	PinCreateRequest,
@@ -25,6 +30,10 @@ import type {
 	PinsResponse,
 	Role,
 	SessionResponse,
+	SharedFolderSummary,
+	TeamMembersResponse,
+	TeamSummary,
+	TeamsResponse,
 	User,
 	WorkspaceSummary,
 	WorkspacesResponse,
@@ -36,6 +45,7 @@ import {
 	WS_TOKEN_TTL_SECONDS,
 } from "@arcasync/shared";
 import type { z } from "zod";
+import { caps, signupPolicy } from "./accounts/caps";
 import {
 	type Limit,
 	LOGIN_FAILURE_ROWS_MAX,
@@ -49,7 +59,12 @@ import {
 } from "./accounts/limits";
 import { dummyVerify, hashPassword, type PasswordHash, verifyPassword } from "./accounts/passwords";
 import { newPin } from "./accounts/pins";
-import { migratePinsAndPasswords } from "./accounts/schema";
+import {
+	backfillTeams,
+	migratePinsAndPasswords,
+	migrateTeams,
+	uniqueSlug,
+} from "./accounts/schema";
 import {
 	constantTimeEqual,
 	hashSecret,
@@ -60,6 +75,7 @@ import {
 } from "./accounts/tokens";
 import type { Env } from "./env";
 import { signWsToken } from "./jwt";
+import { type OAuthProfile, s256 } from "./oauth";
 
 export const SESSION_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DEV_WORKSPACE_SLUG = "dev";
@@ -68,12 +84,15 @@ const MIN_BOOTSTRAP_TOKEN_LENGTH = 32;
 const ROLE_RANK: Record<Role, number> = { viewer: 1, editor: 2, owner: 3 };
 const DEVICE_LOOKUPS_PER_MINUTE = 5;
 const REENTRY_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-/** At most this many usable PINs server-wide. */
+/** At most this many usable PINs per team. */
 const PIN_MAX_ACTIVE = 10;
 const RESET_PIN_TTL_MS = 24 * 60 * 60 * 1000;
 /** Used, revoked and expired PINs stay listed this long, then are deleted. */
 const PIN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const PINS_LOCKED_UNTIL = "pins_locked_until";
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const OAUTH_HANDOFF_TTL_MS = 60 * 1000;
+const NAME_MAX = 60;
 
 export interface ApiError {
 	status: 400 | 401 | 403 | 404 | 409 | 410 | 411 | 413 | 423 | 429 | 503;
@@ -96,6 +115,7 @@ const fail = (
 });
 
 const invalidPin = () => fail(404, "invalid_pin", "Wrong or expired PIN");
+const limitReached = (message: string) => fail(409, "limit_reached", message);
 const invalidCredentials = () => fail(401, "invalid_credentials", "Wrong name or password");
 
 const PALETTE = [
@@ -175,6 +195,31 @@ export interface PersonSummary {
 	reset: { pin: string; expiresAt: number } | null;
 }
 
+interface TeamRow extends Record<string, SqlStorageValue> {
+	id: string;
+	slug: string;
+	name: string;
+	created_by: string | null;
+	created_at: number;
+	deleted_at: number | null;
+}
+
+/** A used OAuth state, as the callback needs it. */
+export interface OAuthStateTaken {
+	expired: boolean;
+	intent: "signin" | "link";
+	userId: string | null;
+	next: string | null;
+	verifierHash: string;
+	codeVerifier: string;
+}
+
+/** A membership whose role changed or that was removed: its sockets must be revoked. */
+interface MembershipChange {
+	workspaceId: string;
+	userId: string;
+}
+
 interface UserRow extends Record<string, SqlStorageValue> {
 	id: string;
 	name: string;
@@ -187,6 +232,9 @@ interface UserRow extends Record<string, SqlStorageValue> {
 
 interface InviteRow extends Record<string, SqlStorageValue> {
 	id: string;
+	/** Null only on re-entry invites. */
+	team_id: string | null;
+	/** The folder an old-route invite was made for; `''` for team and re-entry invites. */
 	workspace_id: string;
 	role: string;
 	admin: number;
@@ -202,6 +250,8 @@ interface InviteRow extends Record<string, SqlStorageValue> {
 interface PinRow extends Record<string, SqlStorageValue> {
 	id: string;
 	pin: string;
+	team_id: string;
+	/** The folder an old-route PIN was made for; `''` for team PINs. */
 	workspace_id: string;
 	role: string;
 	admin: number;
@@ -298,6 +348,8 @@ export class AccountsDO extends DurableObject<Env> {
 			if (!String(err).includes("duplicate column")) throw err;
 		}
 		migratePinsAndPasswords(this.sql);
+		migrateTeams(this.sql);
+		ctx.storage.transactionSync(() => backfillTeams(this.sql));
 	}
 
 	private hashToken(token: string): Promise<string> {
@@ -321,35 +373,205 @@ export class AccountsDO extends DurableObject<Env> {
 		);
 	}
 
-	private roleIn(userId: string, workspaceId: string): Role | undefined {
+	// --- teams: membership lives in `team_members`; `memberships` mirrors it per folder ---
+
+	/** The live team of a live workspace (shared folder). */
+	private teamOf(workspaceId: string): string | undefined {
+		return this.sql
+			.exec<{ team_id: string }>(
+				`SELECT w.team_id FROM workspaces w JOIN teams t ON t.id = w.team_id
+				 WHERE w.id = ? AND w.deleted_at IS NULL AND t.deleted_at IS NULL`,
+				workspaceId,
+			)
+			.toArray()[0]?.team_id;
+	}
+
+	private liveTeam(teamId: string): TeamRow | undefined {
+		return this.sql
+			.exec<TeamRow>("SELECT * FROM teams WHERE id = ? AND deleted_at IS NULL", teamId)
+			.toArray()[0];
+	}
+
+	private teamRole(userId: string, teamId: string): Role | undefined {
 		return this.sql
 			.exec<{ role: string }>(
-				`SELECT m.role FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
-				 WHERE m.workspace_id = ? AND m.user_id = ? AND w.deleted_at IS NULL`,
-				workspaceId,
+				`SELECT m.role FROM team_members m JOIN teams t ON t.id = m.team_id
+				 WHERE m.team_id = ? AND m.user_id = ? AND t.deleted_at IS NULL`,
+				teamId,
 				userId,
 			)
 			.toArray()[0]?.role as Role | undefined;
 	}
 
-	/** Owners of the workspace and server admins manage its invites and members. */
-	private canManage(user: UserRow, workspaceId: string): boolean {
-		return user.is_admin === 1 || this.roleIn(user.id, workspaceId) === "owner";
+	/** Team owners and server admins manage its invites, PINs and members. */
+	private canManageTeam(user: UserRow, teamId: string): boolean {
+		return user.is_admin === 1 || this.teamRole(user.id, teamId) === "owner";
 	}
 
-	private createWorkspaceRow(name: string): WorkspaceSummary & { role: "owner" } {
-		const base = slugify(name);
-		const taken = (slug: string) =>
-			this.sql.exec("SELECT 1 FROM workspaces WHERE slug = ?", slug).toArray().length > 0;
-		let slug = base;
-		for (let n = 2; taken(slug); n++) slug = `${base.slice(0, 40 - `-${n}`.length)}-${n}`;
-		const id = crypto.randomUUID();
-		this.sql.exec("INSERT INTO workspaces (id, slug, name) VALUES (?, ?, ?)", id, slug, name);
-		return { id, slug, name, role: "owner" };
+	private teamMemberCount(teamId: string): number {
+		return this.sql
+			.exec<{ n: number }>("SELECT COUNT(*) AS n FROM team_members WHERE team_id = ?", teamId)
+			.one().n;
+	}
+
+	private isLastTeamOwner(teamId: string, userId: string): boolean {
+		const owners = this.sql
+			.exec<{ user_id: string }>(
+				"SELECT user_id FROM team_members WHERE team_id = ? AND role = 'owner'",
+				teamId,
+			)
+			.toArray();
+		return owners.length === 1 && owners[0]?.user_id === userId;
+	}
+
+	/**
+	 * The one writer of `memberships` (besides the account reset): makes every folder's
+	 * memberships equal the team's members and roles (none for a deleted folder or team).
+	 * Returns the memberships whose role changed or that were removed; the caller revokes their
+	 * sockets (`revokeChanges`) after its synchronous block.
+	 */
+	private syncTeam(teamId: string): MembershipChange[] {
+		const want = new Map(
+			this.liveTeam(teamId)
+				? this.sql
+						.exec<{ user_id: string; role: string }>(
+							"SELECT user_id, role FROM team_members WHERE team_id = ?",
+							teamId,
+						)
+						.toArray()
+						.map((m) => [m.user_id, m.role] as const)
+				: [],
+		);
+		const changes: MembershipChange[] = [];
+		const folders = this.sql
+			.exec<{ id: string; deleted_at: number | null }>(
+				"SELECT id, deleted_at FROM workspaces WHERE team_id = ?",
+				teamId,
+			)
+			.toArray();
+		for (const folder of folders) {
+			const target = folder.deleted_at === null ? want : new Map<string, string>();
+			const have = new Map(
+				this.sql
+					.exec<{ user_id: string; role: string }>(
+						"SELECT user_id, role FROM memberships WHERE workspace_id = ?",
+						folder.id,
+					)
+					.toArray()
+					.map((m) => [m.user_id, m.role] as const),
+			);
+			for (const [userId, role] of have) {
+				if (target.get(userId) === role) continue;
+				if (!target.has(userId)) {
+					this.sql.exec(
+						"DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?",
+						folder.id,
+						userId,
+					);
+				}
+				changes.push({ workspaceId: folder.id, userId });
+			}
+			for (const [userId, role] of target) {
+				if (have.get(userId) === role) continue;
+				this.sql.exec(
+					`INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)
+					 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`,
+					folder.id,
+					userId,
+					role,
+				);
+			}
+		}
+		return changes;
+	}
+
+	/** Sets (or with null removes) one team member, then fans out to the team's folders. */
+	private setTeamMember(teamId: string, userId: string, role: Role | null): MembershipChange[] {
+		if (role === null) {
+			this.sql.exec("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", teamId, userId);
+		} else {
+			this.sql.exec(
+				`INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)
+				 ON CONFLICT (team_id, user_id) DO UPDATE SET role = excluded.role`,
+				teamId,
+				userId,
+				role,
+			);
+		}
+		return this.syncTeam(teamId);
+	}
+
+	private async revokeChanges(changes: MembershipChange[]): Promise<void> {
+		for (const c of changes) await this.revokeSockets(c.workspaceId, c.userId);
+	}
+
+	private createTeamRow(name: string, createdBy: string | null): TeamRow {
+		const row: TeamRow = {
+			id: crypto.randomUUID(),
+			slug: uniqueSlug(this.sql, "teams", slugify(name)),
+			name,
+			created_by: createdBy,
+			created_at: Date.now(),
+			deleted_at: null,
+		};
+		this.sql.exec(
+			"INSERT INTO teams (id, slug, name, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+			row.id,
+			row.slug,
+			row.name,
+			row.created_by,
+			row.created_at,
+		);
+		return row;
+	}
+
+	/** A new folder (workspace) of the team; the caller's `syncTeam` adds its members. */
+	private createFolderRow(teamId: string, name: string, slugBase = slugify(name)) {
+		const folder: SharedFolderSummary = {
+			id: crypto.randomUUID(),
+			slug: uniqueSlug(this.sql, "workspaces", slugBase),
+			name,
+		};
+		this.sql.exec(
+			"INSERT INTO workspaces (id, slug, name, team_id) VALUES (?, ?, ?, ?)",
+			folder.id,
+			folder.slug,
+			folder.name,
+			teamId,
+		);
+		return folder;
+	}
+
+	/** A team with one folder of the same name (bootstrap and the admin's `POST /workspaces`). */
+	private createTeamWithFolder(
+		name: string,
+		createdBy: string | null,
+	): WorkspaceSummary & { role: "owner"; teamId: string } {
+		const team = this.createTeamRow(name, createdBy);
+		return { ...this.createFolderRow(team.id, name), role: "owner", teamId: team.id };
+	}
+
+	/** Refuses a new account once the server has `maxUsers` (409 `too_many_users`). */
+	private userCap(): Result<null> {
+		const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM users").one().n;
+		if (n >= caps(this.env).maxUsers) {
+			return fail(409, "too_many_users", "This server has reached its maximum number of accounts");
+		}
+		return ok(null);
+	}
+
+	/** Refuses a new member once the team has `membersPerTeam` (409 `limit_reached`). */
+	private memberCap(teamId: string): Result<null> {
+		const max = caps(this.env).membersPerTeam;
+		if (this.teamMemberCount(teamId) >= max) {
+			return limitReached(`A team can have at most ${max} members`);
+		}
+		return ok(null);
 	}
 
 	private insertInvite(
 		tokenHash: string,
+		teamId: string | null,
 		workspaceId: string,
 		role: Role,
 		admin: boolean,
@@ -360,10 +582,11 @@ export class AccountsDO extends DurableObject<Env> {
 	): string {
 		const id = crypto.randomUUID();
 		this.sql.exec(
-			`INSERT INTO invites (id, token_hash, workspace_id, role, admin, max_uses, expires_at,
-			 created_by, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO invites (id, token_hash, team_id, workspace_id, role, admin, max_uses,
+			 expires_at, created_by, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			tokenHash,
+			teamId,
 			workspaceId,
 			role,
 			admin ? 1 : 0,
@@ -378,14 +601,14 @@ export class AccountsDO extends DurableObject<Env> {
 
 	/**
 	 * A usable invite for `tokenHash`, or why not (404 unknown/revoked, 410 expired/used).
-	 * Re-entry invites have no workspace (`workspace_id = ''`), hence the LEFT JOIN.
+	 * Re-entry invites have no team, hence the LEFT JOIN.
 	 */
 	private usableInvite(tokenHash: string): Result<InviteRow> {
 		const invite = this.sql
 			.exec<InviteRow>(
-				`SELECT i.* FROM invites i LEFT JOIN workspaces w ON w.id = i.workspace_id
-				 WHERE i.token_hash = ? AND (i.user_id IS NOT NULL OR w.id IS NOT NULL)
-				 AND w.deleted_at IS NULL`,
+				`SELECT i.* FROM invites i LEFT JOIN teams t ON t.id = i.team_id
+				 WHERE i.token_hash = ? AND (i.user_id IS NOT NULL OR t.id IS NOT NULL)
+				 AND t.deleted_at IS NULL`,
 				tokenHash,
 			)
 			.toArray()[0];
@@ -435,16 +658,6 @@ export class AccountsDO extends DurableObject<Env> {
 		}
 	}
 
-	private isLastOwner(workspaceId: string, userId: string): boolean {
-		const owners = this.sql
-			.exec<{ user_id: string }>(
-				"SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner'",
-				workspaceId,
-			)
-			.toArray();
-		return owners.length === 1 && owners[0]?.user_id === userId;
-	}
-
 	private insertSession(userId: string, deviceId: string, tokenHash: string): void {
 		this.sql.exec(
 			"INSERT INTO sessions (id, user_id, device_id, token_hash, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -456,19 +669,23 @@ export class AccountsDO extends DurableObject<Env> {
 		);
 	}
 
+	/** The dev workspace `slug`'s team, creating both (a one-folder team) when missing. */
 	private ensureDevWorkspace(slug = DEV_WORKSPACE_SLUG): string {
 		const existing = this.sql
-			.exec<{ id: string }>("SELECT id FROM workspaces WHERE slug = ?", slug)
+			.exec<{ id: string; team_id: string | null }>(
+				"SELECT id, team_id FROM workspaces WHERE slug = ?",
+				slug,
+			)
 			.toArray()[0];
-		if (existing) return existing.id;
-		const id = crypto.randomUUID();
-		this.sql.exec(
-			"INSERT INTO workspaces (id, slug, name) VALUES (?, ?, ?)",
-			id,
-			slug,
-			slug === DEV_WORKSPACE_SLUG ? "Dev" : slug,
-		);
-		return id;
+		if (existing?.team_id) return existing.team_id;
+		const name = slug === DEV_WORKSPACE_SLUG ? "Dev" : slug;
+		const team = this.createTeamRow(name, null);
+		if (existing) {
+			this.sql.exec("UPDATE workspaces SET team_id = ? WHERE id = ?", team.id, existing.id);
+		} else {
+			this.createFolderRow(team.id, name, slug);
+		}
+		return team.id;
 	}
 
 	private workspacesFor(userId: string): WorkspaceSummary[] {
@@ -571,16 +788,11 @@ export class AccountsDO extends DurableObject<Env> {
 		}
 		if (!user) return fail(400, "bad_request", "Could not create user");
 
-		const workspaceId = this.ensureDevWorkspace(workspace);
-		const firstMember = this.sql
-			.exec("SELECT user_id FROM memberships WHERE workspace_id = ? LIMIT 1", workspaceId)
-			.toArray()[0];
-		this.sql.exec(
-			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-			workspaceId,
-			user.id,
-			role ?? (firstMember ? "editor" : "owner"),
-		);
+		const teamId = this.ensureDevWorkspace(workspace);
+		if (!this.teamRole(user.id, teamId)) {
+			const first = this.teamMemberCount(teamId) === 0;
+			this.setTeamMember(teamId, user.id, role ?? (first ? "owner" : "editor"));
+		}
 
 		this.insertSession(user.id, this.deviceFor(user.id, device), tokenHash);
 
@@ -697,14 +909,29 @@ export class AccountsDO extends DurableObject<Env> {
 		}
 		const now = Date.now();
 		const existing = reset ? this.workspaceNamed(workspaceName) : null;
-		const workspace = existing ?? this.createWorkspaceRow(workspaceName);
+		const { teamId, ...created } = existing ?? this.createTeamWithFolder(workspaceName, null);
+		const workspace: WorkspaceSummary = {
+			id: created.id,
+			slug: created.slug,
+			name: created.name,
+			role: "owner",
+		};
 		const expiresAt = now + BOOTSTRAP_INVITE_TTL_MS;
-		const inviteId = this.insertInvite(inviteHash, workspace.id, "owner", true, 1, expiresAt, null);
+		const inviteId = this.insertInvite(
+			inviteHash,
+			teamId,
+			workspace.id,
+			"owner",
+			true,
+			1,
+			expiresAt,
+			null,
+		);
 		this.sql.exec(
 			"INSERT INTO server_settings (key, value) VALUES ('bootstrapped_at', ?)",
 			String(now),
 		);
-		this.audit(null, reset ? "bootstrap_reset" : "bootstrap", workspace.id, { inviteId });
+		this.audit(null, reset ? "bootstrap_reset" : "bootstrap", workspace.id, { inviteId, teamId });
 		return ok({
 			workspace,
 			invite: {
@@ -719,7 +946,10 @@ export class AccountsDO extends DurableObject<Env> {
 		});
 	}
 
-	/** Deletes every account and everything tied to one; workspaces and the audit log stay. */
+	/**
+	 * Deletes every account and everything tied to one (teams included); workspaces and the
+	 * audit log stay, each workspace again in a team of its own (no members).
+	 */
 	private resetAccounts(): void {
 		this.ctx.storage.transactionSync(() => {
 			for (const table of [
@@ -734,29 +964,58 @@ export class AccountsDO extends DurableObject<Env> {
 				"pin_failures",
 				"login_failures",
 				"password_resets",
+				"teams",
+				"team_members",
+				"identities",
+				"oauth_states",
+				"oauth_handoffs",
 			]) {
 				this.sql.exec(`DELETE FROM ${table}`);
 			}
+			this.sql.exec("UPDATE workspaces SET team_id = NULL");
 			this.sql.exec(
 				"DELETE FROM server_settings WHERE key IN ('bootstrapped_at', ?)",
 				PINS_LOCKED_UNTIL,
 			);
+			backfillTeams(this.sql);
 		});
 		this.lookups.clear();
 	}
 
-	private workspaceNamed(name: string): (WorkspaceSummary & { role: "owner" }) | null {
+	private workspaceNamed(name: string): (SharedFolderSummary & { teamId: string }) | null {
 		const row = this.sql
-			.exec<{ id: string; slug: string; name: string }>(
-				"SELECT id, slug, name FROM workspaces WHERE name = ? AND deleted_at IS NULL LIMIT 1",
+			.exec<{ id: string; slug: string; name: string; team_id: string }>(
+				`SELECT id, slug, name, team_id FROM workspaces
+				 WHERE name = ? AND deleted_at IS NULL AND team_id IS NOT NULL LIMIT 1`,
 				name,
 			)
 			.toArray()[0];
-		return row ? { ...row, role: "owner" } : null;
+		return row ? { id: row.id, slug: row.slug, name: row.name, teamId: row.team_id } : null;
 	}
 
+	/** `POST /api/workspaces/:id/invites` (acts on the folder's team). */
 	async createInvite(
 		token: string | null,
+		workspaceId: string,
+		req: InviteCreateRequest,
+		links: LinkBase,
+	): Promise<Result<InviteCreated>> {
+		return this.makeInvite(token, this.teamOf(workspaceId), workspaceId, req, links);
+	}
+
+	/** `POST /api/teams/:id/invites`. */
+	async createTeamInvite(
+		token: string | null,
+		teamId: string,
+		req: InviteCreateRequest,
+		links: LinkBase,
+	): Promise<Result<InviteCreated>> {
+		return this.makeInvite(token, this.liveTeam(teamId)?.id, "", req, links);
+	}
+
+	private async makeInvite(
+		token: string | null,
+		teamId: string | undefined,
 		workspaceId: string,
 		req: InviteCreateRequest,
 		links: LinkBase,
@@ -767,10 +1026,12 @@ export class AccountsDO extends DurableObject<Env> {
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
-		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
 		const expiresAt = Date.now() + req.expiresInSec * 1000;
 		const id = this.insertInvite(
 			inviteHash,
+			teamId,
 			workspaceId,
 			req.role,
 			false,
@@ -779,7 +1040,8 @@ export class AccountsDO extends DurableObject<Env> {
 			user.id,
 		);
 		this.audit(user.id, "invite.create", id, {
-			workspaceId,
+			teamId,
+			...(workspaceId ? { workspaceId } : {}),
 			role: req.role,
 			maxUses: req.maxUses,
 		});
@@ -794,19 +1056,28 @@ export class AccountsDO extends DurableObject<Env> {
 		});
 	}
 
-	/** Never returns tokens (only their hashes are stored). */
+	/** The invites of the folder's team. Never returns tokens (only their hashes are stored). */
 	async listInvites(token: string | null, workspaceId: string): Promise<Result<InvitesResponse>> {
+		return this.inviteList(token, this.teamOf(workspaceId));
+	}
+
+	async listTeamInvites(token: string | null, teamId: string): Promise<Result<InvitesResponse>> {
+		return this.inviteList(token, this.liveTeam(teamId)?.id);
+	}
+
+	private async inviteList(
+		token: string | null,
+		teamId: string | undefined,
+	): Promise<Result<InvitesResponse>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
-		if (!this.canManage(s.value.user, workspaceId)) {
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(s.value.user, teamId)) {
 			return fail(403, "forbidden", "Owner or admin only");
 		}
 		const invites = this.sql
-			.exec<InviteRow>(
-				"SELECT * FROM invites WHERE workspace_id = ? ORDER BY created_at DESC",
-				workspaceId,
-			)
+			.exec<InviteRow>("SELECT * FROM invites WHERE team_id = ? ORDER BY created_at DESC", teamId)
 			.toArray()
 			.map((r) => ({
 				id: r.id,
@@ -827,27 +1098,40 @@ export class AccountsDO extends DurableObject<Env> {
 		workspaceId: string,
 		inviteId: string,
 	): Promise<Result<{ ok: true }>> {
+		return this.inviteRevoke(token, this.teamOf(workspaceId), inviteId);
+	}
+
+	async revokeTeamInvite(
+		token: string | null,
+		teamId: string,
+		inviteId: string,
+	): Promise<Result<{ ok: true }>> {
+		return this.inviteRevoke(token, this.liveTeam(teamId)?.id, inviteId);
+	}
+
+	private async inviteRevoke(
+		token: string | null,
+		teamId: string | undefined,
+		inviteId: string,
+	): Promise<Result<{ ok: true }>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
-		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
 		const invite = this.sql
-			.exec<InviteRow>(
-				"SELECT * FROM invites WHERE id = ? AND workspace_id = ?",
-				inviteId,
-				workspaceId,
-			)
+			.exec<InviteRow>("SELECT * FROM invites WHERE id = ? AND team_id = ?", inviteId, teamId)
 			.toArray()[0];
 		if (!invite) return fail(404, "not_found", "Unknown invite");
 		if (invite.revoked_at === null) {
 			this.sql.exec("UPDATE invites SET revoked_at = ? WHERE id = ?", Date.now(), inviteId);
-			this.audit(user.id, "invite.revoke", inviteId, { workspaceId });
+			this.audit(user.id, "invite.revoke", inviteId, { teamId });
 		}
 		return ok({ ok: true });
 	}
 
-	/** Unauthenticated: a new user joins through an invite and gets a session. */
+	/** Unauthenticated: a new user joins the invite's team and gets a session. */
 	async acceptInvite(req: InviteAcceptRequest): Promise<Result<SessionResponse>> {
 		this.calls += 1;
 		const inviteHash = await this.hashToken(req.token);
@@ -860,7 +1144,13 @@ export class AccountsDO extends DurableObject<Env> {
 		if (!found.ok) return found;
 		const invite = found.value;
 		if (invite.user_id !== null) return this.reenter(invite, req.device, sessionHash, sessionToken);
+		const teamId = invite.team_id;
+		if (!teamId) return fail(404, "not_found", "Unknown invite");
 		if (this.nameTaken(req.name)) return fail(409, "name_taken", "That name is taken");
+		const room = this.userCap();
+		if (!room.ok) return room;
+		const seat = this.memberCap(teamId);
+		if (!seat.ok) return seat;
 		const userId = crypto.randomUUID();
 		this.sql.exec(
 			"INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)",
@@ -869,15 +1159,11 @@ export class AccountsDO extends DurableObject<Env> {
 			color,
 			invite.admin,
 		);
-		this.sql.exec(
-			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)",
-			invite.workspace_id,
-			userId,
-			invite.role,
-		);
+		this.setTeamMember(teamId, userId, invite.role as Role);
 		this.insertSession(userId, this.deviceFor(userId, req.device), sessionHash);
 		this.sql.exec("UPDATE invites SET uses = uses + 1 WHERE id = ?", invite.id);
 		this.audit(userId, "invite.accept", invite.id, {
+			teamId,
 			workspaceId: invite.workspace_id,
 			role: invite.role,
 			admin: invite.admin === 1,
@@ -910,7 +1196,26 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(user.id) });
 	}
 
-	/** Authenticated: an existing user joins another workspace; an existing role never drops. */
+	/**
+	 * Joins `teamId` with `offered`, or keeps a higher existing role (a role never drops).
+	 * Synchronous; the caller revokes `changes` afterwards.
+	 */
+	private joinTeam(
+		teamId: string,
+		userId: string,
+		offered: Role,
+	): Result<{ role: Role; previous: Role | null; changes: MembershipChange[] }> {
+		const current = this.teamRole(userId, teamId);
+		if (!current) {
+			const seat = this.memberCap(teamId);
+			if (!seat.ok) return seat;
+		}
+		const role = current && ROLE_RANK[current] >= ROLE_RANK[offered] ? current : offered;
+		const changes = current === role ? [] : this.setTeamMember(teamId, userId, role);
+		return ok({ role, previous: current ?? null, changes });
+	}
+
+	/** Authenticated: an existing user joins the invite's team; an existing role never drops. */
 	async redeemInvite(
 		token: string | null,
 		inviteToken: string,
@@ -923,56 +1228,52 @@ export class AccountsDO extends DurableObject<Env> {
 		const found = this.usableInvite(inviteHash);
 		if (!found.ok) return found;
 		const invite = found.value;
-		// Re-entry invites only sign their user in; they grant no workspace.
-		if (invite.user_id !== null) return fail(404, "not_found", "Unknown invite");
-		const offered = invite.role as Role;
-		const current = this.roleIn(user.id, invite.workspace_id);
-		const role = current && ROLE_RANK[current] >= ROLE_RANK[offered] ? current : offered;
-		this.sql.exec(
-			`INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)
-			 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`,
-			invite.workspace_id,
-			user.id,
-			role,
-		);
+		// Re-entry invites only sign their user in; they grant no team.
+		if (invite.user_id !== null || !invite.team_id) return fail(404, "not_found", "Unknown invite");
+		const joined = this.joinTeam(invite.team_id, user.id, invite.role as Role);
+		if (!joined.ok) return joined;
+		const { role, previous, changes } = joined.value;
 		if (invite.admin === 1) this.sql.exec("UPDATE users SET is_admin = 1 WHERE id = ?", user.id);
 		this.sql.exec("UPDATE invites SET uses = uses + 1 WHERE id = ?", invite.id);
 		this.audit(user.id, "invite.redeem", invite.id, {
+			teamId: invite.team_id,
 			workspaceId: invite.workspace_id,
 			role,
-			previousRole: current ?? null,
+			previousRole: previous,
 			admin: invite.admin === 1,
 		});
 		const workspaces = this.workspacesFor(user.id);
-		if (current && current !== role) await this.revokeSockets(invite.workspace_id, user.id);
+		await this.revokeChanges(changes);
 		return ok({ workspaces });
 	}
 
-	/** Admin only; the creator owns the new workspace. */
+	/** Admin only: a new team with one folder of this name; the creator owns it. */
 	async createWorkspace(token: string | null, name: string): Promise<Result<WorkspaceSummary>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
 		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
-		const workspace = this.createWorkspaceRow(name);
-		this.sql.exec(
-			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
-			workspace.id,
-			user.id,
-		);
-		this.audit(user.id, "workspace.create", workspace.id, { name, slug: workspace.slug });
+		const { teamId, ...workspace } = this.createTeamWithFolder(name, user.id);
+		this.setTeamMember(teamId, user.id, "owner");
+		this.audit(user.id, "workspace.create", workspace.id, {
+			name,
+			slug: workspace.slug,
+			teamId,
+		});
 		return ok(workspace);
 	}
 
 	// --- P2 members, admin, audit ---
 
+	/** The folder's members (the team's, mirrored); members and admins only. */
 	async members(token: string | null, workspaceId: string): Promise<Result<MembersResponse>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
-		if (user.is_admin !== 1 && !this.roleIn(user.id, workspaceId)) {
+		const teamId = this.teamOf(workspaceId);
+		if (user.is_admin !== 1 && !(teamId && this.teamRole(user.id, teamId))) {
 			return fail(403, "forbidden", "Not a member of that workspace");
 		}
 		const members = this.sql
@@ -986,6 +1287,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ members });
 	}
 
+	/** `PATCH /api/workspaces/:id/members/:userId`: changes the role in the folder's team. */
 	async setRole(
 		token: string | null,
 		workspaceId: string,
@@ -995,26 +1297,10 @@ export class AccountsDO extends DurableObject<Env> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
-		const { user } = s.value;
-		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
-		const current = this.roleIn(userId, workspaceId);
-		if (!current) return fail(404, "not_found", "Not a member of that workspace");
-		if (current === role) return ok({ ok: true });
-		if (current === "owner" && this.isLastOwner(workspaceId, userId)) {
-			return fail(409, "last_owner", "A workspace needs at least one owner");
-		}
-		this.sql.exec(
-			"UPDATE memberships SET role = ? WHERE workspace_id = ? AND user_id = ?",
-			role,
-			workspaceId,
-			userId,
-		);
-		this.audit(user.id, "member.role", userId, { workspaceId, role, previousRole: current });
-		await this.revokeSockets(workspaceId, userId);
-		return ok({ ok: true });
+		return this.changeRole(s.value.user, this.teamOf(workspaceId), userId, role, { workspaceId });
 	}
 
-	/** Owners and admins remove anyone; any member may remove themselves. */
+	/** `DELETE /api/workspaces/:id/members/:userId`: removes from (or leaves) the folder's team. */
 	async removeMember(
 		token: string | null,
 		workspaceId: string,
@@ -1023,22 +1309,55 @@ export class AccountsDO extends DurableObject<Env> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
-		const { user } = s.value;
-		if (user.id !== userId && !this.canManage(user, workspaceId)) {
+		return this.dropMember(s.value.user, this.teamOf(workspaceId), userId, { workspaceId });
+	}
+
+	/** Owners and admins change roles; the last owner keeps theirs. Revokes changed sockets. */
+	private async changeRole(
+		actor: UserRow,
+		teamId: string | undefined,
+		userId: string,
+		role: Role,
+		details: Record<string, unknown> = {},
+	): Promise<Result<{ ok: true }>> {
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(actor, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		const current = this.teamRole(userId, teamId);
+		if (!current) return fail(404, "not_found", "Not a member of that team");
+		if (current === role) return ok({ ok: true });
+		if (current === "owner" && this.isLastTeamOwner(teamId, userId)) {
+			return fail(409, "last_owner", "A team needs at least one owner");
+		}
+		const changes = this.setTeamMember(teamId, userId, role);
+		this.audit(actor.id, "member.role", userId, {
+			...details,
+			teamId,
+			role,
+			previousRole: current,
+		});
+		await this.revokeChanges(changes);
+		return ok({ ok: true });
+	}
+
+	/** Owners and admins remove anyone; any member may remove themselves (leave). */
+	private async dropMember(
+		actor: UserRow,
+		teamId: string | undefined,
+		userId: string,
+		details: Record<string, unknown> = {},
+	): Promise<Result<{ ok: true }>> {
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (actor.id !== userId && !this.canManageTeam(actor, teamId)) {
 			return fail(403, "forbidden", "Owner or admin only");
 		}
-		const current = this.roleIn(userId, workspaceId);
-		if (!current) return fail(404, "not_found", "Not a member of that workspace");
-		if (current === "owner" && this.isLastOwner(workspaceId, userId)) {
-			return fail(409, "last_owner", "A workspace needs at least one owner");
+		const current = this.teamRole(userId, teamId);
+		if (!current) return fail(404, "not_found", "Not a member of that team");
+		if (current === "owner" && this.isLastTeamOwner(teamId, userId)) {
+			return fail(409, "last_owner", "A team needs at least one owner");
 		}
-		this.sql.exec(
-			"DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?",
-			workspaceId,
-			userId,
-		);
-		this.audit(user.id, "member.remove", userId, { workspaceId, previousRole: current });
-		await this.revokeSockets(workspaceId, userId);
+		const changes = this.setTeamMember(teamId, userId, null);
+		this.audit(actor.id, "member.remove", userId, { ...details, teamId, previousRole: current });
+		await this.revokeChanges(changes);
 		return ok({ ok: true });
 	}
 
@@ -1094,7 +1413,17 @@ export class AccountsDO extends DurableObject<Env> {
 		if (!target.disabled_at) return fail(409, "not_disabled", "That user is not disabled");
 		this.sql.exec("UPDATE users SET disabled_at = NULL WHERE id = ?", userId);
 		const expiresAt = Date.now() + REENTRY_INVITE_TTL_MS;
-		const id = this.insertInvite(inviteHash, "", "viewer", false, 1, expiresAt, user.id, userId);
+		const id = this.insertInvite(
+			inviteHash,
+			null,
+			"",
+			"viewer",
+			false,
+			1,
+			expiresAt,
+			user.id,
+			userId,
+		);
 		this.audit(user.id, "user.enable", userId, { inviteId: id });
 		return ok({
 			id,
@@ -1144,6 +1473,14 @@ export class AccountsDO extends DurableObject<Env> {
 
 	// --- PIN invites ---
 
+	/** `PIN_GLOBAL_LIMIT.max`; tests (debug stats on) lower it with `ARCASYNC_PIN_LOCK_THRESHOLD`. */
+	private pinLockThreshold(): number {
+		const override = Number(this.env.ARCASYNC_PIN_LOCK_THRESHOLD);
+		return this.env.ARCASYNC_DEBUG_STATS === "1" && Number.isInteger(override) && override > 0
+			? override
+			: PIN_GLOBAL_LIMIT.max;
+	}
+
 	/** Lock end (ms) while PIN entry is locked server-wide, else null. */
 	private pinsLockedUntil(now: number): number | null {
 		const row = this.sql
@@ -1192,7 +1529,7 @@ export class AccountsDO extends DurableObject<Env> {
 		const forIp = count("ip = ? AND at > ?", ip, now - PIN_IP_LIMIT.windowMs);
 		if (forIp === PIN_IP_LIMIT.max) this.audit(null, "pin.limited", "ip", { failures: forIp });
 		const total = count("at > ?", now - PIN_GLOBAL_LIMIT.windowMs);
-		if (total >= PIN_GLOBAL_LIMIT.max) {
+		if (total >= this.pinLockThreshold()) {
 			const until = now + PIN_LOCK_MS;
 			this.sql.exec(
 				`INSERT INTO server_settings (key, value) VALUES (?, ?)
@@ -1206,24 +1543,28 @@ export class AccountsDO extends DurableObject<Env> {
 		}
 	}
 
-	/** The usable PIN with these digits (unused, unrevoked, unexpired, workspace alive). */
+	/** The usable PIN with these digits (unused, unrevoked, unexpired, team alive). */
 	private activePin(pin: string, now: number): PinRow | undefined {
 		return this.sql
 			.exec<PinRow>(
-				`SELECT p.* FROM invite_pins p JOIN workspaces w ON w.id = p.workspace_id
+				`SELECT p.* FROM invite_pins p JOIN teams t ON t.id = p.team_id
 				 WHERE p.pin = ? AND p.used_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?
-				 AND w.deleted_at IS NULL`,
+				 AND t.deleted_at IS NULL`,
 				pin,
 				now,
 			)
 			.toArray()[0];
 	}
 
-	private toPinSummary(row: PinRow & { used_by_name?: string | null }): PinSummary {
+	/** `workspaceId` is the stored folder, or `asFolder` when listed through a folder route. */
+	private toPinSummary(
+		row: PinRow & { used_by_name?: string | null },
+		asFolder?: string,
+	): PinSummary {
 		return {
 			id: row.id,
 			pin: row.pin,
-			workspaceId: row.workspace_id,
+			workspaceId: asFolder ?? row.workspace_id,
 			role: row.role as Role,
 			admin: row.admin === 1,
 			createdAt: row.created_at,
@@ -1235,9 +1576,28 @@ export class AccountsDO extends DurableObject<Env> {
 		};
 	}
 
-	/** Owner or admin; `admin` PINs only for server admins. At most 10 usable server-wide. */
+	/** `POST /api/workspaces/:id/pins` (a PIN for the folder's team). */
 	async createPin(
 		token: string | null,
+		workspaceId: string,
+		req: PinCreateRequest,
+	): Promise<Result<PinSummary>> {
+		return this.makePin(token, this.teamOf(workspaceId), workspaceId, req);
+	}
+
+	/** `POST /api/teams/:id/pins`. */
+	async createTeamPin(
+		token: string | null,
+		teamId: string,
+		req: PinCreateRequest,
+	): Promise<Result<PinSummary>> {
+		return this.makePin(token, this.liveTeam(teamId)?.id, "", req);
+	}
+
+	/** Owner or admin; `admin` PINs only for server admins. At most 10 usable per team. */
+	private async makePin(
+		token: string | null,
+		teamId: string | undefined,
 		workspaceId: string,
 		req: PinCreateRequest,
 	): Promise<Result<PinSummary>> {
@@ -1245,7 +1605,8 @@ export class AccountsDO extends DurableObject<Env> {
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
-		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
 		if (req.admin && user.is_admin !== 1) {
 			return fail(403, "forbidden", "Only server admins create admin PINs");
 		}
@@ -1260,18 +1621,24 @@ export class AccountsDO extends DurableObject<Env> {
 		const active = this.sql
 			.exec<{ n: number }>(
 				`SELECT COUNT(*) AS n FROM invite_pins
-				 WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+				 WHERE team_id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+				teamId,
 				now,
 			)
 			.one().n;
 		if (active >= PIN_MAX_ACTIVE) {
-			return fail(409, "too_many_pins", `At most ${PIN_MAX_ACTIVE} PINs can be open at once`);
+			return fail(
+				409,
+				"too_many_pins",
+				`At most ${PIN_MAX_ACTIVE} PINs can be open at once per team`,
+			);
 		}
 		const pin = newPin((candidate) => this.activePin(candidate, now) !== undefined);
 		if (!pin) return fail(409, "too_many_pins", "No free PIN; revoke one first");
 		const row: PinRow = {
 			id: crypto.randomUUID(),
 			pin,
+			team_id: teamId,
 			workspace_id: workspaceId,
 			role: req.role,
 			admin: req.admin ? 1 : 0,
@@ -1283,10 +1650,11 @@ export class AccountsDO extends DurableObject<Env> {
 			revoked_at: null,
 		};
 		this.sql.exec(
-			`INSERT INTO invite_pins (id, pin, workspace_id, role, admin, expires_at, created_by,
-			 created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO invite_pins (id, pin, team_id, workspace_id, role, admin, expires_at,
+			 created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			row.id,
 			row.pin,
+			row.team_id,
 			row.workspace_id,
 			row.role,
 			row.admin,
@@ -1296,7 +1664,8 @@ export class AccountsDO extends DurableObject<Env> {
 		);
 		// Never the digits: the audit log outlives the PIN.
 		this.audit(user.id, "pin.create", row.id, {
-			workspaceId,
+			teamId,
+			...(workspaceId ? { workspaceId } : {}),
 			role: req.role,
 			admin: req.admin,
 			expiresAt: row.expires_at,
@@ -1304,22 +1673,35 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok(this.toPinSummary(row));
 	}
 
-	/** The workspace's PINs, newest first, with the server-wide lock state. */
+	/** The PINs of the folder's team, newest first, with the server-wide lock state. */
 	async listPins(token: string | null, workspaceId: string): Promise<Result<PinsResponse>> {
+		return this.pinList(token, this.teamOf(workspaceId), workspaceId);
+	}
+
+	async listTeamPins(token: string | null, teamId: string): Promise<Result<PinsResponse>> {
+		return this.pinList(token, this.liveTeam(teamId)?.id);
+	}
+
+	private async pinList(
+		token: string | null,
+		teamId: string | undefined,
+		asFolder?: string,
+	): Promise<Result<PinsResponse>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
-		if (!this.canManage(s.value.user, workspaceId)) {
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(s.value.user, teamId)) {
 			return fail(403, "forbidden", "Owner or admin only");
 		}
 		const pins = this.sql
 			.exec<PinRow & { used_by_name: string | null }>(
 				`SELECT p.*, u.name AS used_by_name FROM invite_pins p LEFT JOIN users u ON u.id = p.used_by
-				 WHERE p.workspace_id = ? ORDER BY p.created_at DESC`,
-				workspaceId,
+				 WHERE p.team_id = ? ORDER BY p.created_at DESC`,
+				teamId,
 			)
 			.toArray()
-			.map((r) => this.toPinSummary(r));
+			.map((r) => this.toPinSummary(r, asFolder));
 		const lockedUntil = this.pinsLockedUntil(Date.now());
 		return ok({ pins, locked: lockedUntil !== null, lockedUntil });
 	}
@@ -1329,22 +1711,35 @@ export class AccountsDO extends DurableObject<Env> {
 		workspaceId: string,
 		pinId: string,
 	): Promise<Result<{ ok: true }>> {
+		return this.pinRevoke(token, this.teamOf(workspaceId), pinId);
+	}
+
+	async revokeTeamPin(
+		token: string | null,
+		teamId: string,
+		pinId: string,
+	): Promise<Result<{ ok: true }>> {
+		return this.pinRevoke(token, this.liveTeam(teamId)?.id, pinId);
+	}
+
+	private async pinRevoke(
+		token: string | null,
+		teamId: string | undefined,
+		pinId: string,
+	): Promise<Result<{ ok: true }>> {
 		this.calls += 1;
 		const s = await this.session(token);
 		if (!s.ok) return s;
 		const { user } = s.value;
-		if (!this.canManage(user, workspaceId)) return fail(403, "forbidden", "Owner or admin only");
+		if (!teamId) return fail(404, "not_found", "Unknown team or folder");
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
 		const row = this.sql
-			.exec<PinRow>(
-				"SELECT * FROM invite_pins WHERE id = ? AND workspace_id = ?",
-				pinId,
-				workspaceId,
-			)
+			.exec<PinRow>("SELECT * FROM invite_pins WHERE id = ? AND team_id = ?", pinId, teamId)
 			.toArray()[0];
 		if (!row) return fail(404, "not_found", "Unknown PIN");
 		if (row.revoked_at === null && row.used_at === null) {
 			this.sql.exec("UPDATE invite_pins SET revoked_at = ? WHERE id = ?", Date.now(), pinId);
-			this.audit(user.id, "pin.revoke", pinId, { workspaceId });
+			this.audit(user.id, "pin.revoke", pinId, { teamId });
 		}
 		return ok({ ok: true });
 	}
@@ -1410,7 +1805,8 @@ export class AccountsDO extends DurableObject<Env> {
 				.exec<{ actor_id: string; at: number }>(
 					`SELECT actor_id, MAX(at) AS at FROM audit_log
 					WHERE action IN ('user.login', 'pin.accept', 'invite.accept', 'user.reenter',
-						'device.approve', 'user.password.reset') AND actor_id IS NOT NULL GROUP BY actor_id`,
+						'device.approve', 'user.password.reset', 'user.oauth.login')
+						AND actor_id IS NOT NULL GROUP BY actor_id`,
 				)
 				.toArray()
 				.map((r) => [r.actor_id, r.at]),
@@ -1633,6 +2029,10 @@ export class AccountsDO extends DurableObject<Env> {
 		const pin = this.activePin(req.pin, Date.now());
 		if (!pin || pin.id !== found.id) return invalidPin();
 		if (this.nameTaken(req.name)) return fail(409, "name_taken", "That name is taken");
+		const room = this.userCap();
+		if (!room.ok) return room;
+		const seat = this.memberCap(pin.team_id);
+		if (!seat.ok) return seat;
 		const userId = crypto.randomUUID();
 		this.sql.exec(
 			"INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)",
@@ -1641,12 +2041,7 @@ export class AccountsDO extends DurableObject<Env> {
 			color,
 			pin.admin,
 		);
-		this.sql.exec(
-			"INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)",
-			pin.workspace_id,
-			userId,
-			pin.role,
-		);
+		this.setTeamMember(pin.team_id, userId, pin.role as Role);
 		this.setPasswordRow(userId, password);
 		this.insertSession(userId, this.deviceFor(userId, req.device), sessionHash);
 		this.sql.exec(
@@ -1656,6 +2051,7 @@ export class AccountsDO extends DurableObject<Env> {
 			pin.id,
 		);
 		this.audit(userId, "pin.accept", pin.id, {
+			teamId: pin.team_id,
 			workspaceId: pin.workspace_id,
 			role: pin.role,
 			admin: pin.admin === 1,
@@ -1665,7 +2061,7 @@ export class AccountsDO extends DurableObject<Env> {
 		return ok({ sessionToken, user: toApiUser(user), workspaces: this.workspacesFor(userId) });
 	}
 
-	/** Authenticated: joins the PIN's workspace (a role never drops); same limits as accept. */
+	/** Authenticated: joins the PIN's team (a role never drops); same limits as accept. */
 	async redeemPin(
 		token: string | null,
 		pinDigits: string,
@@ -1684,16 +2080,9 @@ export class AccountsDO extends DurableObject<Env> {
 			this.recordPinFailure(ip, now);
 			return invalidPin();
 		}
-		const offered = pin.role as Role;
-		const current = this.roleIn(user.id, pin.workspace_id);
-		const role = current && ROLE_RANK[current] >= ROLE_RANK[offered] ? current : offered;
-		this.sql.exec(
-			`INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?)
-			 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`,
-			pin.workspace_id,
-			user.id,
-			role,
-		);
+		const joined = this.joinTeam(pin.team_id, user.id, pin.role as Role);
+		if (!joined.ok) return joined;
+		const { role, previous, changes } = joined.value;
 		if (pin.admin === 1) this.sql.exec("UPDATE users SET is_admin = 1 WHERE id = ?", user.id);
 		this.sql.exec(
 			"UPDATE invite_pins SET used_at = ?, used_by = ? WHERE id = ?",
@@ -1702,13 +2091,14 @@ export class AccountsDO extends DurableObject<Env> {
 			pin.id,
 		);
 		this.audit(user.id, "pin.redeem", pin.id, {
+			teamId: pin.team_id,
 			workspaceId: pin.workspace_id,
 			role,
-			previousRole: current ?? null,
+			previousRole: previous,
 			admin: pin.admin === 1,
 		});
 		const workspaces = this.workspacesFor(user.id);
-		if (current && current !== role) await this.revokeSockets(pin.workspace_id, user.id);
+		await this.revokeChanges(changes);
 		return ok({ workspaces });
 	}
 
@@ -2012,6 +2402,497 @@ export class AccountsDO extends DurableObject<Env> {
 			device: { name: device.name, platform: device.platform },
 		});
 		return ok({ ok: true });
+	}
+
+	// --- teams (`/api/teams…`, see teams.ts) ---
+
+	private teamSummary(team: TeamRow, role: Role): TeamSummary {
+		const folders = this.sql
+			.exec<{ id: string; slug: string; name: string }>(
+				`SELECT id, slug, name FROM workspaces WHERE team_id = ? AND deleted_at IS NULL
+				 ORDER BY name COLLATE NOCASE`,
+				team.id,
+			)
+			.toArray()
+			.map((f) => ({ id: f.id, slug: f.slug, name: f.name }));
+		return {
+			id: team.id,
+			slug: team.slug,
+			name: team.name,
+			role,
+			memberCount: this.teamMemberCount(team.id),
+			folders,
+		};
+	}
+
+	/** A live team the caller may see (member or server admin), with the caller's role. */
+	private visibleTeam(user: UserRow, teamId: string): Result<{ team: TeamRow; role?: Role }> {
+		const team = this.liveTeam(teamId);
+		const role = team ? this.teamRole(user.id, team.id) : undefined;
+		if (!team || (!role && user.is_admin !== 1)) return fail(404, "not_found", "Unknown team");
+		return ok({ team, role });
+	}
+
+	async teams(token: string | null): Promise<Result<TeamsResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const rows = this.sql
+			.exec<TeamRow & { my_role: string }>(
+				`SELECT t.*, m.role AS my_role FROM team_members m JOIN teams t ON t.id = m.team_id
+				 WHERE m.user_id = ? AND t.deleted_at IS NULL ORDER BY t.name COLLATE NOCASE`,
+				s.value.user.id,
+			)
+			.toArray();
+		return ok({ teams: rows.map((r) => this.teamSummary(r, r.my_role as Role)) });
+	}
+
+	/** The caller owns the new team; at most `teamsPerUser` owned teams (admins exempt). */
+	async createTeam(token: string | null, name: string): Promise<Result<TeamSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) {
+			const max = caps(this.env).teamsPerUser;
+			const owned = this.sql
+				.exec<{ n: number }>(
+					`SELECT COUNT(*) AS n FROM team_members m JOIN teams t ON t.id = m.team_id
+					 WHERE m.user_id = ? AND m.role = 'owner' AND t.deleted_at IS NULL`,
+					user.id,
+				)
+				.one().n;
+			if (owned >= max) return limitReached(`You can own at most ${max} teams`);
+		}
+		const team = this.createTeamRow(name, user.id);
+		this.setTeamMember(team.id, user.id, "owner");
+		this.audit(user.id, "team.create", team.id, { name, slug: team.slug });
+		return ok(this.teamSummary(team, "owner"));
+	}
+
+	async renameTeam(
+		token: string | null,
+		teamId: string,
+		name: string,
+	): Promise<Result<TeamSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		this.sql.exec("UPDATE teams SET name = ? WHERE id = ?", name, teamId);
+		this.audit(user.id, "team.rename", teamId, { name, previousName: seen.value.team.name });
+		return ok(
+			this.teamSummary({ ...seen.value.team, name }, seen.value.role ?? ("owner" as const)),
+		);
+	}
+
+	/** Owner or admin: deletes the team and every folder of it for everyone. */
+	async deleteTeam(token: string | null, teamId: string): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		const now = Date.now();
+		this.sql.exec("UPDATE teams SET deleted_at = ? WHERE id = ?", now, teamId);
+		this.sql.exec(
+			"UPDATE workspaces SET deleted_at = ? WHERE team_id = ? AND deleted_at IS NULL",
+			now,
+			teamId,
+		);
+		this.sql.exec("DELETE FROM team_members WHERE team_id = ?", teamId);
+		const changes = this.syncTeam(teamId);
+		this.audit(user.id, "team.delete", teamId, { name: seen.value.team.name });
+		await this.revokeChanges(changes);
+		return ok({ ok: true });
+	}
+
+	async teamMembers(token: string | null, teamId: string): Promise<Result<TeamMembersResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const seen = this.visibleTeam(s.value.user, teamId);
+		if (!seen.ok) return seen;
+		const members = this.sql
+			.exec<UserRow & { role: string }>(
+				`SELECT u.*, m.role FROM team_members m JOIN users u ON u.id = m.user_id
+				 WHERE m.team_id = ? ORDER BY u.name COLLATE NOCASE`,
+				teamId,
+			)
+			.toArray()
+			.map((r) => ({
+				user: {
+					id: r.id,
+					name: r.name,
+					email: r.email,
+					color: r.color,
+					avatarUrl: r.avatar_url,
+				},
+				role: r.role as Role,
+			}));
+		return ok({ members });
+	}
+
+	async setTeamRole(
+		token: string | null,
+		teamId: string,
+		userId: string,
+		role: Role,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return this.changeRole(s.value.user, this.liveTeam(teamId)?.id, userId, role);
+	}
+
+	async removeTeamMember(
+		token: string | null,
+		teamId: string,
+		userId: string,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return this.dropMember(s.value.user, this.liveTeam(teamId)?.id, userId);
+	}
+
+	/** Owners, editors and admins add a folder; at most `foldersPerTeam`. */
+	async createFolder(
+		token: string | null,
+		teamId: string,
+		name: string,
+	): Promise<Result<SharedFolderSummary>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (user.is_admin !== 1 && seen.value.role === "viewer") {
+			return fail(403, "forbidden", "Owners and editors only");
+		}
+		const max = caps(this.env).foldersPerTeam;
+		const folders = this.sql
+			.exec<{ n: number }>(
+				"SELECT COUNT(*) AS n FROM workspaces WHERE team_id = ? AND deleted_at IS NULL",
+				teamId,
+			)
+			.one().n;
+		if (folders >= max) return limitReached(`A team can share at most ${max} folders`);
+		const folder = this.createFolderRow(teamId, name);
+		this.syncTeam(teamId);
+		this.audit(user.id, "folder.create", folder.id, { teamId, name, slug: folder.slug });
+		return ok(folder);
+	}
+
+	/** Owner or admin: deletes the folder for everyone. */
+	async deleteFolder(
+		token: string | null,
+		teamId: string,
+		folderId: string,
+	): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const seen = this.visibleTeam(user, teamId);
+		if (!seen.ok) return seen;
+		if (!this.canManageTeam(user, teamId)) return fail(403, "forbidden", "Owner or admin only");
+		const folder = this.sql
+			.exec<{ name: string }>(
+				"SELECT name FROM workspaces WHERE id = ? AND team_id = ? AND deleted_at IS NULL",
+				folderId,
+				teamId,
+			)
+			.toArray()[0];
+		if (!folder) return fail(404, "not_found", "Unknown folder");
+		this.sql.exec("UPDATE workspaces SET deleted_at = ? WHERE id = ?", Date.now(), folderId);
+		const changes = this.syncTeam(teamId);
+		this.audit(user.id, "folder.delete", folderId, { teamId, name: folder.name });
+		await this.revokeChanges(changes);
+		return ok({ ok: true });
+	}
+
+	// --- OAuth sign-in (the Worker talks to Google/GitHub; src/oauth.ts) ---
+
+	/** A state row for 10 min; `link` needs a session (the account the identity joins). */
+	async oauthStart(
+		token: string | null,
+		provider: AuthProvider,
+		req: OAuthStartRequest,
+	): Promise<Result<{ state: string; codeVerifier: string }>> {
+		this.calls += 1;
+		let userId: string | null = null;
+		if (req.intent === "link") {
+			const s = await this.session(token);
+			if (!s.ok) return s;
+			userId = s.value.user.id;
+		}
+		const state = newOpaqueToken();
+		const codeVerifier = newOpaqueToken();
+		const id = await this.hashToken(state);
+		const now = Date.now();
+		this.sql.exec("DELETE FROM oauth_states WHERE expires_at <= ?", now);
+		this.sql.exec("DELETE FROM oauth_handoffs WHERE expires_at <= ?", now);
+		this.sql.exec(
+			`INSERT INTO oauth_states (id, provider, intent, user_id, next, verifier_hash,
+			 code_verifier, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id,
+			provider,
+			req.intent,
+			userId,
+			req.next ?? null,
+			req.verifierHash,
+			codeVerifier,
+			now + OAUTH_STATE_TTL_MS,
+		);
+		return ok({ state, codeVerifier });
+	}
+
+	/** Uses up a state (single use, whatever happens next); null when unknown. */
+	async oauthTakeState(provider: AuthProvider, state: string): Promise<OAuthStateTaken | null> {
+		this.calls += 1;
+		const id = await this.hashToken(state);
+		const row = this.sql
+			.exec<{
+				provider: string;
+				intent: string;
+				user_id: string | null;
+				next: string | null;
+				verifier_hash: string;
+				code_verifier: string;
+				expires_at: number;
+			}>("DELETE FROM oauth_states WHERE id = ? RETURNING *", id)
+			.toArray()[0];
+		if (!row || row.provider !== provider) return null;
+		return {
+			expired: row.expires_at <= Date.now(),
+			intent: row.intent === "link" ? "link" : "signin",
+			userId: row.user_id,
+			next: row.next,
+			verifierHash: row.verifier_hash,
+			codeVerifier: row.code_verifier,
+		};
+	}
+
+	/** The name itself, else `Name 2`, `Name 3`… that no account has (case-insensitively). */
+	private freeName(raw: string): string {
+		const base = raw.normalize("NFC").replace(/\s+/g, " ").trim().slice(0, NAME_MAX) || "user";
+		for (let n = 1; ; n++) {
+			const suffix = n === 1 ? "" : ` ${n}`;
+			const name = `${base.slice(0, NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+			if (!this.nameTaken(name)) return name;
+		}
+	}
+
+	/**
+	 * Signs in, signs up (open signups only) or links with a verified provider profile, then
+	 * stores a 60 s single-use handoff bound to the starting browser's `verifierHash`. Errors
+	 * carry the redirect's `error` code. Never matches accounts by email.
+	 */
+	async oauthFinish(
+		provider: AuthProvider,
+		taken: OAuthStateTaken,
+		profile: OAuthProfile,
+	): Promise<Result<{ handoff: string }>> {
+		this.calls += 1;
+		const handoff = newOpaqueToken();
+		const handoffHash = await this.hashToken(handoff);
+		const color = await userColor(profile.name);
+
+		// Synchronous from here.
+		const now = Date.now();
+		const linked = this.sql
+			.exec<{ user_id: string }>(
+				"SELECT user_id FROM identities WHERE provider = ? AND subject = ?",
+				provider,
+				profile.subject,
+			)
+			.toArray()[0];
+		const insertIdentity = (userId: string) =>
+			this.sql.exec(
+				`INSERT INTO identities (provider, subject, user_id, email, linked_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+				provider,
+				profile.subject,
+				userId,
+				profile.email,
+				now,
+			);
+		let userId: string;
+		let created = false;
+		if (taken.intent === "link") {
+			const user = taken.userId ? this.userById(taken.userId) : undefined;
+			if (!user || user.disabled_at) return fail(403, "oauth_failed", "Account unavailable");
+			if (linked && linked.user_id !== user.id) {
+				return fail(409, "identity_in_use", "That account is linked to someone else");
+			}
+			if (!linked) {
+				const other = this.sql
+					.exec("SELECT 1 FROM identities WHERE user_id = ? AND provider = ?", user.id, provider)
+					.toArray()[0];
+				if (other) {
+					return fail(409, "identity_in_use", "Unlink your other account of this provider first");
+				}
+				insertIdentity(user.id);
+				this.audit(user.id, "identity.link", user.id, { provider, email: profile.email });
+			}
+			userId = user.id;
+		} else if (linked) {
+			const user = this.userById(linked.user_id);
+			if (!user || user.disabled_at) return fail(403, "oauth_failed", "Account disabled");
+			this.sql.exec(
+				"UPDATE identities SET email = ? WHERE provider = ? AND subject = ?",
+				profile.email,
+				provider,
+				profile.subject,
+			);
+			userId = user.id;
+		} else {
+			if (signupPolicy(this.env) !== "open") {
+				return fail(403, "signup_closed", "New accounts need an invite on this server");
+			}
+			const room = this.userCap();
+			if (!room.ok) return room;
+			userId = crypto.randomUUID();
+			const name = this.freeName(profile.name);
+			this.sql.exec(
+				"INSERT INTO users (id, name, email, color, avatar_url) VALUES (?, ?, ?, ?, ?)",
+				userId,
+				name,
+				profile.email,
+				color,
+				profile.avatarUrl,
+			);
+			insertIdentity(userId);
+			this.audit(userId, "user.oauth.signup", userId, { provider, name });
+			created = true;
+		}
+		this.sql.exec(
+			`INSERT INTO oauth_handoffs (id, user_id, verifier_hash, created, expires_at)
+			 VALUES (?, ?, ?, ?, ?)`,
+			handoffHash,
+			userId,
+			taken.verifierHash,
+			created ? 1 : 0,
+			now + OAUTH_HANDOFF_TTL_MS,
+		);
+		return ok({ handoff });
+	}
+
+	/** The website trades a handoff (once, within 60 s, same browser) for a session. */
+	async oauthExchange(
+		req: OAuthExchangeRequest,
+	): Promise<Result<SessionResponse & { created: boolean }>> {
+		this.calls += 1;
+		const id = await this.hashToken(req.handoff);
+		const [given, sessionToken] = [await s256(req.verifier), newOpaqueToken()];
+		const sessionHash = await this.hashToken(sessionToken);
+
+		// Synchronous: the handoff is gone after this, whatever the outcome.
+		const row = this.sql
+			.exec<{ user_id: string; verifier_hash: string; created: number; expires_at: number }>(
+				"DELETE FROM oauth_handoffs WHERE id = ? RETURNING *",
+				id,
+			)
+			.toArray()[0];
+		if (!row || row.expires_at <= Date.now()) {
+			return fail(400, "oauth_failed", "This sign-in expired or was already used; start again");
+		}
+		const enc = new TextEncoder();
+		if (!constantTimeEqual(enc.encode(row.verifier_hash), enc.encode(given))) {
+			return fail(400, "oauth_failed", "This sign-in was started in another browser");
+		}
+		const user = this.userById(row.user_id);
+		if (!user) return fail(400, "oauth_failed", "Unknown account");
+		if (user.disabled_at) return fail(403, "forbidden", "Account disabled");
+		this.insertSession(user.id, this.deviceFor(user.id, req.device), sessionHash);
+		this.audit(user.id, "user.oauth.login", user.id, {
+			created: row.created === 1,
+			device: { name: req.device.name, platform: req.device.platform },
+		});
+		return ok({
+			sessionToken,
+			user: toApiUser(user),
+			workspaces: this.workspacesFor(user.id),
+			created: row.created === 1,
+		});
+	}
+
+	private identitiesOf(userId: string): IdentitiesResponse {
+		const identities = this.sql
+			.exec<{ provider: string; email: string | null; linked_at: number }>(
+				"SELECT provider, email, linked_at FROM identities WHERE user_id = ? ORDER BY provider",
+				userId,
+			)
+			.toArray()
+			.map((r) => ({
+				provider: r.provider as AuthProvider,
+				email: r.email,
+				linkedAt: r.linked_at,
+			}));
+		return { identities, hasPassword: this.passwordOf(userId) !== undefined };
+	}
+
+	async identities(token: string | null): Promise<Result<IdentitiesResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		return ok(this.identitiesOf(s.value.user.id));
+	}
+
+	/** Unlinks a provider unless it is the account's last way to sign in (no password either). */
+	async unlinkIdentity(
+		token: string | null,
+		provider: AuthProvider,
+	): Promise<Result<IdentitiesResponse>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const current = this.identitiesOf(user.id);
+		if (!current.identities.some((i) => i.provider === provider)) {
+			return fail(404, "not_found", "That provider is not linked");
+		}
+		const others = current.identities.filter((i) => i.provider !== provider).length;
+		if (!current.hasPassword && others === 0) {
+			return fail(
+				409,
+				"last_sign_in_method",
+				"Set a password or link another account before unlinking this one",
+			);
+		}
+		this.sql.exec("DELETE FROM identities WHERE user_id = ? AND provider = ?", user.id, provider);
+		this.audit(user.id, "identity.unlink", user.id, { provider });
+		return ok(this.identitiesOf(user.id));
+	}
+
+	/** Renames the caller; names stay unique case-insensitively (409 `name_taken`). */
+	async updateProfile(token: string | null, name: string): Promise<Result<{ user: User }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		const next = name.normalize("NFC").replace(/\s+/g, " ").trim();
+		if (!next || next.length > NAME_MAX) return fail(400, "bad_request", "Invalid name");
+		const key = nameKey(next);
+		const clash = this.sql
+			.exec<{ id: string; name: string }>("SELECT id, name FROM users")
+			.toArray()
+			.some((u) => u.id !== user.id && nameKey(u.name) === key);
+		if (clash) return fail(409, "name_taken", "That name is taken");
+		if (next !== user.name) {
+			this.sql.exec("UPDATE users SET name = ? WHERE id = ?", next, user.id);
+			this.audit(user.id, "user.rename", user.id, { name: next, previousName: user.name });
+		}
+		const updated = this.userById(user.id);
+		if (!updated) return fail(404, "not_found", "Unknown user");
+		return ok({ user: toApiUser(updated) });
 	}
 
 	// --- dev-only (worker gates these on ARCASYNC_DEBUG_STATS) ---

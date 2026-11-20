@@ -7,8 +7,11 @@ export const HOUR_MS = 60 * MINUTE_MS;
 
 /** Wrong PINs per client IP per 15 min; the next attempt gets 429. */
 export const PIN_IP_LIMIT = { max: 5, windowMs: 15 * MINUTE_MS };
-/** Wrong PINs server-wide in a rolling 24 h that lock all PIN entry (423) for 24 h. */
-export const PIN_GLOBAL_LIMIT = { max: 20, windowMs: 24 * HOUR_MS };
+/**
+ * Wrong PINs server-wide in a rolling 24 h that lock all PIN entry (423) for 24 h. High enough
+ * that strangers cannot cheaply lock everyone out; 6-digit PINs keep guessing hopeless anyway.
+ */
+export const PIN_GLOBAL_LIMIT = { max: 500, windowMs: 24 * HOUR_MS };
 export const PIN_LOCK_MS = 24 * HOUR_MS;
 /** Failed sign-ins per name, and per client IP, per 15 min. */
 export const LOGIN_NAME_LIMIT = { max: 5, windowMs: 15 * MINUTE_MS };

@@ -43,14 +43,19 @@ characters, or equal to the public dev secret (outside `env.dev`), every route a
    BOOTSTRAP_TOKEN=$(openssl rand -base64 48)
    printf %s "$BOOTSTRAP_TOKEN" | pnpm -F @arcasync/relay-cf exec wrangler secret put ARCASYNC_BOOTSTRAP_TOKEN --env production
    ```
-   Keep the shell open: the bootstrap below reads `$BOOTSTRAP_TOKEN`.
+   Keep the shell open: the bootstrap below reads `$BOOTSTRAP_TOKEN`. For "Continue with Google"
+   and "Continue with GitHub", also set the OAuth app secrets (see
+   [Sign in with Google and GitHub](#sign-in-with-google-and-github)); without them the relay
+   offers name + password, invites, PINs and device codes only.
 4. Deploy:
    ```sh
    pnpm -F @arcasync/relay-cf deploy:production
    ```
 5. Check: `curl https://arcasync-relay.<subdomain>.workers.dev/api/health` returns `"ok":true`.
    `"ok":false` names the configuration problem. `/api/server-info` lists
-   `features: {accounts: true, chunks: true, bulkClone: true}` once the bucket binding resolves.
+   `features: {accounts: true, chunks: true, bulkClone: true, teams: true}` once the bucket
+   binding resolves, and `auth: {providers, passwords, signups, limits}` (the enabled OAuth
+   providers, the signup policy and the team caps).
 
 ## Website
 
@@ -62,7 +67,8 @@ are in [site.md](site.md). Deploy the site before (or together with) a relay dep
 
 ## Accounts: bootstrap, invites and sign-in
 
-Production has dev login off. Every user signs in through an invite (link or PIN), a device code or name + password.
+Production has dev login off. Every user signs in with Google or GitHub (when configured), through
+an invite (link or PIN), a device code or name + password.
 
 **Bootstrap (once).** The first call creates the first workspace and a single-use invite that
 makes whoever accepts it the workspace owner **and** server admin. The invite is valid for 24 hours.
@@ -80,8 +86,9 @@ secret afterwards if you like (`wrangler secret delete ARCASYNC_BOOTSTRAP_TOKEN 
 it is only needed again for a reset.
 
 **Reset (start over).** Sending `"reset": true` with the same bearer deletes every account,
-device, session, membership, invite, PIN and password, then issues a fresh owner + admin invite.
-Workspaces and their notes stay; the one named `workspaceName` is reused, so pass the same name
+device, session, membership, team, linked Google/GitHub identity, OAuth state, invite, PIN and
+password, then issues a fresh owner + admin invite. Workspaces and their notes stay, each again in
+a team of its own; the one named `workspaceName` is reused, so pass the same name
 (`{"workspaceName":"Friends","reset":true}`). Use it when the bootstrap link expired unused or the
 wrong person took it. Put the secret back first if you deleted it, and delete it again afterwards.
 
@@ -103,19 +110,25 @@ website, `obsidian://arcasync?approve=<code>` without it), check the device name
 platform it shows, and approve. The new device polls every 5 s at most (faster polls get
 `slow_down`) and signs in as the approver; the code expires after 10 minutes.
 
-**PIN invites.** An owner or admin creates a 4-digit PIN (Obsidian: "Create an invite link" →
-PINs; website: `/account`) with a role; server admins may also make an admin PIN. PINs are random
-(crypto RNG), unique among usable PINs, single-use, valid 72 h by default (30 days at most), and at
-most 10 are usable server-wide (`409 too_many_pins`). They are stored in plaintext so owners can
-list them; the audit log names PINs by id only. Whoever has a PIN joins with it plus a name and a
-password (`/api/auth/pin/accept`), or, already signed in, adds its workspace (`redeem-pin`).
-Every wrong, used, revoked or expired PIN is the same `404 invalid_pin`.
+**PIN invites.** A team owner or admin creates a 6-digit PIN (`POST /api/teams/:id/pins`, or the
+older `POST /api/workspaces/:id/pins`, which makes one for that folder's team; Obsidian and
+website: the team's Invite section) with a role; server admins may also make an admin PIN. PINs
+are random (crypto RNG), unique among usable PINs, single-use, valid 72 h by default (30 days at
+most), and at most 10 are usable per team (`409 too_many_pins`). 4-digit PINs issued before teams
+stay valid until they expire. They are stored in plaintext so owners can list them; the audit log
+names PINs by id only. Whoever has a PIN joins its team with it plus a name and a password
+(`/api/auth/pin/accept`), or, already signed in, with `redeem-pin`. Every wrong, used, revoked or
+expired PIN is the same `404 invalid_pin`. The 0.2.0 plugin knows 4-digit PINs only: its PIN box
+refuses 6 digits (enter those on the website's `/join` page instead), and its invite modal's PIN
+list and "Create PIN" fail with "Unexpected response" once the team has a 6-digit PIN (manage
+PINs on the website's `/account`, or update the plugin).
 
 **PIN brute-force limits.** Per client IP (`CF-Connecting-IP`), 5 wrong PINs per 15 min, then
-`429 rate_limited` with `Retry-After`. Server-wide, 20 wrong PINs in a rolling 24 h lock all PIN
-entry (`423 pins_locked`) for 24 h; the lock is audited (`pin.lock`). An admin lifts it early with
-`POST /api/admin/pins/unlock` (Obsidian: the PINs section of the invite modal; website:
-`/account`), which also resets the count. Successful PINs never count.
+`429 rate_limited` with `Retry-After`. Server-wide, 500 wrong PINs in a rolling 24 h lock all PIN
+entry (`423 pins_locked`) for 24 h; the lock is audited (`pin.lock`). The threshold is high so
+strangers cannot cheaply lock everyone out; with 6 digits and the per-IP limit, guessing stays
+hopeless. An admin lifts the lock early with `POST /api/admin/pins/unlock` (website: `/account`),
+which also resets the count. Successful PINs never count.
 
 **Passwords.** Accounts made with a PIN have a password; anyone signed in can set one (Settings →
 ArcaSync → Password, or `/account`). 10–256 characters after NFC, no composition rules, 20 very
@@ -136,9 +149,15 @@ admin disables and re-enables the user; accepting the re-entry invite signs them
 password, so they set a new one without the old.
 
 **Migration.** The new tables (`user_passwords`, `invite_pins`, `pin_failures`,
-`login_failures`) are created with `CREATE TABLE IF NOT EXISTS` when AccountsDO wakes; no existing
-table or row changes, so a deploy needs no manual step and a rollback leaves them unused.
-Accounts created by invite link have no password until they set one.
+`login_failures`, `teams`, `team_members`, `identities`, `oauth_states`, `oauth_handoffs`) are
+created with `CREATE TABLE IF NOT EXISTS`, and `team_id` columns are added to `workspaces`,
+`invites` and `invite_pins`, when AccountsDO wakes. Then, in one transaction, every live workspace
+without a team gets a team of its own (same name, slug from the workspace's, members copied in
+their roles) and outstanding invites and PINs point at it. Workspaces, memberships and every other
+row stay as they were, so a deploy needs no manual step; it runs once (migrated workspaces have a
+team) and is covered by `test/schema.test.ts` and the `pre-team migration` integration test. It is
+one-way in practice: deploy it only after CI is green. Accounts created by invite link have no
+password until they set one.
 
 **Revocation.** A role change or removal closes that user's sockets with `4401
 membership-changed`, and the relay refuses any workspace JWT issued up to that second. The
@@ -149,6 +168,96 @@ the Worker against the workspace JWT only, so a removed member can still read or
 workspace's chunks with an already-minted JWT for up to its 15-minute lifetime.
 `GET /api/auth/me` is cached per isolate for 60 s, so another isolate may show a role or
 membership that changed less than a minute ago; authorisation never reads that cache.
+
+## Teams
+
+A team owns shared folders. Each folder is a workspace (its own Yjs index and docs, sockets and
+ws-tokens, unchanged), and team membership is the source of truth: every member holds a workspace
+membership in their team role in each of the team's folders. AccountsDO keeps the two in step
+through one helper, so adding a folder gives it to every member, and a role change or removal
+applies to every folder and closes the affected sockets (`4401 membership-changed`).
+
+- `GET/POST /api/teams`, `PATCH/DELETE /api/teams/:id` (owner). Whoever creates a team owns it.
+  Deleting a team deletes its folders for everyone.
+- `GET /api/teams/:id/members`; `PATCH /api/teams/:id/members/:userId` `{role}` (owner);
+  `DELETE /api/teams/:id/members/:userId` (owner, or yourself to leave). A team keeps at least one
+  owner (`409 last_owner`).
+- `POST /api/teams/:id/folders` `{name}` (owner or editor); `DELETE /api/teams/:id/folders/:id`
+  (owner).
+- `/api/teams/:id/invites` and `/api/teams/:id/pins` (list, create, `DELETE …/:id` to revoke).
+  Accepting or redeeming one joins the team; a role never drops on redeem.
+- The older routes keep working and act on the folder's team: `/api/workspaces/:id/invites`,
+  `/pins` and `/members` (so a role change or removal there applies to the whole team), and the
+  admin-only `POST /api/workspaces` creates a new team with one folder of that name.
+
+Server admins may manage any team. Workspaces that existed before teams each got their own team
+(see Migration), so nothing about them changes until someone adds a folder to that team.
+
+**Caps.** Defaults suit the free plan; each is an env var (`vars` in `wrangler.jsonc`), and
+`/api/server-info` reports the first three under `auth.limits`:
+
+| Cap | Default | Env var | Refusal |
+|---|---|---|---|
+| Teams a user owns | 3 | `ARCASYNC_TEAMS_PER_USER` | `409 limit_reached` (server admins exempt) |
+| Members per team | 25 | `ARCASYNC_MEMBERS_PER_TEAM` | `409 limit_reached` on accept or redeem |
+| Folders per team | 10 | `ARCASYNC_FOLDERS_PER_TEAM` | `409 limit_reached` |
+| Accounts on the server | 200 | `ARCASYNC_MAX_USERS` | `409 too_many_users` (OAuth: `error=too_many_users`) |
+
+Dev login (`env.dev` only) is not capped.
+
+## Sign in with Google and GitHub
+
+Both are optional. A provider is offered (`/api/server-info` `auth.providers`) only when both of
+its secrets are set:
+```sh
+pnpm -F @arcasync/relay-cf exec wrangler secret put GOOGLE_CLIENT_ID --env production
+pnpm -F @arcasync/relay-cf exec wrangler secret put GOOGLE_CLIENT_SECRET --env production
+pnpm -F @arcasync/relay-cf exec wrangler secret put GITHUB_CLIENT_ID --env production
+pnpm -F @arcasync/relay-cf exec wrangler secret put GITHUB_CLIENT_SECRET --env production
+```
+The callback URLs are on the relay, not the website:
+`https://<relay host>/api/auth/oauth/google/callback` and
+`https://<relay host>/api/auth/oauth/github/callback` (for the workers.dev deployment,
+`https://arcasync-relay.<subdomain>.workers.dev/api/auth/oauth/…/callback`). They must match the
+registered URLs exactly.
+
+**Google.** In Google Cloud Console, create a project, then:
+1. OAuth consent screen (Google Auth Platform → Branding/Audience): user type **External**, app
+   name, support email, and the website `https://arca-sync.pages.dev` as home page. Do **not**
+   upload a logo: a logo triggers brand verification. With no logo and only the `openid`, `email`
+   and `profile` scopes (all non-sensitive), no verification is needed.
+2. Data access: add the scopes `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`.
+3. Audience: **Publish app** so the status is **In production**. In "Testing", only listed test
+   users can sign in and their sign-ins expire after 7 days.
+4. Clients → Create client → Web application. Authorized redirect URI: the Google callback URL
+   above. Copy the client ID and secret into the two secrets.
+
+The relay uses the authorization-code flow with PKCE and reads the OpenID userinfo endpoint;
+accounts without a verified email are refused (`error=oauth_failed`).
+
+**GitHub.** Settings → Developer settings → OAuth Apps → New OAuth App: homepage
+`https://arca-sync.pages.dev`, authorization callback URL the GitHub callback URL above. Generate
+a client secret and set both secrets. The relay asks for `read:user user:email`, reads `/user` and
+`/user/emails` (the primary verified address, if any) and names new accounts after the GitHub
+display name, or the login without one.
+
+**Flow.** The website calls `POST /api/auth/oauth/:provider/start` with `verifierHash` (base64url
+SHA-256 of a random verifier it keeps in sessionStorage) and goes to the returned URL. The relay
+stores a state row (10 min, single use). The provider redirects to the relay's callback, which
+exchanges the code, signs in, signs up or links, and redirects to
+`${ARCASYNC_PUBLIC_URL}/auth/callback?handoff=…&next=…` (or `?error=…&next=…`: `signup_closed`,
+`identity_in_use`, `oauth_denied`, `oauth_failed`, `state_expired`, `too_many_users`). The website
+exchanges the handoff (60 s, single use, only with the matching verifier) at
+`POST /api/auth/oauth/exchange` for a session. Identities are keyed by provider and account id and
+are never matched by email; a new account gets the provider's name (`Name 2` if taken), email and
+avatar. `GET /api/auth/identities` lists linked providers, `DELETE /api/auth/identities/:provider`
+unlinks one unless it is the account's last way to sign in (`409 last_sign_in_method`; set a
+password or link another provider first), and `PATCH /api/auth/profile` `{name}` renames.
+
+**Signups.** `ARCASYNC_SIGNUPS=open` (production, dev) lets anyone create an account with Google
+or GitHub. Unset or anything else means invite only: new OAuth users are refused with
+`error=signup_closed`, and accounts come from invites and PINs as before. Password accounts are
+only ever created through invites and PINs.
 
 ## Attachments (R2) and chunk GC
 
@@ -243,6 +352,10 @@ Nothing below has been done; each needs its own go-ahead.
    token can be deleted after step 4).
 3. Deploy production: `pnpm -F @arcasync/relay-cf deploy:production`.
 4. Bootstrap with the `curl` above and open the printed link on the admin's machine.
+4a. Optional: create the Google and GitHub OAuth apps and set `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (see
+   [Sign in with Google and GitHub](#sign-in-with-google-and-github)), then check that
+   `/api/server-info` lists them under `auth.providers` and run one real sign-in with each.
 5. A real-Cloudflare P2 probe (local emulation cannot prove these):
    - A 4 MiB chunk PUT/GET stays under the free plan's 10 ms Worker CPU (`wrangler tail`: no
      `exceededCpu`).
@@ -286,4 +399,7 @@ pnpm -F @arcasync/relay-cf exec wrangler rollback --env production            # 
 pnpm -F @arcasync/relay-cf exec wrangler rollback <version-id> --env production
 ```
 A rollback changes code only. Durable Object storage and secrets stay as they are, so a rollback
-across a storage schema change needs care.
+across a storage schema change needs care. Rolling back past teams leaves the team tables unused
+and memberships intact, so the old code keeps working; but membership changes it makes are not
+reflected in `team_members`, so rolling forward again restores team roles from before the
+rollback.
