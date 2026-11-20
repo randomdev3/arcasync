@@ -440,7 +440,8 @@ function render(state: AccountState) {
 			setBusy($<HTMLButtonElement>("[data-logout]"), state.signingOut, "Signing out…");
 			renderPassword(state);
 			renderPins(state);
-			if (teamsOn) $("[data-pins]").hidden = true;
+			// Teams have their own PINs; admins keep this card only to unlock PIN entry.
+			if (teamsOn && !(state.me.isAdmin && state.pins?.locked)) $("[data-pins]").hidden = true;
 			people.show(state.me.isAdmin, state.me.name);
 			startDashboard(state);
 			break;

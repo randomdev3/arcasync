@@ -134,7 +134,7 @@ function render(state: JoinState) {
 			$("[data-pin-lede-signed-in]").hidden = !state.signedIn;
 			setBusy(pinSubmit, state.submitting, state.signedIn ? "Adding…" : "Creating…");
 			if (!state.submitting)
-				pinSubmit.textContent = state.signedIn ? "Add workspace" : "Create account";
+				pinSubmit.textContent = state.signedIn ? "Join team" : "Create account";
 			const errors = {
 				pin: state.pinError,
 				name: state.nameError,
