@@ -75,8 +75,8 @@ function joinPageInvite(url: URL): InviteLink | null {
 	});
 }
 
-/** A 4-digit invite PIN (spaces and dashes ignored), or null. */
+/** A 6-digit (or older 4-digit) invite PIN, spaces and dashes ignored, or null. */
 export function parsePin(input: string): string | null {
 	const digits = input.replace(/[\s-]/g, "");
-	return /^[0-9]{4}$/.test(digits) ? digits : null;
+	return /^[0-9]{4}([0-9]{2})?$/.test(digits) ? digits : null;
 }

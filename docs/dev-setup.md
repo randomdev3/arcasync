@@ -62,15 +62,16 @@ To bring in the second vault, either:
 ## Several workspaces in one vault
 
 A vault can map one folder per workspace of the same relay. To put a dev user in a second
-workspace, either redeem an owner's invite for it ("Join another workspace"), or dev-login the
+workspace, either redeem an owner's invite for it ("Join a team"), or dev-login the
 same name with a `workspace` slug, which creates or joins that workspace (the e2e harness's
 `ctx.api` does this):
 ```sh
 curl -s -X POST http://localhost:8789/api/auth/dev-login -H "Content-Type: application/json" \
   -d '{"name":"alice","workspace":"second","device":{"name":"curl","platform":"macos","vaultId":"curl"}}'
 ```
-Then, under Settings → ArcaSync → Shared folders, "Add folder" maps a folder to each
-workspace. Each mapped workspace gets its own socket, and the status bar shows `<primary> +k`.
+Then, in Settings → ArcaSync (set the server under **Self-hosting** to the local relay first), open
+each workspace and choose "Add to this vault". Each mapped workspace gets its own socket, and the
+status bar shows `<primary> +k`.
 Removing a mapping stops that workspace's sync and keeps the files.
 
 ## Resetting the local relay

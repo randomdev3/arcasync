@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, normalizeSettings } from "../settings";
+import { DEFAULT_SERVER_URL, DEFAULT_SETTINGS, normalizeSettings } from "../settings";
 
 describe("normalizeSettings", () => {
 	it("defaults the P1 fields", () => {
@@ -51,6 +51,34 @@ describe("normalizeSettings", () => {
 			{ path: "SharedToo", workspaceId: "ws2" },
 			{ path: "Unbound", workspaceId: "" },
 		]);
+	});
+
+	it("keeps a folder's paused flag and only valid cached teams", () => {
+		expect(
+			normalizeSettings({ sharedFolders: [{ path: "A", workspaceId: "ws1", paused: true }] })
+				.sharedFolders,
+		).toEqual([{ path: "A", workspaceId: "ws1", paused: true }]);
+		expect(
+			normalizeSettings({ sharedFolders: [{ path: "A", workspaceId: "ws1", paused: "yes" }] })
+				.sharedFolders,
+		).toEqual([{ path: "A", workspaceId: "ws1" }]);
+		const team = {
+			id: "t1",
+			slug: "t",
+			name: "Team",
+			role: "owner",
+			memberCount: 2,
+			folders: [{ id: "ws1", slug: "notes", name: "Notes" }],
+		};
+		expect(normalizeSettings({ teams: [team, { id: "broken" }] }).teams).toEqual([team]);
+		expect(normalizeSettings({}).teams).toEqual([]);
+	});
+
+	it("defaults to the hosted relay but keeps a saved server", () => {
+		expect(normalizeSettings({}).serverUrl).toBe(DEFAULT_SERVER_URL);
+		expect(normalizeSettings({ serverUrl: "http://localhost:8789" }).serverUrl).toBe(
+			"http://localhost:8789",
+		);
 	});
 
 	it("accepts only known dev-login roles", () => {

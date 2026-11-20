@@ -36,7 +36,7 @@ function pinState(pin: PinSummary, now: number): string {
 
 /**
  * Owner tools: creates an invite link (role, uses, expiry) and lists or revokes open ones; with
- * PIN invites, also creates, lists and revokes 4-digit PINs, and lets an admin unlock PIN entry.
+ * PIN invites, also creates, lists and revokes PINs, and lets an admin unlock PIN entry.
  */
 export class CreateInviteModal extends Modal {
 	private workspaceId: string;
@@ -117,7 +117,7 @@ export class CreateInviteModal extends Modal {
 		new Setting(section)
 			.setName("PINs")
 			.setDesc(
-				"A 4-digit code to type instead of a link. Single use, valid for 72 hours; whoever uses it picks a name and password.",
+				"A code to type instead of a link. Single use, valid for 72 hours; whoever uses it picks a name and password.",
 			)
 			.setHeading();
 		new Setting(section)

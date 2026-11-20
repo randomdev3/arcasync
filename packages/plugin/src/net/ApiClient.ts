@@ -17,6 +17,11 @@ import {
 	type Role,
 	ServerInfo,
 	SessionResponse,
+	SharedFolderSummary,
+	type TeamMember,
+	TeamMembersResponse,
+	TeamSummary,
+	TeamsResponse,
 	type WorkspaceSummary,
 	WorkspacesResponse,
 	WsTokenResponse,
@@ -83,6 +88,8 @@ interface RequestOptions<T> {
 	body?: unknown;
 	schema: z.ZodType<T>;
 	auth?: boolean;
+	/** Resolve on any 2xx without reading the body. */
+	ignoreBody?: boolean;
 }
 
 export class ApiClient {
@@ -171,7 +178,7 @@ export class ApiClient {
 		});
 	}
 
-	/** Signed out: joins with a 4-digit PIN as the new user `name`, with a password. */
+	/** Signed out: joins with a PIN as the new user `name`, with a password. */
 	acceptPin(
 		pin: string,
 		name: string,
@@ -287,6 +294,117 @@ export class ApiClient {
 		);
 	}
 
+	// --- teams (`features.teams`) ---------------------------------------------
+	// Mutations without a body in the contract accept any 2xx, empty or not.
+
+	async teams(): Promise<TeamSummary[]> {
+		const response = await this.request("/teams", { schema: TeamsResponse });
+		return response.teams;
+	}
+
+	/** The caller becomes the team's owner. */
+	createTeam(name: string): Promise<TeamSummary> {
+		return this.request("/teams", { method: "POST", body: { name }, schema: TeamSummary });
+	}
+
+	/** Owner only. */
+	renameTeam(teamId: string, name: string): Promise<void> {
+		return this.send(`/teams/${encodeURIComponent(teamId)}`, "PATCH", { name });
+	}
+
+	/** Owner only; removes every folder of the team for everyone. */
+	deleteTeam(teamId: string): Promise<void> {
+		return this.send(`/teams/${encodeURIComponent(teamId)}`, "DELETE");
+	}
+
+	async teamMembers(teamId: string): Promise<TeamMember[]> {
+		const response = await this.request(`/teams/${encodeURIComponent(teamId)}/members`, {
+			schema: TeamMembersResponse,
+		});
+		return response.members;
+	}
+
+	/** Owner only. */
+	setTeamRole(teamId: string, userId: string, role: Role): Promise<void> {
+		return this.send(
+			`/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
+			"PATCH",
+			{ role },
+		);
+	}
+
+	/** Owner removes anyone but the last owner; anyone removes themself (leaves the team). */
+	removeTeamMember(teamId: string, userId: string): Promise<void> {
+		return this.send(
+			`/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
+			"DELETE",
+		);
+	}
+
+	/** Owner or editor: a new shared folder (workspace) in the team. */
+	createTeamFolder(teamId: string, name: string): Promise<SharedFolderSummary> {
+		return this.request(`/teams/${encodeURIComponent(teamId)}/folders`, {
+			method: "POST",
+			body: { name },
+			schema: SharedFolderSummary,
+		});
+	}
+
+	/** Owner only; deletes the folder for everyone. */
+	deleteTeamFolder(teamId: string, folderId: string): Promise<void> {
+		return this.send(
+			`/teams/${encodeURIComponent(teamId)}/folders/${encodeURIComponent(folderId)}`,
+			"DELETE",
+		);
+	}
+
+	createTeamInvite(
+		teamId: string,
+		invite: { role: Role } & Partial<Omit<InviteCreateRequest, "role">>,
+	): Promise<InviteCreated> {
+		return this.request(`/teams/${encodeURIComponent(teamId)}/invites`, {
+			method: "POST",
+			body: invite,
+			schema: InviteCreated,
+		});
+	}
+
+	async listTeamInvites(teamId: string): Promise<InviteSummary[]> {
+		const response = await this.request(`/teams/${encodeURIComponent(teamId)}/invites`, {
+			schema: InvitesResponse,
+		});
+		return response.invites;
+	}
+
+	revokeTeamInvite(teamId: string, inviteId: string): Promise<void> {
+		return this.send(
+			`/teams/${encodeURIComponent(teamId)}/invites/${encodeURIComponent(inviteId)}`,
+			"DELETE",
+		);
+	}
+
+	createTeamPin(
+		teamId: string,
+		pin: { role: Role } & Partial<Omit<PinCreateRequest, "role">>,
+	): Promise<PinSummary> {
+		return this.request(`/teams/${encodeURIComponent(teamId)}/pins`, {
+			method: "POST",
+			body: pin,
+			schema: PinSummary,
+		});
+	}
+
+	listTeamPins(teamId: string): Promise<PinsResponse> {
+		return this.request(`/teams/${encodeURIComponent(teamId)}/pins`, { schema: PinsResponse });
+	}
+
+	revokeTeamPin(teamId: string, pinId: string): Promise<void> {
+		return this.send(
+			`/teams/${encodeURIComponent(teamId)}/pins/${encodeURIComponent(pinId)}`,
+			"DELETE",
+		);
+	}
+
 	/** Signed out: asks for a code that a signed-in device approves. */
 	deviceStart(device: DeviceInfo): Promise<DeviceCodeResponse> {
 		return this.request("/auth/device/start", {
@@ -323,6 +441,11 @@ export class ApiClient {
 		});
 	}
 
+	/** An authenticated mutation whose response body is ignored (any 2xx, even empty). */
+	private async send(pathname: string, method: string, body?: unknown): Promise<void> {
+		await this.request(pathname, { method, body, schema: z.unknown(), ignoreBody: true });
+	}
+
 	private async request<T>(pathname: string, options: RequestOptions<T>): Promise<T> {
 		const url = `${this.baseUrl}${API_PREFIX}${pathname}`;
 		const headers: Record<string, string> = { Accept: "application/json" };
@@ -350,6 +473,7 @@ export class ApiClient {
 		}
 
 		if (response.status >= 400) throw toApiError(response);
+		if (options.ignoreBody) return undefined as T;
 
 		const parsed = options.schema.safeParse(this.readJson(response, url));
 		if (!parsed.success) {

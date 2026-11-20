@@ -1,8 +1,8 @@
-import { Role, type WorkspaceSummary } from "@arcasync/shared";
+import { Role, TeamSummary, type WorkspaceSummary } from "@arcasync/shared";
 import { foldersOverlap } from "./workspace/paths";
 
 export interface ArcaSyncSettings {
-	/** Base URL of the ArcaSync server, e.g. `http://localhost:8789` (`pnpm dev`). */
+	/** Base URL of the ArcaSync server; the hosted relay unless self-hosting. */
 	serverUrl: string;
 	/** Name used for `POST /api/auth/dev-login` while the server allows open login. */
 	devLoginName: string;
@@ -15,6 +15,8 @@ export interface ArcaSyncSettings {
 	user: { id: string; name: string; color: string } | null;
 	/** Cached workspace list from the last successful session call. */
 	workspaces: WorkspaceSummary[];
+	/** Cached `GET /api/teams` (servers with `features.teams`), for names while offline. */
+	teams: TeamSummary[];
 	/** Connect on plugin load. */
 	autoConnect: boolean;
 	/**
@@ -30,14 +32,20 @@ export interface SharedFolder {
 	/** Vault-relative folder path without leading or trailing slashes. */
 	path: string;
 	workspaceId: string;
+	/** Sync is paused for this folder ("Disconnect" in the file menu); it stays mapped. */
+	paused?: boolean;
 }
 
+/** The hosted relay. */
+export const DEFAULT_SERVER_URL = "https://arcasync-relay.studentranoa.workers.dev";
+
 export const DEFAULT_SETTINGS: ArcaSyncSettings = {
-	serverUrl: "http://localhost:8789",
+	serverUrl: DEFAULT_SERVER_URL,
 	devLoginName: "",
 	workspaceId: "",
 	user: null,
 	workspaces: [],
+	teams: [],
 	autoConnect: false,
 	sharedFolders: [],
 	devLoginRole: "",
@@ -59,6 +67,12 @@ export function normalizeSettings(raw: unknown): ArcaSyncSettings {
 			typeof data.workspaceId === "string" ? data.workspaceId : DEFAULT_SETTINGS.workspaceId,
 		user: data.user ?? null,
 		workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
+		teams: Array.isArray(data.teams)
+			? data.teams.flatMap((team) => {
+					const parsed = TeamSummary.safeParse(team);
+					return parsed.success ? [parsed.data] : [];
+				})
+			: [],
 		autoConnect: data.autoConnect === true,
 		sharedFolders: normalizeSharedFolders(
 			Array.isArray(data.sharedFolders) ? data.sharedFolders : [data.sharedFolder],
@@ -87,11 +101,16 @@ export function normalizeSharedFolders(values: unknown[]): SharedFolder[] {
 
 function normalizeSharedFolder(value: unknown): SharedFolder | null {
 	if (!value || typeof value !== "object") return null;
-	const { path, workspaceId } = value as Partial<SharedFolder>;
+	const { path, workspaceId, paused } = value as Partial<SharedFolder>;
 	if (typeof path !== "string") return null;
 	const trimmed = path.trim().replace(/^\/+|\/+$/g, "");
 	if (!trimmed) return null;
-	return { path: trimmed, workspaceId: typeof workspaceId === "string" ? workspaceId : "" };
+	const folder: SharedFolder = {
+		path: trimmed,
+		workspaceId: typeof workspaceId === "string" ? workspaceId : "",
+	};
+	if (paused === true) folder.paused = true;
+	return folder;
 }
 
 /** `http(s)://host` → `ws(s)://host`, with any trailing slash removed. */
