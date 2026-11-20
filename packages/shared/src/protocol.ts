@@ -147,7 +147,8 @@ export const PasswordChangeRequest = z.object({
 export type PasswordChangeRequest = z.infer<typeof PasswordChangeRequest>;
 
 /** Four decimal digits. */
-export const Pin = z.string().regex(/^[0-9]{4}$/);
+/** 6 digits for new PINs; 4-digit PINs issued before teams stay valid until they expire. */
+export const Pin = z.string().regex(/^[0-9]{4}([0-9]{2})?$/);
 
 export const PinCreateRequest = z.object({
 	role: Role,

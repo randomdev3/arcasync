@@ -21,6 +21,11 @@ import { AuthProvider, DeviceInfo, Role, User } from "./protocol.js";
 export const OAuthStartRequest = z.object({
 	intent: z.enum(["signin", "link"]).default("signin"),
 	next: z.string().max(300).optional(),
+	/**
+	 * Binds the handoff to the browser that started it (no login CSRF): base64url SHA-256 of a
+	 * random `verifier` the site keeps in sessionStorage and sends with the exchange.
+	 */
+	verifierHash: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 export type OAuthStartRequest = z.infer<typeof OAuthStartRequest>;
 
@@ -37,6 +42,8 @@ export type OAuthStartResponse = z.infer<typeof OAuthStartResponse>;
  */
 export const OAuthExchangeRequest = z.object({
 	handoff: z.string().min(16).max(128),
+	/** The value whose hash was sent as `verifierHash`; a mismatch is 400 `oauth_failed`. */
+	verifier: z.string().min(43).max(128),
 	device: DeviceInfo,
 });
 export type OAuthExchangeRequest = z.infer<typeof OAuthExchangeRequest>;
@@ -112,7 +119,8 @@ export type FolderCreateRequest = z.infer<typeof FolderCreateRequest>;
 /**
  * Team invites reuse the invite and PIN shapes (`InviteCreateRequest`, `InviteCreated`,
  * `PinCreateRequest`, `PinSummary`) under `/api/teams/:id/invites` and `/api/teams/:id/pins`;
- * accepting one joins the team (and so every folder in it). The older
+ * accepting one joins the team (and so every folder in it). Active PINs are capped per team, and
+ * new PINs (invite and reset) have 6 digits; 4-digit PINs already issued stay valid. The older
  * `/api/workspaces/:id/invites|pins` routes keep working and act on the folder's team.
  */
 export const TEAM_ROUTES = true;
