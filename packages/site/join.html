@@ -4,7 +4,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>ArcaSync · Join</title>
-		<meta name="description" content="Use an ArcaSync invite: create your account here or open it in Obsidian." />
+		<meta name="description" content="Join an ArcaSync team with an invite link or PIN, or start your own with Google or GitHub." />
 		<meta name="robots" content="noindex" />
 		<meta name="color-scheme" content="light dark" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -23,10 +23,10 @@
 
 				<section data-state="no-invite">
 					<div class="flow-head">
-						<p class="kicker">invite-only</p>
-						<h1>Join ArcaSync</h1>
+						<p class="kicker">join a team</p>
+						<h1>Join a team</h1>
 					</div>
-					<p class="lede">ArcaSync is invite-only. Paste the invite link you were sent.</p>
+					<p class="lede">Paste the invite link a teammate sent you.</p>
 					<form class="field" data-paste-form novalidate>
 						<label for="paste">Invite link</label>
 						<div class="inline-form">
@@ -48,9 +48,15 @@
 						<p class="field-error" id="paste-error" hidden></p>
 					</form>
 					<p class="muted small">
-						Got a 4-digit PIN instead?
+						Got a PIN instead?
 						<button class="link-button" type="button" data-use-pin>Join with a PIN</button>
 					</p>
+					<div class="card" data-start hidden>
+						<h2 class="card__title">No invite? Start your own team</h2>
+						<p class="muted">Sign up, create a team, then invite the people you work with.</p>
+						<div class="btn-row" data-start-providers></div>
+						<p class="callout callout--error" data-start-error hidden></p>
+					</div>
 					<p class="muted small">
 						Already have an account? <a href="/signin">Sign in</a> instead.
 					</p>
@@ -58,15 +64,15 @@
 
 				<section data-state="pin" hidden>
 					<div class="flow-head">
-						<p class="kicker">invite-only</p>
+						<p class="kicker">join a team</p>
 						<h1 tabindex="-1">Join with a PIN</h1>
 					</div>
 					<p class="lede" data-pin-lede-new>
-						Type the 4-digit PIN you were given, then pick a name and a password. From now on you
-						sign in with them, here and in Obsidian.
+						Type the PIN you were given, then pick a name and a password. From now on you sign in
+						with them, here and in Obsidian.
 					</p>
 					<p class="lede" data-pin-lede-signed-in hidden>
-						You're signed in. The PIN adds its workspace to your account.
+						You're signed in. The PIN adds you to its team.
 					</p>
 					<form class="card" data-pin-form novalidate>
 						<div class="field">
@@ -77,12 +83,12 @@
 								type="text"
 								inputmode="numeric"
 								autocomplete="one-time-code"
-								maxlength="4"
+								maxlength="6"
 								spellcheck="false"
 								required
 								aria-describedby="pin-hint pin-error"
 							/>
-							<p class="hint" id="pin-hint">Single use. It expires a few days after it was made.</p>
+							<p class="hint" id="pin-hint">4 or 6 digits. Single use; it expires a few days after it was made.</p>
 							<p class="field-error" id="pin-error" hidden></p>
 						</div>
 						<div class="field" data-pin-account>
@@ -134,6 +140,12 @@
 							</span>
 						</div>
 					</form>
+					<div class="card" data-pin-providers hidden>
+						<h2 class="card__title">Or skip the password</h2>
+						<p class="muted">Type the PIN above, then sign up with an account you already have.</p>
+						<div class="btn-row" data-pin-provider-buttons></div>
+						<p class="callout callout--error" data-pin-oauth-error hidden></p>
+					</div>
 					<p class="muted small">
 						<button class="link-button" type="button" data-use-link>I have an invite link instead</button>
 					</p>
@@ -142,16 +154,17 @@
 				<section data-state="pin-redeemed" hidden>
 					<div class="flow-head">
 						<p class="kicker">you're in</p>
-						<h1 tabindex="-1">Workspace added</h1>
+						<h1 tabindex="-1">You joined the team</h1>
 					</div>
 					<div class="card">
-						<h2 class="card__title">Your workspaces</h2>
+						<h2 class="card__title">Your shared folders</h2>
 						<ul class="workspace-list" data-pin-redeemed-list></ul>
 						<p>
-							Open Obsidian. The new workspace appears under <strong>ArcaSync settings → Shared
-							folders</strong> → workspace picker after you reconnect.
+							In Obsidian, open <strong>Settings → ArcaSync</strong>: the team and its folders are
+							there, ready to add to your vault.
 						</p>
 					</div>
+					<div class="btn-row"><a class="btn btn--primary" href="/account">Go to your teams</a></div>
 				</section>
 
 				<section data-state="checking-session" hidden>
@@ -163,18 +176,22 @@
 
 				<section data-state="choose" hidden>
 					<div class="flow-head">
-						<p class="kicker">an invite to ArcaSync</p>
+						<p class="kicker">an invite to a team</p>
 						<h1>You're invited</h1>
 					</div>
 					<div class="callout callout--warn">
-						<strong>Use one or the other.</strong> This invite works once, so whichever you use first
-						spends it. If you create your account here, you'll sign Obsidian in with a code
-						afterwards.
+						<strong>Use one or the other.</strong> This invite usually works once, so whichever you
+						use first spends it.
 					</div>
 					<div class="choose-grid">
 						<form class="card card--primary" data-join-form novalidate>
 							<p class="card__eyebrow">A <span class="badge">recommended</span></p>
 							<h2 class="card__title">Create your account here</h2>
+							<div data-choose-providers hidden>
+								<div class="btn-row" data-choose-provider-buttons></div>
+								<p class="callout callout--error" data-choose-oauth-error hidden></p>
+								<p class="muted small">Or just pick a name:</p>
+							</div>
 							<div class="field">
 								<label for="name">Your name</label>
 								<input
@@ -187,7 +204,7 @@
 									aria-describedby="name-hint name-error"
 								/>
 								<p class="hint" id="name-hint">
-									Shown next to your caret. Pick something your friends will recognise.
+									Shown next to your caret. Pick something your teammates will recognise.
 								</p>
 								<p class="field-error" id="name-error" hidden></p>
 							</div>
@@ -216,42 +233,34 @@
 						<h1 class="big-who"><span class="dot" data-user-dot></span><span data-welcome>Welcome</span></h1>
 					</div>
 					<div class="card">
-						<h2 class="card__title">Your workspaces</h2>
+						<h2 class="card__title">Your shared folders</h2>
 						<ul class="workspace-list" data-workspaces></ul>
 					</div>
 					<h2>Next steps</h2>
 					<ol class="steps" data-steps-password hidden>
 						<li><a href="/guide#install">Install the plugin</a> in Obsidian.</li>
 						<li>
-							In ArcaSync settings, set <strong>Server URL</strong> to:
-							<div class="copy-row">
-								<span class="copy-row__value" id="joined-server-password">{{relay}}</span>
-								<button class="btn btn--small" type="button" data-copy="joined-server-password">Copy</button>
-							</div>
+							In <strong>Settings → ArcaSync</strong>, choose <strong>Sign in with name &amp;
+							password</strong> and enter yours.
 						</li>
-						<li>Under <strong>Sign in</strong>, enter your name and password.</li>
 					</ol>
 					<ol class="steps" data-steps-code>
 						<li><a href="/guide#install">Install the plugin</a> in Obsidian.</li>
 						<li>
-							In ArcaSync settings, set <strong>Server URL</strong> to:
-							<div class="copy-row">
-								<span class="copy-row__value" id="joined-server">{{relay}}</span>
-								<button class="btn btn--small" type="button" data-copy="joined-server">Copy</button>
-							</div>
+							On <a href="/account">your account page</a>, link Google or GitHub, or set a password.
+							Then sign in to Obsidian with it.
 						</li>
-						<li>Click <strong>Sign in with another device</strong>. Obsidian shows a code.</li>
 						<li>
-							Approve it here.
-							<div class="btn-row"><a class="btn btn--primary" href="/approve">Approve a code</a></div>
+							Or start a sign-in from Obsidian and approve its code here.
+							<div class="btn-row"><a class="btn" href="/approve">Approve a code</a></div>
 						</li>
 					</ol>
 				</section>
 
 				<section data-state="signed-in" hidden>
 					<div class="flow-head">
-						<p class="kicker">an invite to ArcaSync</p>
-						<h1>Add a workspace</h1>
+						<p class="kicker">an invite to a team</p>
+						<h1>Join the team</h1>
 					</div>
 					<p class="lede">
 						You're signed in as <strong class="who"><span class="dot" data-me-dot></span><span data-me-name></span></strong>.
@@ -259,17 +268,18 @@
 					<div data-redeem-form>
 						<p class="callout callout--error" data-redeem-error hidden></p>
 						<div class="btn-row">
-							<button class="btn btn--primary" type="button" data-redeem>Add this workspace to my account</button>
+							<button class="btn btn--primary" type="button" data-redeem>Join this team</button>
 							<button class="link-button" type="button" data-not-me>Not you? Sign out</button>
 						</div>
 					</div>
 					<div class="card" data-redeemed hidden>
-						<h2 class="card__title">Your workspaces</h2>
+						<h2 class="card__title">Your shared folders</h2>
 						<ul class="workspace-list" data-redeemed-list></ul>
 						<p>
-							Open Obsidian. The new workspace appears under <strong>ArcaSync settings → Shared
-							folders</strong> → workspace picker after you reconnect.
+							In Obsidian, open <strong>Settings → ArcaSync</strong>: the team and its folders are
+							there, ready to add to your vault.
 						</p>
+						<div class="btn-row"><a class="btn btn--primary" href="/account">Go to your teams</a></div>
 					</div>
 				</section>
 

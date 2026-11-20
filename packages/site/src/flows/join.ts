@@ -2,6 +2,7 @@ import type { DeviceInfo, InviteAcceptRequest } from "@arcasync/shared";
 import type { Api, ApiFailure } from "../lib/api";
 import { RATE_LIMIT_COOLDOWN_MS } from "../lib/errors";
 import { INVITE_TOKEN, parseInvite } from "../lib/invite";
+import type { PendingRedeem } from "../lib/oauth";
 import { normalizePin, passwordProblem } from "../lib/passwords";
 import { type KeyValue, PENDING_INVITE_KEY, type Session } from "../lib/session";
 import {
@@ -81,6 +82,20 @@ export type JoinEvent =
 	| { type: "use-link" }
 	| { type: "pin-submit"; pin: string; name: string; password: string; confirm: string };
 
+function pinFormFor(signedIn: boolean): PinForm {
+	return {
+		kind: "pin",
+		signedIn,
+		submitting: false,
+		pinError: null,
+		nameError: null,
+		passwordError: null,
+		confirmError: null,
+		formError: null,
+		cooldownUntil: null,
+	};
+}
+
 export interface JoinDeps {
 	api: Api;
 	session: Session;
@@ -93,9 +108,19 @@ export interface JoinDeps {
 export const NAME_TAKEN_COPY = "Someone already uses that name. Try another.";
 export const NAME_RULE_COPY = "Names are 1–60 characters.";
 export const BAD_LINK_COPY = "That doesn't look like an ArcaSync invite link.";
-export const PIN_RULE_COPY = "A PIN is 4 digits.";
+export const PIN_RULE_COPY = "A PIN is 4 or 6 digits.";
 export const BAD_PIN_COPY = "That PIN is wrong, already used or expired.";
 export const CONFIRM_COPY = "The two passwords differ.";
+
+export interface JoinOptions {
+	/** `/join?pin=…`: open the PIN form with it. */
+	pin?: string | null;
+	/**
+	 * What this tab asked to redeem before leaving for Google or GitHub. When it matches the URL's
+	 * invite or PIN and a session exists, it is redeemed without another click.
+	 */
+	redeem?: PendingRedeem | null;
+}
 
 /**
  * `/join`: create an account from an invite, or add its workspace to the signed-in account.
@@ -105,12 +130,29 @@ export const CONFIRM_COPY = "The two passwords differ.";
 export function createJoinFlow(
 	deps: JoinDeps,
 	initialToken: string | null,
+	options: JoinOptions = {},
 ): Flow<JoinState, JoinEvent> {
 	const clock = deps.clock ?? systemClock;
 	const stored = deps.pending.getItem(PENDING_INVITE_KEY);
 	const token = initialToken ?? (stored && INVITE_TOKEN.test(stored) ? stored : null);
+	const initialPin = !token && options.pin ? normalizePin(options.pin) : null;
+	const signedIn = deps.session.token() !== null;
+	let autoRedeem =
+		signedIn &&
+		token !== null &&
+		options.redeem?.kind === "invite" &&
+		options.redeem.token === token;
+	const autoPin =
+		signedIn &&
+		initialPin !== null &&
+		options.redeem?.kind === "pin" &&
+		options.redeem.pin === initialPin;
 	const store = createStore<JoinState>(
-		token ? { kind: "checking-session", token } : { kind: "no-invite", pasteError: null },
+		token
+			? { kind: "checking-session", token }
+			: initialPin
+				? pinFormFor(signedIn)
+				: { kind: "no-invite", pasteError: null },
 	);
 	let cooldownTimer: unknown = null;
 
@@ -142,6 +184,10 @@ export function createJoinFlow(
 				redeemed: null,
 				formError: null,
 			});
+			if (autoRedeem) {
+				autoRedeem = false;
+				void redeem();
+			}
 		} else if (!me.ok && me.code === "forbidden") {
 			store.set({ kind: "error", token: t, error: me });
 		} else {
@@ -241,17 +287,7 @@ export function createJoinFlow(
 		void begin(parsed.token);
 	}
 
-	const pinForm = (): PinForm => ({
-		kind: "pin",
-		signedIn: deps.session.token() !== null,
-		submitting: false,
-		pinError: null,
-		nameError: null,
-		passwordError: null,
-		confirmError: null,
-		formError: null,
-		cooldownUntil: null,
-	});
+	const pinForm = (): PinForm => pinFormFor(deps.session.token() !== null);
 
 	function cooldown(seconds: number) {
 		if (cooldownTimer !== null) clock.clearTimeout(cooldownTimer);
@@ -347,6 +383,9 @@ export function createJoinFlow(
 	}
 
 	if (token) void begin(token);
+	else if (initialPin && autoPin) {
+		void submitPin({ type: "pin-submit", pin: initialPin, name: "", password: "", confirm: "" });
+	}
 
 	return {
 		getState: store.get,
