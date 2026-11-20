@@ -22,11 +22,23 @@ import {
 } from "../lib/dom";
 import { describeError } from "../lib/errors";
 import { obsidianApproveLink } from "../lib/invite";
-import { passwordProblem } from "../lib/passwords";
+import { normalizePin, passwordProblem } from "../lib/passwords";
+import { beginOAuth, renderProviderButtons } from "../lib/providers";
+import { isProvider, loadServerInfo, PROVIDER_LABELS } from "../lib/serverInfo";
 
 const app = initChrome();
 const root = $("[data-flow]");
-const next = safeNext(new URLSearchParams(location.search).get("next"));
+const query = new URLSearchParams(location.search);
+const next = safeNext(query.get("next"));
+/** `/signin?provider=google&next=…` (the plugin opens this): go straight to that provider. */
+const wanted = query.get("provider");
+if (wanted !== null) {
+	history.replaceState(
+		null,
+		"",
+		next === "/account" ? "/signin" : `/signin?next=${encodeURIComponent(next)}`,
+	);
+}
 const device = app.device();
 const flow = createSigninFlow({ api: app.api, session: app.session, device: () => device, next });
 
@@ -180,10 +192,10 @@ resetForm.addEventListener("submit", async (event) => {
 	event.preventDefault();
 	if (resetSubmit.disabled) return;
 	const name = reset.name.value.trim();
-	const pin = reset.pin.value.trim();
+	const pin = normalizePin(reset.pin.value) ?? "";
 	const errors: [HTMLInputElement, string | null][] = [
 		[reset.name, name ? null : "Enter your name."],
-		[reset.pin, /^[0-9]{4}$/.test(pin) ? null : "Enter the 4-digit reset PIN."],
+		[reset.pin, pin ? null : "Enter the reset PIN (4 or 6 digits)."],
 		[reset.password, passwordProblem(reset.password.value)],
 		[reset.confirm, null],
 	];
@@ -227,3 +239,43 @@ resetForm.addEventListener("submit", async (event) => {
 	renderError($("[data-reset-error]"), copy);
 	announce(copy.message);
 });
+
+// Google / GitHub, when the server offers them.
+const providersCard = $("[data-providers]");
+const oauthError = $("[data-oauth-error]");
+
+void (async () => {
+	if (isProvider(wanted) && app.session.token()) {
+		// Already signed in here: /approve shows who, and the device, before anything happens.
+		location.replace(next);
+		return;
+	}
+	const info = await loadServerInfo(app.api);
+	if (info.providers.length > 0) {
+		providersCard.hidden = false;
+		$("[data-providers-title]").textContent =
+			`With ${info.providers.map((p) => PROVIDER_LABELS[p]).join(" or ")}`;
+		$("[data-providers-hint]").textContent =
+			info.signups === "open"
+				? "New to ArcaSync? This creates your account."
+				: "For accounts that have linked it. New accounts on this server need an invite.";
+	}
+	const buttons = renderProviderButtons(
+		$("[data-provider-buttons]"),
+		info.providers,
+		(provider, button) =>
+			void beginOAuth(app, provider, { intent: "signin", next }, button, oauthError),
+	);
+	if (wanted === null) return;
+	const button = buttons.find((b) => b.dataset.provider === wanted);
+	if (isProvider(wanted) && button) {
+		void beginOAuth(app, wanted, { intent: "signin", next }, button, oauthError);
+	} else {
+		providersCard.hidden = false;
+		renderError(oauthError, {
+			message: isProvider(wanted)
+				? `This server doesn't offer sign-in with ${PROVIDER_LABELS[wanted]}. Use another way below.`
+				: "Unknown sign-in method. Use one of the ways below.",
+		});
+	}
+})();

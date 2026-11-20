@@ -40,8 +40,8 @@ export function passwordProblem(password: string): string | null {
 	return null;
 }
 
-/** A 4-digit PIN (spaces and dashes ignored), or null. */
+/** A 4- or 6-digit PIN (spaces and dashes ignored), or null. New PINs have 6 digits. */
 export function normalizePin(input: string): string | null {
 	const digits = input.replace(/[\s-]/g, "");
-	return /^[0-9]{4}$/.test(digits) ? digits : null;
+	return /^[0-9]{4}([0-9]{2})?$/.test(digits) ? digits : null;
 }

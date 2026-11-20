@@ -171,7 +171,11 @@ describe("safeNext", () => {
 		expect(safeNext("/approve?code=BCDF-GHJK")).toBe("/approve?code=BCDF-GHJK");
 		expect(safeNext("/account")).toBe("/account");
 		expect(safeNext("/join")).toBe("/join");
+		expect(safeNext("/join?invite=abc_DEF-123")).toBe("/join?invite=abc_DEF-123");
+		expect(safeNext("/join?pin=123456")).toBe("/join?pin=123456");
 		for (const bad of [
+			"/auth/callback",
+			"/approve?code=x#y",
 			null,
 			"",
 			"//evil.example",

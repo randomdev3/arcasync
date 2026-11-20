@@ -18,9 +18,15 @@ describe("site password rules", () => {
 		}
 	});
 
-	it("normalizePin takes four digits, ignoring spaces and dashes", () => {
+	it("normalizePin takes four or six digits, ignoring spaces and dashes", () => {
 		expect(normalizePin(" 04 20 ")).toBe("0420");
 		expect(normalizePin("04-20")).toBe("0420");
-		for (const bad of ["042", "04201", "o420", ""]) expect(normalizePin(bad)).toBeNull();
+		expect(normalizePin("123 456")).toBe("123456");
+		for (const bad of ["042", "04201", "1234567", "o420", ""]) {
+			expect(normalizePin(bad)).toBeNull();
+		}
+		for (const pin of ["0420", "123456", "04201", "1234567"]) {
+			expect(normalizePin(pin) !== null, pin).toBe(shared.Pin.safeParse(pin).success);
+		}
 	});
 });
