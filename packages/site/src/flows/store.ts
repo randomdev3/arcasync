@@ -70,3 +70,25 @@ export function workspaceRows(list: unknown): WorkspaceRow[] {
 			: [];
 	});
 }
+
+/** The rest of the signed-in user that /account shows (kept apart from `Person`). */
+export interface Profile {
+	id: string;
+	email: string | null;
+	/** An https picture from Google or GitHub, or null. */
+	avatarUrl: string | null;
+}
+
+export function profile(user: unknown): Profile {
+	const u = user as { id?: unknown; email?: unknown; avatarUrl?: unknown } | null;
+	return {
+		id: typeof u?.id === "string" ? u.id : "",
+		email: typeof u?.email === "string" && u.email ? u.email : null,
+		avatarUrl: safeAvatar(u?.avatarUrl),
+	};
+}
+
+/** Only https pictures (the CSP allows Google's and GitHub's). */
+export function safeAvatar(url: unknown): string | null {
+	return typeof url === "string" && /^https:\/\/[^\s"'<>]+$/.test(url) ? url : null;
+}

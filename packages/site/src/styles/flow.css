@@ -244,3 +244,50 @@
 	flex-wrap: wrap;
 	gap: var(--s2);
 }
+
+/* Profile pictures from Google or GitHub: square, framed like everything else. */
+.avatar {
+	flex: none;
+	width: 24px;
+	height: 24px;
+	object-fit: cover;
+	border: 1px solid var(--rule);
+}
+
+.big-who .avatar {
+	width: 0.8em;
+	height: 0.8em;
+	align-self: center;
+}
+
+/* Teams on /account: one card per team, the open one with members, invites and PINs. */
+.flow .teams > * + *,
+.flow .teams__list > * + * {
+	margin-top: var(--s4);
+}
+
+.team__head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--s2) var(--s3);
+}
+
+.team__head .btn {
+	margin-left: auto;
+}
+
+.flow .team__part > * + * {
+	margin-top: var(--s3);
+}
+
+.people__head .avatar,
+.people__head .dot {
+	align-self: center;
+}
+
+.input--inline {
+	width: auto;
+	min-height: 36px;
+	padding-block: var(--s1);
+}

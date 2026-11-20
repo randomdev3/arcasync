@@ -4,7 +4,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>ArcaSync · Account</title>
-		<meta name="description" content="Your ArcaSync account in this browser." />
+		<meta name="description" content="Your ArcaSync account and teams: members, invites, PINs and sign-in methods." />
 		<meta name="robots" content="noindex" />
 		<meta name="color-scheme" content="light dark" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -37,7 +37,7 @@
 					<p class="lede">This browser holds no ArcaSync session.</p>
 					<div class="btn-row">
 						<a class="btn btn--primary" href="/signin?next=%2Faccount">Sign in</a>
-						<a class="btn" href="/join">I have an invite</a>
+						<a class="btn" href="/join">Have an invite link or PIN?</a>
 					</div>
 				</section>
 
@@ -45,12 +45,40 @@
 					<div class="flow-head">
 						<p class="kicker">account</p>
 						<h1 class="big-who">
+							<img class="avatar" data-me-avatar alt="" width="48" height="48" referrerpolicy="no-referrer" hidden />
 							<span class="dot" data-me-dot></span><span data-me-name></span>
 							<span class="badge" data-admin hidden>admin</span>
 						</h1>
 					</div>
-					<p class="lede">This browser: <strong data-device-name></strong></p>
-					<div class="card">
+					<p class="lede">
+						<span data-me-email hidden></span>
+						This browser: <strong data-device-name></strong>
+					</p>
+					<div class="card" data-profile hidden>
+						<h2 class="card__title">Profile</h2>
+						<form class="field" data-rename-form novalidate>
+							<label for="rename">Name</label>
+							<div class="inline-form">
+								<input
+									id="rename"
+									class="input"
+									type="text"
+									autocomplete="nickname"
+									maxlength="60"
+									spellcheck="false"
+									aria-describedby="rename-hint rename-error"
+								/>
+								<button class="btn" type="submit" data-rename-submit>Save</button>
+							</div>
+							<p class="hint" id="rename-hint">Shown next to your caret and to your teams.</p>
+							<p class="field-error" id="rename-error" hidden></p>
+						</form>
+						<p class="card__eyebrow">Sign-in methods</p>
+						<ul class="options" data-identities></ul>
+						<p class="callout callout--ok" data-profile-notice hidden></p>
+						<p class="callout callout--error" data-profile-error hidden></p>
+					</div>
+					<div class="card" data-legacy-workspaces>
 						<h2 class="card__title">Workspaces</h2>
 						<table class="plain" data-workspaces-table>
 							<thead>
@@ -110,11 +138,44 @@
 							<button class="btn" type="submit" data-password-submit>Set password</button>
 						</div>
 					</form>
+					<div class="teams" data-teams hidden>
+						<h2>Teams</h2>
+						<p class="callout callout--ok" data-teams-notice hidden></p>
+						<p class="callout callout--error" data-teams-error hidden></p>
+						<div class="loader" aria-hidden="true" data-teams-loading hidden><span></span><span></span><span></span></div>
+						<p class="muted" data-no-teams hidden>
+							No teams yet. Create one, share a folder from Obsidian, then invite the people you work with.
+						</p>
+						<div class="teams__list" data-team-list></div>
+						<div class="btn-row" data-teams-retry-row hidden>
+							<button class="btn" type="button" data-teams-retry>Try again</button>
+						</div>
+						<form class="card" data-team-create novalidate>
+							<h2 class="card__title">Create a team</h2>
+							<div class="field">
+								<label for="team-name">Team name</label>
+								<div class="inline-form">
+									<input
+										id="team-name"
+										class="input"
+										type="text"
+										autocomplete="off"
+										maxlength="60"
+										aria-describedby="team-name-hint team-name-error"
+									/>
+									<button class="btn btn--primary" type="submit" data-team-create-submit>Create team</button>
+								</div>
+								<p class="hint" id="team-name-hint" data-team-limit>You become its owner.</p>
+								<p class="field-error" id="team-name-error" hidden></p>
+							</div>
+							<p class="callout callout--error" data-team-create-error hidden></p>
+						</form>
+					</div>
 					<div class="card" data-pins hidden>
 						<h2 class="card__title">Invite PINs</h2>
 						<p class="muted">
-							A 4-digit code to type at <a href="/join">/join</a> or in Obsidian instead of an invite
-							link. Each works once and lasts 72 hours; whoever uses it picks a name and a password.
+							A code to type at <a href="/join">/join</a> or in Obsidian instead of an invite link.
+							Each works once and lasts 72 hours; whoever uses it picks a name and a password.
 						</p>
 						<p class="callout callout--error" data-pins-locked hidden></p>
 						<div class="btn-row" data-pins-unlock-row hidden>
