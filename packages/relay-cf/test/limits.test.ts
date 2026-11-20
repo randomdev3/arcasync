@@ -13,7 +13,7 @@ import { newPin, randomPin } from "../src/accounts/pins";
 describe("limits", () => {
 	it("match the spec", () => {
 		expect(PIN_IP_LIMIT).toEqual({ max: 5, windowMs: 15 * MINUTE_MS });
-		expect(PIN_GLOBAL_LIMIT).toEqual({ max: 20, windowMs: 24 * 60 * MINUTE_MS });
+		expect(PIN_GLOBAL_LIMIT).toEqual({ max: 500, windowMs: 24 * 60 * MINUTE_MS });
 		expect(LOGIN_NAME_LIMIT).toEqual({ max: 5, windowMs: 15 * MINUTE_MS });
 		expect(LOGIN_IP_LIMIT).toEqual({ max: 20, windowMs: 15 * MINUTE_MS });
 	});
@@ -40,8 +40,8 @@ describe("limits", () => {
 });
 
 describe("pins", () => {
-	it("are four digits", () => {
-		for (let i = 0; i < 500; i++) expect(randomPin()).toMatch(/^[0-9]{4}$/);
+	it("are six digits", () => {
+		for (let i = 0; i < 500; i++) expect(randomPin()).toMatch(/^[0-9]{6}$/);
 	});
 
 	it("are roughly uniform over the first digit", () => {
