@@ -7,7 +7,6 @@ import {
 	type SigninState,
 	safeNext,
 } from "../flows/signin";
-import { person } from "../flows/store";
 import { initChrome, refreshNav } from "../lib/chrome";
 import { spellCode } from "../lib/codes";
 import {
@@ -22,7 +21,6 @@ import {
 } from "../lib/dom";
 import { describeError } from "../lib/errors";
 import { obsidianApproveLink } from "../lib/invite";
-import { passwordProblem } from "../lib/passwords";
 
 const app = initChrome();
 const root = $("[data-flow]");
@@ -147,83 +145,4 @@ for (const button of document.querySelectorAll("[data-restart]")) {
 }
 document.addEventListener("visibilitychange", () => {
 	if (document.visibilityState === "visible") flow.send({ type: "visible" });
-});
-
-// Forgot password: name + an admin-issued reset PIN + a new password.
-const resetForm = $<HTMLFormElement>("[data-reset-form]");
-const forgot = $<HTMLButtonElement>("[data-forgot]");
-const reset = {
-	name: $<HTMLInputElement>("#reset-name"),
-	pin: $<HTMLInputElement>("#reset-pin"),
-	password: $<HTMLInputElement>("#reset-password"),
-	confirm: $<HTMLInputElement>("#reset-confirm"),
-};
-const resetSubmit = $<HTMLButtonElement>("[data-reset-submit]");
-
-forgot.addEventListener("click", () => {
-	resetForm.hidden = !resetForm.hidden;
-	forgot.setAttribute("aria-expanded", String(!resetForm.hidden));
-	if (!resetForm.hidden) {
-		if (!reset.name.value) reset.name.value = loginName.value;
-		focus(reset.name.value ? reset.pin : reset.name);
-	}
-});
-
-function fieldError(input: HTMLInputElement, message: string | null) {
-	const error = $(`#${input.id}-error`);
-	error.hidden = !message;
-	error.textContent = message ?? "";
-	input.setAttribute("aria-invalid", String(Boolean(message)));
-}
-
-resetForm.addEventListener("submit", async (event) => {
-	event.preventDefault();
-	if (resetSubmit.disabled) return;
-	const name = reset.name.value.trim();
-	const pin = reset.pin.value.trim();
-	const errors: [HTMLInputElement, string | null][] = [
-		[reset.name, name ? null : "Enter your name."],
-		[reset.pin, /^[0-9]{4}$/.test(pin) ? null : "Enter the 4-digit reset PIN."],
-		[reset.password, passwordProblem(reset.password.value)],
-		[reset.confirm, null],
-	];
-	if (!errors[2]?.[1] && reset.password.value !== reset.confirm.value) {
-		errors[3] = [reset.confirm, "The two passwords differ."];
-	}
-	for (const [input, message] of errors) fieldError(input, message);
-	renderError($("[data-reset-error]"), null);
-	const first = errors.find(([, message]) => message);
-	if (first) {
-		focus(first[0]);
-		announce(first[1] ?? "");
-		return;
-	}
-	setBusy(resetSubmit, true, "Saving…");
-	const res = await app.api.call<{ sessionToken?: unknown; user?: unknown }>(
-		"POST",
-		"/api/auth/password/reset",
-		{ body: { name, pin, password: reset.password.value, device } },
-	);
-	setBusy(resetSubmit, false);
-	const user = res.ok ? person(res.data.user) : null;
-	if (res.ok && typeof res.data.sessionToken === "string" && user) {
-		app.session.set(res.data.sessionToken);
-		showApproved(user, next);
-		return;
-	}
-	const failure = res.ok ? { code: "server_error", message: "Unexpected response" } : res;
-	if (failure.code === "invalid_pin") {
-		fieldError(reset.pin, "That name and reset PIN don't match, or the PIN expired.");
-		focus(reset.pin);
-		announce("That name and reset PIN don't match, or the PIN expired.");
-		return;
-	}
-	if (failure.code === "weak_password") {
-		fieldError(reset.password, failure.message || "Pick another password.");
-		focus(reset.password);
-		return;
-	}
-	const copy = describeError(failure);
-	renderError($("[data-reset-error]"), copy);
-	announce(copy.message);
 });

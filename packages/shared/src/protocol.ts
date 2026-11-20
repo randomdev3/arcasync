@@ -287,6 +287,28 @@ export const CloneRequest = z.object({
 });
 export type CloneRequest = z.infer<typeof CloneRequest>;
 
+/** Sign-in methods a server offers (`ServerInfo.auth.providers`). */
+export const AuthProvider = z.enum(["google", "github"]);
+export type AuthProvider = z.infer<typeof AuthProvider>;
+
+/** Who may create an account: anyone (via OAuth) or only people holding an invite. */
+export const SignupPolicy = z.enum(["open", "invite"]);
+export type SignupPolicy = z.infer<typeof SignupPolicy>;
+
+/** `ServerInfo.auth` (optional there; servers without it offer password + device code only). */
+export const AuthInfo = z.object({
+	providers: z.array(AuthProvider),
+	passwords: z.boolean(),
+	signups: SignupPolicy,
+	/** Team caps for this server, shown in UIs before the server would refuse. */
+	limits: z.object({
+		teamsPerUser: z.number(),
+		membersPerTeam: z.number(),
+		foldersPerTeam: z.number(),
+	}),
+});
+export type AuthInfo = z.infer<typeof AuthInfo>;
+
 export const ServerInfo = z.object({
 	name: z.string(),
 	version: z.string(),
@@ -304,8 +326,12 @@ export const ServerInfo = z.object({
 		passwords: z.boolean().optional(),
 		/** PIN invites (`/api/workspaces/:id/pins`, `/api/auth/pin/accept`). */
 		pins: z.boolean().optional(),
+		/** `/api/teams…` (see teams.ts). */
+		teams: z.boolean().optional(),
 	}),
 	limits: z.object({ maxFileBytes: z.number(), chunkBytes: z.number() }),
+	/** Sign-in methods and signup policy; absent on servers without OAuth. */
+	auth: AuthInfo.optional(),
 });
 export type ServerInfo = z.infer<typeof ServerInfo>;
 

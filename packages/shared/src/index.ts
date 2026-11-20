@@ -8,3 +8,4 @@ export * from "./keepalive.js";
 export * from "./passwords.js";
 export * from "./presencePolicy.js";
 export * from "./protocol.js";
+export * from "./teams.js";
