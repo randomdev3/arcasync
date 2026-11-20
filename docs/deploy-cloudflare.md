@@ -87,13 +87,13 @@ wrong person took it. Put the secret back first if you deleted it, and delete it
 
 **First sign-in.** Open the printed link. On the website's join page, either create the account
 in the browser (then sign Obsidian in with a device code approved on `/approve`) or choose "Open in
-Obsidian". You can also paste the link into Settings → ArcaSync → "Join with an invite" (set the
-Server URL first on a fresh install), pick a display name, and Join. The plugin accepts the invite, stores the session token
+Obsidian". You can also paste the link into Settings → ArcaSync → "Have an invite link or PIN?" (set the
+server under Self-hosting first if it is not the hosted relay), pick a display name, and Join. The plugin accepts the invite, stores the session token
 in Obsidian's secret storage, and connects.
 
 **More people.** An owner or admin runs "Create an invite link" (command palette) and sends the
-link. A new user joins as above; someone already signed in pastes it into "Join another
-workspace" and is added to that workspace. Members and roles are managed with "Manage workspace
+link. A new user joins as above; someone already signed in pastes it into "Join a
+team" and is added to that workspace. Members and roles are managed with "Manage workspace
 members".
 
 **More devices (device code).** On the new device, Settings → ArcaSync → "Sign in with another
