@@ -5,7 +5,9 @@ import {
 	createStore,
 	type Flow,
 	type Person,
+	type Profile,
 	person,
+	profile,
 	type WorkspaceRow,
 	workspaceRows,
 } from "./store";
@@ -65,6 +67,7 @@ export type AccountState =
 	| {
 			kind: "ready";
 			me: Person;
+			profile: Profile;
 			deviceName: string;
 			workspaces: WorkspaceRow[];
 			signingOut: boolean;
@@ -83,7 +86,9 @@ export type AccountEvent =
 	| { type: "pins-workspace"; workspaceId: string }
 	| { type: "pin-create"; role: string }
 	| { type: "pin-revoke"; id: string }
-	| { type: "pins-unlock" };
+	| { type: "pins-unlock" }
+	/** The profile was renamed elsewhere on the page. */
+	| { type: "renamed"; name: string };
 
 type Ready = Extract<AccountState, { kind: "ready" }>;
 
@@ -105,7 +110,7 @@ function managedWorkspaces(list: unknown, isAdmin: boolean): ManagedWorkspace[] 
 	});
 }
 
-function pinItems(list: unknown): PinItem[] {
+export function pinItems(list: unknown): PinItem[] {
 	if (!Array.isArray(list)) return [];
 	return list.flatMap((p) => {
 		const x = p as Record<string, unknown>;
@@ -150,6 +155,7 @@ export function createAccountFlow(deps: {
 			store.set({
 				kind: "ready",
 				me,
+				profile: profile(res.data.user),
 				deviceName:
 					typeof res.data.device?.name === "string" ? res.data.device.name : "this browser",
 				workspaces: workspaceRows(res.data.workspaces),
@@ -336,6 +342,10 @@ export function createAccountFlow(deps: {
 				case "pins-unlock":
 					if (state.kind !== "ready" || !state.me.isAdmin) return;
 					void pinAction("POST", "/api/admin/pins/unlock");
+					break;
+				case "renamed":
+					if (state.kind !== "ready") return;
+					store.set({ ...state, me: { ...state.me, name: event.name } });
 					break;
 			}
 		},

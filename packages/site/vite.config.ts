@@ -8,8 +8,17 @@ import { dotsSvg, sceneSvg } from "./src/matrix/svg";
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
-/** Every page, built to a flat `<name>.html`: Pages serves it at `/join` (and 404.html for misses). */
-const PAGES = ["index", "join", "signin", "approve", "guide", "account", "404"] as const;
+/** Every page, built to `<name>.html`: Pages serves it at `/join` (and 404.html for misses). */
+const PAGES = [
+	"index",
+	"join",
+	"signin",
+	"approve",
+	"guide",
+	"account",
+	"auth/callback",
+	"404",
+] as const;
 const CLEAN = new Set<string>(PAGES.filter((p) => p !== "index" && p !== "404"));
 
 /** `wrangler dev --env dev` (packages/relay-cf): the relay a build talks to unless told otherwise. */
@@ -37,7 +46,8 @@ function headersFile(relay: string): string {
 		"default-src 'none'",
 		"script-src 'self'",
 		"style-src 'self'",
-		"img-src 'self' data: blob:",
+		// Profile pictures from Google and GitHub sign-ins.
+		"img-src 'self' data: blob: https://*.googleusercontent.com https://avatars.githubusercontent.com",
 		"font-src 'self'",
 		`connect-src 'self' ${new URL(relay).origin}`,
 		"manifest-src 'self'",

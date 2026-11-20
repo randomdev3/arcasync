@@ -47,6 +47,10 @@ export function describeError(
 			return { message: "Wrong name or password." };
 		case "too_many_pins":
 			return { message: "At most 10 PINs can be open at once. Revoke one first." };
+		case "limit_reached":
+			return { message: failure.message || "You've hit a limit on this server." };
+		case "team_forbidden":
+			return { message: "Only the team's owners can do that." };
 		case "server_error":
 		case "internal":
 			return { message: "Something broke on the server. Try again in a bit.", retry: true };

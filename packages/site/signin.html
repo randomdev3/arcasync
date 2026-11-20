@@ -4,7 +4,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>ArcaSync · Sign in</title>
-		<meta name="description" content="Sign this browser in to ArcaSync with your name and password, or a code approved in Obsidian." />
+		<meta name="description" content="Sign in to ArcaSync with Google, GitHub, your name and password, or a code approved in Obsidian." />
 		<meta name="color-scheme" content="light dark" />
 		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 		<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
@@ -24,6 +24,12 @@
 					<div class="flow-head">
 						<p class="kicker">sign in</p>
 						<h1>Sign in</h1>
+					</div>
+					<div class="card" data-providers hidden>
+						<h2 class="card__title" data-providers-title>With Google or GitHub</h2>
+						<p class="muted" data-providers-hint>New to ArcaSync? This creates your account.</p>
+						<div class="btn-row" data-provider-buttons></div>
+						<p class="callout callout--error" data-oauth-error hidden></p>
 					</div>
 					<form class="card" data-login-form novalidate>
 						<h2 class="card__title">With your name and password</h2>
@@ -67,7 +73,8 @@
 						<h2 class="card__title">Reset your password</h2>
 						<p class="muted">
 							Ask your server admin for a reset PIN (they make one on their account page). It works
-							once, for 24 hours, and signs your other devices out.
+							once, for 24 hours, and signs your other devices out. Signed in with Google or GitHub
+							before? You don't need a password: use that button above.
 						</p>
 						<div class="field">
 							<label for="reset-name">Name</label>
@@ -76,7 +83,7 @@
 						</div>
 						<div class="field">
 							<label for="reset-pin">Reset PIN</label>
-							<input id="reset-pin" class="input mono" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="4" pattern="[0-9]{4}" required aria-describedby="reset-pin-error" />
+							<input id="reset-pin" class="input mono" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{4}([0-9]{2})?" required aria-describedby="reset-pin-error" />
 							<p class="field-error" id="reset-pin-error" hidden></p>
 						</div>
 						<div class="field">
@@ -102,7 +109,7 @@
 					<p class="callout callout--error" data-start-error hidden></p>
 					<div class="btn-row">
 						<button class="btn" type="button" data-start>Get a code</button>
-						<a href="/join">New here? You need an invite</a>
+						<a href="/join">Have an invite link or PIN?</a>
 					</div>
 				</section>
 

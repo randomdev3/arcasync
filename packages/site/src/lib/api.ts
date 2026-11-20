@@ -10,7 +10,7 @@ export interface ApiFailure {
 	retryAfter?: number;
 }
 
-export type Method = "GET" | "POST" | "DELETE";
+export type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 export type ApiResult<T> = { ok: true; data: T } | ApiFailure;
 

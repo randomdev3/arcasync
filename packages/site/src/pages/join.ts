@@ -1,6 +1,6 @@
 import "../styles/main.css";
 import "../styles/flow.css";
-import { createJoinFlow, type JoinState } from "../flows/join";
+import { createJoinFlow, type JoinState, PIN_RULE_COPY } from "../flows/join";
 import { initChrome, refreshNav } from "../lib/chrome";
 import {
 	$,
@@ -15,18 +15,33 @@ import {
 } from "../lib/dom";
 import { DISABLED_COPY, describeError, formatWait } from "../lib/errors";
 import { inviteFromLocation, obsidianInviteLink } from "../lib/invite";
+import { saveRedeem, takeRedeem } from "../lib/oauth";
+import { normalizePin } from "../lib/passwords";
+import { beginOAuth, renderProviderButtons } from "../lib/providers";
+import { loadServerInfo, type Provider } from "../lib/serverInfo";
+import { PENDING_INVITE_KEY } from "../lib/session";
 
 const app = initChrome();
 const root = $("[data-flow]");
 
-// Take the token out of the address bar, history and screenshots; a reload resumes from
-// session storage.
+// Take the token (or PIN) out of the address bar, history and screenshots; a reload resumes
+// from session storage.
 const token = inviteFromLocation(location.search, location.hash);
+const urlPin = normalizePin(new URLSearchParams(location.search).get("pin") ?? "");
 if (location.search || location.hash) history.replaceState(null, "", "/join");
+
+// Back from Google or GitHub: redeem what this tab asked for, once, without another click.
+const redeem = takeRedeem(app.pending);
+const effectiveToken = token ?? app.pending.getItem(PENDING_INVITE_KEY);
+const auto =
+	app.session.token() !== null &&
+	((redeem?.kind === "invite" && redeem.token === effectiveToken) ||
+		(redeem?.kind === "pin" && redeem.pin === urlPin));
 
 const flow = createJoinFlow(
 	{ api: app.api, session: app.session, pending: app.pending, device: app.device },
 	token,
+	{ pin: urlPin, redeem },
 );
 
 const PAGE_ERRORS: Record<string, { title: string; action: string }> = {
@@ -53,16 +68,28 @@ const pinFields = {
 	confirm: [$<HTMLInputElement>("#pin-confirm"), $("#pin-confirm-error")],
 } as const;
 const pinSubmit = $<HTMLButtonElement>("[data-pin-submit]");
+if (urlPin) pinInput.value = urlPin;
+let providers: Provider[] = [];
+let signupsOpen = false;
 const nameInput = $<HTMLInputElement>("#name");
 const nameError = $("#name-error");
 const submit = $<HTMLButtonElement>("[data-join-submit]");
 let lastKind = "";
 let stopCooldown: (() => void) | null = null;
 
+/** The Google / GitHub blocks, once the server says which it offers. */
+function renderProviderBlocks(state: JoinState) {
+	const any = providers.length > 0;
+	$("[data-start]").hidden = !(signupsOpen && any);
+	$("[data-choose-providers]").hidden = !any;
+	$("[data-pin-providers]").hidden = !any || (state.kind === "pin" && state.signedIn);
+}
+
 function render(state: JoinState) {
 	const changed = state.kind !== lastKind;
 	lastKind = state.kind;
 	const section = showState(root, state.kind);
+	renderProviderBlocks(state);
 
 	switch (state.kind) {
 		case "no-invite": {
@@ -107,7 +134,7 @@ function render(state: JoinState) {
 			$("[data-pin-lede-signed-in]").hidden = !state.signedIn;
 			setBusy(pinSubmit, state.submitting, state.signedIn ? "Adding…" : "Creating…");
 			if (!state.submitting)
-				pinSubmit.textContent = state.signedIn ? "Add workspace" : "Create account";
+				pinSubmit.textContent = state.signedIn ? "Join team" : "Create account";
 			const errors = {
 				pin: state.pinError,
 				name: state.nameError,
@@ -153,6 +180,7 @@ function render(state: JoinState) {
 		case "pin-redeemed":
 			renderWorkspaces($("[data-pin-redeemed-list]"), state.workspaces);
 			refreshNav(app);
+			if (auto) location.assign("/account");
 			break;
 		case "joined": {
 			$("[data-steps-password]").hidden = !state.withPassword;
@@ -177,7 +205,8 @@ function render(state: JoinState) {
 			$("[data-redeemed]").hidden = !done;
 			if (state.redeemed) {
 				renderWorkspaces($("[data-redeemed-list]"), state.redeemed);
-				announce("Workspace added.");
+				announce("You joined the team.");
+				if (auto) location.assign("/account");
 			}
 			break;
 		}
@@ -247,4 +276,68 @@ $("[data-redeem]").addEventListener("click", () => flow.send({ type: "redeem" })
 $("[data-not-me]").addEventListener("click", () => {
 	flow.send({ type: "not-me" });
 	refreshNav(app);
+});
+
+// --- Google / GitHub ---------------------------------------------------------------------
+
+/** `next` is capped at 300 characters; a long token rides in session storage instead. */
+const joinNext = (query: string) => {
+	const next = `/join?${query}`;
+	return next.length <= 300 ? next : "/join";
+};
+
+function pickForInvite(provider: Provider, button: HTMLButtonElement) {
+	const state = flow.getState();
+	if (state.kind !== "choose") return;
+	saveRedeem(app.pending, { kind: "invite", token: state.token });
+	const next = joinNext(`invite=${state.token}`);
+	void beginOAuth(
+		app,
+		provider,
+		{ intent: "signin", next },
+		button,
+		$("[data-choose-oauth-error]"),
+	).then((left) => left || takeRedeem(app.pending));
+}
+
+function pickForPin(provider: Provider, button: HTMLButtonElement) {
+	const pin = normalizePin(pinInput.value);
+	const error = pinFields.pin[1];
+	if (!pin) {
+		error.hidden = false;
+		error.textContent = PIN_RULE_COPY;
+		pinInput.setAttribute("aria-invalid", "true");
+		focus(pinInput);
+		announce(PIN_RULE_COPY);
+		return;
+	}
+	saveRedeem(app.pending, { kind: "pin", pin });
+	void beginOAuth(
+		app,
+		provider,
+		{ intent: "signin", next: joinNext(`pin=${pin}`) },
+		button,
+		$("[data-pin-oauth-error]"),
+	).then((left) => left || takeRedeem(app.pending));
+}
+
+void loadServerInfo(app.api).then((info) => {
+	providers = info.providers;
+	signupsOpen = info.signups === "open";
+	renderProviderButtons($("[data-choose-provider-buttons]"), providers, pickForInvite);
+	renderProviderButtons($("[data-pin-provider-buttons]"), providers, pickForPin);
+	renderProviderButtons(
+		$("[data-start-providers]"),
+		providers,
+		(provider, button) =>
+			void beginOAuth(
+				app,
+				provider,
+				{ intent: "signin", next: "/account" },
+				button,
+				$("[data-start-error]"),
+			),
+		(name) => `Sign up with ${name}`,
+	);
+	renderProviderBlocks(flow.getState());
 });

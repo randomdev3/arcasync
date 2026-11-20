@@ -342,3 +342,67 @@ describe("join flow", () => {
 		});
 	});
 });
+
+describe("join flow after a Google / GitHub sign-in", () => {
+	function oauthSetup(
+		routes: Parameters<typeof fakeApi>[0],
+		token: string | null,
+		options: Parameters<typeof createJoinFlow>[2],
+	) {
+		const fake = fakeApi(routes);
+		const { session } = sessionWith("sess");
+		const flow = createJoinFlow(
+			{ api: fake.api, session, pending: memoryStorage(), device: () => DEVICE },
+			token,
+			options,
+		);
+		return { ...fake, flow };
+	}
+
+	it("redeems the invite this tab asked for, without another click", async () => {
+		const { flow, calls } = oauthSetup(
+			{
+				"GET /api/auth/me": [ok({ user: USER })],
+				"POST /api/invites/redeem": [ok({ workspaces: WORKSPACES })],
+			},
+			TOKEN,
+			{ redeem: { kind: "invite", token: TOKEN } },
+		);
+		await flush();
+		expect(calls.map((c) => c.path)).toEqual(["/api/auth/me", "/api/invites/redeem"]);
+		expect(flow.getState()).toMatchObject({
+			kind: "signed-in",
+			redeemed: [{ name: "Team", role: "editor" }],
+		});
+	});
+
+	it("still asks when the invite isn't the one this tab stored", async () => {
+		const { flow, calls } = oauthSetup({ "GET /api/auth/me": [ok({ user: USER })] }, TOKEN, {
+			redeem: { kind: "invite", token: "someOtherToken12345" },
+		});
+		await flush();
+		expect(calls).toHaveLength(1);
+		expect(flow.getState()).toMatchObject({ kind: "signed-in", redeemed: null });
+	});
+
+	it("redeems the PIN this tab asked for", async () => {
+		const { flow, calls } = oauthSetup(
+			{ "POST /api/invites/redeem-pin": [ok({ workspaces: WORKSPACES })] },
+			null,
+			{ pin: "123456", redeem: { kind: "pin", pin: "123456" } },
+		);
+		await flush();
+		expect(calls[0]).toMatchObject({ options: { auth: true, body: { pin: "123456" } } });
+		expect(flow.getState()).toEqual({
+			kind: "pin-redeemed",
+			workspaces: [{ name: "Team", role: "editor" }],
+		});
+	});
+
+	it("only opens the PIN form for a PIN in the URL this tab didn't ask for", async () => {
+		const { flow, calls } = oauthSetup({}, null, { pin: "123456", redeem: null });
+		await flush();
+		expect(calls).toHaveLength(0);
+		expect(flow.getState()).toMatchObject({ kind: "pin", signedIn: true, submitting: false });
+	});
+});

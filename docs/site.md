@@ -7,11 +7,12 @@ invites and sign-in. It is hosted on **Cloudflare Pages** at **https://arca-sync
 | Path | Page | Relay calls |
 |---|---|---|
 | `/` | Landing page with the display (a 2D canvas, lazy) | none |
-| `/guide` | Install, connect, sign in, share, troubleshooting | none |
-| `/join?invite=…` | Create an account from an invite, or add its workspace to the signed-in account; "Open in Obsidian" as the alternative. "Join with a PIN": 4 digits + name + password (new account), or the PIN alone when signed in | `accept`, or `me` + `redeem`; `pin/accept` or `redeem-pin` |
-| `/signin` | Name + password first; below it, a device code approved in Obsidian | `auth/login`; `device/start`, `device/poll` |
-| `/approve?code=…` | Approve the code an Obsidian shows under "Sign in with another device" | `me`, `device/lookup`, `device/approve` |
-| `/account` | Who am I, my workspaces, set or change the password, invite PINs (owners/admins: create, list, revoke; admins: unlock PIN entry), sign out | `me`, `auth/password`, `workspaces/:id/pins`, `admin/pins/unlock`, `logout` |
+| `/guide` | Install, sign in, create a team, share a folder, invite, self-hosting, troubleshooting | none |
+| `/join?invite=…` / `/join?pin=…` | Join a team from an invite: Google/GitHub, a name, or "Open in Obsidian". "Join with a PIN" (4 or 6 digits): name + password, Google/GitHub, or the PIN alone when signed in. After a Google/GitHub sign-in started here, the invite or PIN is redeemed without another click and the page goes to `/account` | `server-info`, `oauth/:p/start`; `accept`, or `me` + `redeem`; `pin/accept` or `redeem-pin` |
+| `/signin?provider=…&next=…` | Google/GitHub (from `server-info` `auth.providers`; `?provider=` starts it at once, as the plugin does), name + password, forgot password, a device code approved in Obsidian | `server-info`, `oauth/:p/start`, `auth/login`, `password/reset`; `device/start`, `device/poll` |
+| `/auth/callback` | Back from Google/GitHub: exchanges the one-time `handoff` (with this tab's verifier) for a session, then goes to `next`; or explains `?error=` | `oauth/exchange` |
+| `/approve?code=…` | Approve the code an Obsidian shows | `me`, `device/lookup`, `device/approve` |
+| `/account` | Profile (picture, rename, email, linked Google/GitHub with Link/Unlink), password, Teams (`features.teams`: create; members and roles, invite link, PINs, folders, leave, delete), admin People & devices, sign out. Without `features.teams`: workspaces and workspace PINs as before | `me`, `server-info`, `auth/profile`, `auth/identities`, `auth/password`, `teams…`, `workspaces/:id/pins`, `admin/*`, `logout` |
 | (anything else) | `404.html` | none |
 
 Static files cost no Worker requests: Pages serves them. Only the relay calls above count, a few per
@@ -110,8 +111,14 @@ point at a site that isn't there yet.
 ## Security notes
 
 - CSP: `default-src 'none'`, scripts, styles and fonts from `'self'` only, `connect-src` the relay,
-  `frame-ancestors 'none'`. No inline scripts or `style` attributes, no third-party origins. The
-  generated SVG is coloured by classes, or by attributes in the standalone files.
+  `frame-ancestors 'none'`. No inline scripts or `style` attributes. The only third-party origins
+  are `img-src` for profile pictures (`*.googleusercontent.com`, `avatars.githubusercontent.com`;
+  the page shows only `https:` ones). The generated SVG is coloured by classes, or by attributes
+  in the standalone files.
+- Google/GitHub sign-in is bound to the tab that started it: a random verifier stays in
+  `sessionStorage`, the relay only sees its SHA-256 (`verifierHash`), and `/auth/callback` sends the
+  verifier with the one-time handoff. A handoff opened in another browser fails. An invite or PIN
+  is redeemed after such a sign-in only if this tab stored it before leaving for the provider.
 - The session token is kept in `localStorage["arcasync.session"]` and sent as a bearer. It can
   approve devices, so "Sign out" revokes it on the relay and `/account` names the browser device.
   An `HttpOnly` cookie would be stronger but needs cookie auth and CSRF handling in the relay
@@ -120,4 +127,5 @@ point at a site that isn't there yet.
   `Referrer-Policy: no-referrer` keeps them out of referrers. `#invite=` also works, so links could
   later keep the token out of server logs entirely.
 - The device-approval card names the requesting device and warns to approve only codes you started;
-  approving always takes a click. `/signin?next=` only accepts `/approve`, `/account` or `/join`.
+  approving always takes a click, also right after a Google/GitHub sign-in. `next` (on `/signin` and
+  `/auth/callback`) only accepts `/approve`, `/account` or `/join`, with a query.

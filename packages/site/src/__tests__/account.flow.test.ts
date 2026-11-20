@@ -47,6 +47,7 @@ describe("account flow", () => {
 		expect(flow.getState()).toEqual({
 			kind: "ready",
 			me: { name: "mara", color: "#2fae8f", isAdmin: true },
+			profile: { id: "u1", email: null, avatarUrl: null },
 			deviceName: "Browser · Firefox",
 			workspaces: [{ name: "Team", role: "editor" }],
 			signingOut: false,
