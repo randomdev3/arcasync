@@ -1,48 +1,257 @@
-.arcasync-settings {
-	display: flex;
-	flex-direction: column;
-	gap: var(--size-4-4);
+/* --- Settings ---------------------------------------------------------------- */
+
+.arcasync-pill,
+.arcasync-folder-pill,
+.arcasync-status-bar {
+	--arcasync-state: var(--text-faint);
 }
 
-.arcasync-settings .arcasync-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--size-4-4);
-	padding: var(--size-4-2) 0;
-	border-top: 1px solid var(--background-modifier-border);
+:is(.arcasync-pill, .arcasync-folder-pill, .arcasync-status-bar)[data-state="connected"] {
+	--arcasync-state: var(--color-green);
 }
 
-.arcasync-settings .arcasync-row:first-child {
-	border-top: none;
+:is(.arcasync-pill, .arcasync-folder-pill, .arcasync-status-bar):is(
+	[data-state="syncing"],
+	[data-state="connecting"]
+) {
+	--arcasync-state: var(--color-yellow);
 }
 
-.arcasync-settings .arcasync-row-info {
-	display: flex;
-	flex-direction: column;
-	gap: var(--size-2-1);
-}
-
-.arcasync-settings .arcasync-row-name {
-	font-weight: var(--font-medium);
-}
-
-.arcasync-settings .arcasync-row-desc {
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
+:is(.arcasync-pill, .arcasync-folder-pill, .arcasync-status-bar):is(
+	[data-state="error"],
+	[data-state="noaccess"]
+) {
+	--arcasync-state: var(--color-red);
 }
 
 .arcasync-settings input[type="text"],
 .arcasync-settings input[type="password"] {
-	min-width: 18em;
+	min-width: 14em;
 }
 
-.arcasync-settings .arcasync-invite {
+.arcasync-settings .arcasync-nav-row {
+	cursor: pointer;
+	border-radius: var(--radius-s);
+}
+
+.arcasync-settings .arcasync-nav-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.arcasync-settings .arcasync-nav-row:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.arcasync-settings .arcasync-item-icon {
 	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-end;
+	align-items: center;
+	margin-inline-end: var(--size-4-3);
+	color: var(--text-muted);
+}
+
+.arcasync-settings .setting-item-heading {
+	margin-top: var(--size-4-4);
+}
+
+/* Welcome (signed out) */
+.arcasync-welcome {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--size-4-1);
+	padding: var(--size-4-8) 0 var(--size-4-6);
+	text-align: center;
+}
+
+.arcasync-welcome-mark {
+	color: var(--interactive-accent);
+}
+
+.arcasync-welcome-mark svg {
+	width: 40px;
+	height: 40px;
+}
+
+.arcasync-welcome-title {
+	font-size: var(--h2-size);
+	font-weight: var(--font-bold);
+}
+
+.arcasync-welcome-tagline {
+	color: var(--text-muted);
+}
+
+.arcasync-providers,
+.arcasync-browser-pending {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	width: min(100%, 320px);
+	margin-top: var(--size-4-4);
+}
+
+.arcasync-provider {
+	width: 100%;
+}
+
+.arcasync-browser-title {
+	font-weight: var(--font-semibold);
+}
+
+.arcasync-browser-title.mod-warning {
+	color: var(--text-error);
+}
+
+.arcasync-browser-actions {
+	display: flex;
+	justify-content: center;
 	gap: var(--size-4-2);
 }
+
+.arcasync-user-code-inline {
+	user-select: all;
+}
+
+/* Breadcrumbs */
+.arcasync-breadcrumbs {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	margin-bottom: var(--size-4-3);
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	min-width: 0;
+}
+
+.arcasync-breadcrumb {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.arcasync-breadcrumbs button.arcasync-breadcrumb {
+	padding: 0 var(--size-2-2);
+	background: none;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-weight: inherit;
+	cursor: pointer;
+}
+
+.arcasync-breadcrumbs button.arcasync-breadcrumb:hover {
+	color: var(--text-normal);
+}
+
+.arcasync-breadcrumb-separator {
+	display: flex;
+	color: var(--text-faint);
+}
+
+.arcasync-breadcrumb-separator svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+/* Avatars, pills, small text */
+.arcasync-user-avatar {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: var(--arcasync-avatar-size);
+	height: var(--arcasync-avatar-size);
+	border-radius: 50%;
+	overflow: hidden;
+	background-color: var(--arcasync-avatar-color);
+	color: #fff;
+	font-size: calc(var(--arcasync-avatar-size) * 0.4);
+	font-weight: var(--font-bold);
+	line-height: 1;
+	user-select: none;
+}
+
+.arcasync-user-avatar img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.arcasync-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	padding: var(--size-2-1) var(--size-4-2);
+	border-radius: var(--radius-l);
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}
+
+.arcasync-pill::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background-color: var(--arcasync-state);
+}
+
+.arcasync-role,
+.arcasync-loading,
+.arcasync-muted {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.arcasync-loading {
+	padding: var(--size-4-2) 0;
+}
+
+.arcasync-error-line,
+.arcasync-server-error .setting-item-description {
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller);
+}
+
+.arcasync-callout {
+	margin: var(--size-4-2) 0;
+}
+
+.arcasync-callout .arcasync-retry {
+	margin-inline-start: var(--size-4-2);
+}
+
+.arcasync-invite-url {
+	font-family: var(--font-monospace);
+}
+
+/* Self-hosting: collapsed until opened (or while a custom server is set) */
+.arcasync-self-hosting {
+	margin-top: var(--size-4-6);
+}
+
+.arcasync-self-hosting > summary {
+	list-style: none;
+	cursor: pointer;
+}
+
+.arcasync-self-hosting > summary::-webkit-details-marker {
+	display: none;
+}
+
+.arcasync-self-hosting > summary .setting-item-name::before {
+	content: "›";
+	display: inline-block;
+	width: 1em;
+	color: var(--text-faint);
+	transition: transform 120ms ease;
+}
+
+.arcasync-self-hosting[open] > summary .setting-item-name::before {
+	transform: rotate(90deg);
+}
+
+/* --- Device sign-in modal ---------------------------------------------------- */
 
 .arcasync-user-code {
 	font-family: var(--font-monospace);
@@ -53,41 +262,62 @@
 	padding: var(--size-4-2) 0;
 }
 
-.arcasync-settings .arcasync-mappings {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: var(--size-4-2);
-}
-
-.arcasync-settings .arcasync-mapping {
-	display: flex;
-	align-items: center;
-	gap: var(--size-4-2);
-}
-
-.arcasync-status {
-	font-size: var(--font-ui-smaller);
-}
-
-.arcasync-status[data-state="connected"] {
-	color: var(--text-success);
-}
-
-.arcasync-status[data-state="connecting"] {
-	color: var(--text-warning);
-}
-
-.arcasync-status[data-state="error"] {
-	color: var(--text-error);
-}
-
-.arcasync-status[data-state="disconnected"] {
-	color: var(--text-muted);
-}
+/* --- Status bar ----------------------------------------------------------------- */
 
 .status-bar-item.arcasync-status-bar {
-	cursor: default;
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.arcasync-status-bar-icon {
+	display: flex;
+	color: var(--arcasync-state, var(--text-faint));
+}
+
+.arcasync-status-bar-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+/* --- File explorer: shared folders ------------------------------------------ */
+
+.arcasync-folder-pill {
+	display: inline-flex;
+	align-items: center;
+	margin-inline-start: auto;
+	padding: 0 var(--size-2-2);
+	border-radius: var(--radius-s);
+	color: var(--arcasync-state);
+	cursor: pointer;
+}
+
+.arcasync-folder-pill:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.arcasync-folder-pill svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.tree-item-children.arcasync-live {
+	border-inline-start: var(--nav-indentation-guide-width, 1px) solid
+		color-mix(in srgb, var(--arcasync-state-live, var(--color-accent)) 55%, transparent);
+}
+
+.tree-item-children.arcasync-live[data-arcasync-state="offline"],
+.tree-item-children.arcasync-live[data-arcasync-state="paused"] {
+	--arcasync-state-live: var(--text-faint);
+}
+
+.tree-item-children.arcasync-live[data-arcasync-state="syncing"] {
+	--arcasync-state-live: var(--color-yellow);
+}
+
+.tree-item-children.arcasync-live[data-arcasync-state="error"],
+.tree-item-children.arcasync-live[data-arcasync-state="noaccess"] {
+	--arcasync-state-live: var(--color-red);
 }
 
 /*

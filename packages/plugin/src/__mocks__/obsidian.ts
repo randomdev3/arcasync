@@ -147,3 +147,5 @@ export function requestUrl(param: RequestUrlParam): Promise<RequestUrlResponse> 
 }
 
 export type App = unknown;
+
+export function setIcon(_el: HTMLElement, _icon: string): void {}
