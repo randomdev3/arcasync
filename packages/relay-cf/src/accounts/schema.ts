@@ -116,11 +116,13 @@ export function backfillTeams(sql: SqlQuery, now = Date.now()): void {
 			w.id,
 		);
 	}
+	// Only rows that gain a team: this runs on every wake, and a no-op UPDATE still bills writes.
 	for (const table of ["invites", "invite_pins"]) {
 		sql.exec(
 			`UPDATE ${table} SET team_id =
 			 (SELECT w.team_id FROM workspaces w WHERE w.id = ${table}.workspace_id)
-			 WHERE team_id IS NULL AND workspace_id != ''`,
+			 WHERE team_id IS NULL AND workspace_id IN
+			 (SELECT id FROM workspaces WHERE team_id IS NOT NULL)`,
 		);
 	}
 }

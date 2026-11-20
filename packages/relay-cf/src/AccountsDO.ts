@@ -1,7 +1,8 @@
 /**
- * Accounts, devices, sessions, workspaces and memberships for the whole deployment, in one
+ * Accounts, devices, sessions, teams, workspaces and memberships for the whole deployment, in one
  * SQLite Durable Object (singleton by name). Mirrors the behaviour of the Node server's
  * `routes/auth.ts`, `routes/workspaces.ts` and `seed.ts`; responses use the shared zod shapes.
+ * Team membership is the source of truth; `syncTeam` mirrors it into each folder's memberships.
  */
 
 import { DurableObject } from "cloudflare:workers";
