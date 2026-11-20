@@ -98,7 +98,7 @@ const crumbs = $derived([
 			cls="arcasync-open-password"
 			onclick={() => ctl.navigate({ kind: "password" })}
 		>
-			<span class="clickable-icon" use:icon={"chevron-right"}></span>
+			<span class="arcasync-chevron" use:icon={"chevron-right"}></span>
 		</SettingItem>
 	{/if}
 	{#if v.accounts}
@@ -107,7 +107,7 @@ const crumbs = $derived([
 			cls="arcasync-open-join"
 			onclick={() => ctl.navigate({ kind: "join" })}
 		>
-			<span class="clickable-icon" use:icon={"chevron-right"}></span>
+			<span class="arcasync-chevron" use:icon={"chevron-right"}></span>
 		</SettingItem>
 		<SettingItem
 			name="Sign in with another device"

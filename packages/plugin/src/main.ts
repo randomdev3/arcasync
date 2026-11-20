@@ -617,10 +617,13 @@ export default class ArcaSyncPlugin extends Plugin {
 				this.settings.workspaceId,
 				...this.settings.sharedFolders.map((f) => f.workspaceId),
 			];
-			if (wanted.some((id) => id && !known.has(id))) await this.refreshWorkspaces();
+			if (known.size === 0 || wanted.some((id) => id && !known.has(id))) {
+				await this.refreshWorkspaces();
+			}
 
 			const workspaceId =
 				this.settings.workspaces.find((w) => w.id === this.settings.workspaceId)?.id ??
+				this.settings.workspaces[0]?.id ??
 				me.workspaces[0]?.id;
 			if (!workspaceId) {
 				// A new account without a team yet: signed in, nothing to sync.
@@ -649,6 +652,8 @@ export default class ArcaSyncPlugin extends Plugin {
 			this.busy = false;
 			this.notifyView();
 		}
+		// Team names for the explorer pills and "Team settings", fresh after every connect.
+		if (this.signedIn) void this.refreshTeams();
 	}
 
 	/** Signed out: dev-login when the server allows it and a name is set; never a silent fallback. */
@@ -701,7 +706,6 @@ export default class ArcaSyncPlugin extends Plugin {
 		await this.storeSession(session);
 		this.notifyView();
 		await this.connect();
-		await this.refreshTeams();
 	}
 
 	// --- browser sign-in ("Continue with Google/GitHub") ----------------------
@@ -863,13 +867,14 @@ export default class ArcaSyncPlugin extends Plugin {
 		fallback: string,
 	): Promise<void> {
 		await this.updateSettings({ workspaces });
+		// Connect before the uncached team list: connect reads the possibly cached `/auth/me`.
+		if (this.live.size === 0) await this.connect();
 		await this.refreshTeams();
 		const fresh = new Set(workspaces.filter((w) => !before.has(w.id)).map((w) => w.id));
 		const joined = this.teams()
 			.filter((t) => t.folders.some((f) => fresh.has(f.id)))
 			.map((t) => t.name);
 		new Notice(joined.length > 0 ? `ArcaSync: joined ${joined.join(", ")}` : fallback);
-		if (this.live.size === 0) void this.connect();
 	}
 
 	/** Signed out: name + password sign-in (relay with `features.passwords`). */
@@ -1414,18 +1419,21 @@ export default class ArcaSyncPlugin extends Plugin {
 	}
 
 	/** "Disconnect" pauses a mapped folder, "Connect" resumes it. */
-	private addPauseItem(menu: Menu, folder: SharedFolder): void {
-		menu.addItem((item) =>
-			folder.paused
-				? item
-						.setTitle("Connect")
-						.setIcon("play")
-						.onClick(() => void this.setFolderPaused(folder.path, false))
-				: item
-						.setTitle("Disconnect")
-						.setIcon("pause")
-						.onClick(() => void this.setFolderPaused(folder.path, true)),
-		);
+	private addPauseItem(menu: Menu, folder: SharedFolder, section?: string): void {
+		menu.addItem((item) => {
+			if (section) item.setSection(section);
+			if (folder.paused) {
+				item
+					.setTitle("Connect")
+					.setIcon("play")
+					.onClick(() => void this.setFolderPaused(folder.path, false));
+			} else {
+				item
+					.setTitle("Disconnect")
+					.setIcon("pause")
+					.onClick(() => void this.setFolderPaused(folder.path, true));
+			}
+		});
 	}
 
 	private registerExplorer(): void {
@@ -1478,7 +1486,7 @@ export default class ArcaSyncPlugin extends Plugin {
 				.setSection("arcasync")
 				.onClick(() => this.showSyncStatus(path)),
 		);
-		this.addPauseItem(menu, mapped);
+		this.addPauseItem(menu, mapped, "arcasync");
 	}
 
 	showSyncStatus(path: string): void {
