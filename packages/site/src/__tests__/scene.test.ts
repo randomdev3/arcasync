@@ -192,28 +192,32 @@ describe("carets and name tags", () => {
 		["a tablet", 114, 51],
 		["a phone", 71, 51],
 		["the smallest phone", 60, 48],
-	])("never collide over two full loops on %s display", (_, cols, rows) => {
-		const scene = createScene(cols, rows);
-		const buffers = [
-			new Uint8Array(cols * rows),
-			new Float32Array(cols * rows),
-			new Uint8Array(cols * rows),
-		] as const;
-		const total = { tags: 0, hiddenTags: 0, moved: 0 };
-		let frames = 0;
-		while (scene.cycles < 4 && frames < 4000) {
-			advance(scene, 1 / 30);
-			const seen = check(scene, ...buffers);
-			total.tags += seen.tags;
-			total.hiddenTags += seen.hiddenTags;
-			total.moved += seen.moved;
-			frames += 1;
-		}
-		expect(scene.cycles).toBe(4);
-		// The rules were exercised: tags were shown, some gave way, and carets stepped aside.
-		expect(total.tags).toBeGreaterThan(frames);
-		expect(total.moved).toBeGreaterThan(30);
-	});
+	])(
+		"never collide over two full loops on %s display",
+		(_, cols, rows) => {
+			const scene = createScene(cols, rows);
+			const buffers = [
+				new Uint8Array(cols * rows),
+				new Float32Array(cols * rows),
+				new Uint8Array(cols * rows),
+			] as const;
+			const total = { tags: 0, hiddenTags: 0, moved: 0 };
+			let frames = 0;
+			while (scene.cycles < 4 && frames < 4000) {
+				advance(scene, 1 / 30);
+				const seen = check(scene, ...buffers);
+				total.tags += seen.tags;
+				total.hiddenTags += seen.hiddenTags;
+				total.moved += seen.moved;
+				frames += 1;
+			}
+			expect(scene.cycles).toBe(4);
+			// The rules were exercised: tags were shown, some gave way, and carets stepped aside.
+			expect(total.tags).toBeGreaterThan(frames);
+			expect(total.moved).toBeGreaterThan(30);
+		},
+		60_000,
+	); // two full loops of the scene: seconds on a slow CI runner
 
 	it("never collide with the visitor's caret, wherever the pointer is", () => {
 		const scene = createScene(150, 51);
