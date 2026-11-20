@@ -2900,18 +2900,6 @@ export class AccountsDO extends DurableObject<Env> {
 		return { calls: this.calls };
 	}
 
-	/** Strips all team data, as on a database from before teams; the next wake migrates it. */
-	async debugUnmigrateTeams(): Promise<{ ok: true }> {
-		this.ctx.storage.transactionSync(() => {
-			this.sql.exec("DELETE FROM teams");
-			this.sql.exec("DELETE FROM team_members");
-			for (const table of ["workspaces", "invites", "invite_pins"]) {
-				this.sql.exec(`UPDATE ${table} SET team_id = NULL`);
-			}
-		});
-		return { ok: true };
-	}
-
 	/** Moves every limit row and the PIN lock `ms` into the past, as if that much time passed. */
 	async debugAgeLimits(ms: number): Promise<{ ok: true }> {
 		this.sql.exec("UPDATE pin_failures SET at = at - ?", ms);

@@ -600,12 +600,6 @@ api.post("/debug/accounts/age-limits", async (c) => {
 	return c.json(await accounts(c.env).debugAgeLimits(ms));
 });
 
-/** Dev-only: strip team data as before teams existed; the AccountsDO's next wake migrates it. */
-api.post("/debug/accounts/unmigrate-teams", async (c) => {
-	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);
-	return c.json(await accounts(c.env).debugUnmigrateTeams());
-});
-
 /** Dev-only: expire a PIN now. */
 api.post("/debug/accounts/expire-pin", async (c) => {
 	if (c.env.ARCASYNC_DEBUG_STATS !== "1") return c.json(errorBody("not_found", "Not found"), 404);

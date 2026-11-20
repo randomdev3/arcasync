@@ -2,6 +2,8 @@
  * PIN invites under `wrangler dev --env dev`: create, list, revoke, accept (new user + password),
  * redeem (signed-in user), uniform `invalid_pin`, the per-IP limit, the server-wide lock and its
  * expiry and admin unlock. Client IPs come from `X-Test-Client-IP` (honoured with debug stats on).
+ * The lock threshold (500 in production) is lowered to `LOCK_AFTER` through the dev-only
+ * `ARCASYNC_PIN_LOCK_THRESHOLD`.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,6 +25,7 @@ import { acceptInvite, bootstrap, del, device, errorCode, get, post, request } f
 
 const PORT = 23_400 + Math.floor(Math.random() * 400);
 const PASSWORD = "correct horse battery";
+const LOCK_AFTER = 20;
 
 type Relay = { url: string; stop: () => Promise<void> };
 
@@ -43,7 +46,11 @@ describe("PIN invites", () => {
 
 	beforeAll(async () => {
 		dir = mkdtempSync(join(tmpdir(), "relay-pins-"));
-		relay = await startRelayDev({ port: PORT, persistTo: dir });
+		relay = await startRelayDev({
+			port: PORT,
+			persistTo: dir,
+			vars: { ARCASYNC_PIN_LOCK_THRESHOLD: String(LOCK_AFTER) },
+		});
 		const boot = await bootstrap(relay.url, "Team");
 		team = boot.workspace;
 		dave = await acceptInvite(relay.url, boot.invite.token, "dave");
@@ -88,11 +95,11 @@ describe("PIN invites", () => {
 		const all = [...(await listPins(team.id)).pins, ...(await listPins(second.id)).pins];
 		return all.filter((p) => !p.revoked && p.usedAt === null && p.expiresAt > now);
 	};
-	/** A 4-digit PIN that is not usable right now. */
+	/** A 6-digit PIN that is not usable right now. */
 	const wrongPin = async () => {
 		const active = new Set((await activePins()).map((p) => p.pin));
 		for (;;) {
-			const pin = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
+			const pin = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 			if (!active.has(pin)) return pin;
 		}
 	};
@@ -105,10 +112,10 @@ describe("PIN invites", () => {
 	});
 
 	describe("create, list, revoke", () => {
-		it("creates a 4-digit, 72 h, single-use PIN for owners and admins only", async () => {
+		it("creates a 6-digit, 72 h, single-use PIN for owners and admins only", async () => {
 			const before = Date.now();
 			const pin = await createPin({ role: "editor" });
-			expect(pin.pin).toMatch(/^[0-9]{4}$/);
+			expect(pin.pin).toMatch(/^[0-9]{6}$/);
 			expect(pin).toMatchObject({
 				workspaceId: team.id,
 				role: "editor",
@@ -178,13 +185,19 @@ describe("PIN invites", () => {
 			).toBe(404);
 		});
 
-		it("allows at most 10 usable PINs server-wide (409 too_many_pins)", async () => {
-			let active = (await activePins()).length;
+		it("allows at most 10 usable PINs per team (409 too_many_pins)", async () => {
+			const usableIn = async (ws: string) => {
+				const now = Date.now();
+				return (await listPins(ws)).pins.filter(
+					(p) => !p.revoked && p.usedAt === null && p.expiresAt > now,
+				);
+			};
+			let active = (await usableIn(team.id)).length;
 			while (active < 10) {
-				await createPin({ role: "viewer" }, active % 2 ? team.id : second.id);
+				await createPin({ role: "viewer" });
 				active += 1;
 			}
-			const pins = await activePins();
+			const pins = await usableIn(team.id);
 			expect(pins).toHaveLength(10);
 			expect(new Set(pins.map((p) => p.pin)).size).toBe(10);
 			const res = await request(relay.url, "POST", pinsPath(), {
@@ -193,8 +206,11 @@ describe("PIN invites", () => {
 			});
 			expect(res.status).toBe(409);
 			expect(errorCode(res.body)).toBe("too_many_pins");
-			for (const p of pins)
+			// Another team (Second is a team of its own) still has room.
+			await createPin({ role: "viewer" }, second.id);
+			for (const p of await activePins()) {
 				await del(relay.url, `${pinsPath(p.workspaceId)}/${p.id}`, dave.sessionToken);
+			}
 			expect(await activePins()).toHaveLength(0);
 		});
 	});
@@ -310,7 +326,7 @@ describe("PIN invites", () => {
 			expect((await acceptPin(good.pin, "guess", ip)).status).toBe(200);
 		});
 
-		it("locks all PIN entry after 20 wrong PINs in 24 h (successes do not count)", async () => {
+		it("locks all PIN entry after LOCK_AFTER wrong PINs in 24 h (successes do not count)", async () => {
 			await unlock();
 			const good = await createPin({ role: "viewer" });
 			const later = await createPin({ role: "viewer" });
