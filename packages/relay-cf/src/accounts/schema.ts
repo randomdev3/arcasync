@@ -27,6 +27,10 @@ export const PIN_AND_PASSWORD_TABLES = [
 		id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, name_key TEXT NOT NULL,
 		ip TEXT NOT NULL)`,
 	"CREATE INDEX IF NOT EXISTS login_failures_at ON login_failures (at)",
+	// Admin-issued, single-use password reset PINs, bound to one user (forgot password).
+	`CREATE TABLE IF NOT EXISTS password_resets (
+		id TEXT PRIMARY KEY, pin TEXT NOT NULL, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
+		created_by TEXT NOT NULL, created_at INTEGER NOT NULL, used_at INTEGER, revoked_at INTEGER)`,
 ];
 
 export function migratePinsAndPasswords(sql: SqlExec): void {

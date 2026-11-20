@@ -17,6 +17,7 @@ import {
 	MemberUpdateRequest,
 	type MeResponse,
 	PasswordChangeRequest,
+	PasswordResetRequest,
 	PinAcceptRequest,
 	PinCreateRequest,
 	PinRedeemRequest,
@@ -244,6 +245,27 @@ api.delete("/workspaces/:id/pins/:pinId", async (c) =>
 );
 
 api.post("/admin/pins/unlock", async (c) => reply(c, await accounts(c.env).unlockPins(bearer(c))));
+
+api.get("/admin/people", async (c) => reply(c, await accounts(c.env).people(bearer(c))));
+
+api.post("/admin/users/:id/reset-pin", async (c) =>
+	reply(c, await accounts(c.env).createResetPin(bearer(c), c.req.param("id"))),
+);
+
+api.post("/auth/password/reset", async (c) => {
+	const body = await parseBody(c, PasswordResetRequest);
+	if (!body) return badRequest(c);
+	const result = await accounts(c.env).resetPassword(body, clientIp(c));
+	if (!result.ok) return reply(c, result);
+	const { userId, ...session } = result.value;
+	// Every other session of the user is revoked: drop what this isolate cached for them.
+	meCache.dropWhere((me) => me.user.id === userId);
+	return c.json(session);
+});
+
+api.post("/admin/devices/:id/sign-out", async (c) =>
+	reply(c, await accounts(c.env).signOutDevice(bearer(c), c.req.param("id"))),
+);
 
 api.get("/workspaces", async (c) =>
 	reply(c, await accounts(c.env).workspaces(bearerToken(c.req.header("authorization")))),

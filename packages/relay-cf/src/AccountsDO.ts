@@ -18,6 +18,7 @@ import type {
 	LoginRequest,
 	MembersResponse,
 	MeResponse,
+	PasswordResetRequest,
 	PinAcceptRequest,
 	PinCreateRequest,
 	PinSummary,
@@ -69,6 +70,7 @@ const DEVICE_LOOKUPS_PER_MINUTE = 5;
 const REENTRY_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** At most this many usable PINs server-wide. */
 const PIN_MAX_ACTIVE = 10;
+const RESET_PIN_TTL_MS = 24 * 60 * 60 * 1000;
 /** Used, revoked and expired PINs stay listed this long, then are deleted. */
 const PIN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const PINS_LOCKED_UNTIL = "pins_locked_until";
@@ -154,6 +156,23 @@ function slugify(name: string): string {
 		.slice(0, 40)
 		.replace(/-+$/, "");
 	return slug || "workspace";
+}
+
+/** One user in the admin's People & devices view (`GET /api/admin/people`). */
+export interface PersonSummary {
+	id: string;
+	name: string;
+	isAdmin: boolean;
+	disabled: boolean;
+	hasPassword: boolean;
+	/** How the account was created: a PIN (with its code), an invite link, or unknown. */
+	joined: { via: "pin" | "invite"; pin: string | null; at: number } | null;
+	/** Last sign-in of any kind (password, PIN, invite, device code). */
+	lastSignInAt: number | null;
+	workspaces: { id: string; name: string; role: string }[];
+	devices: { id: string; name: string; platform: string; signedIn: boolean }[];
+	/** An unused password reset PIN, shown to admins until it is used or expires. */
+	reset: { pin: string; expiresAt: number } | null;
 }
 
 interface UserRow extends Record<string, SqlStorageValue> {
@@ -714,6 +733,7 @@ export class AccountsDO extends DurableObject<Env> {
 				"invite_pins",
 				"pin_failures",
 				"login_failures",
+				"password_resets",
 			]) {
 				this.sql.exec(`DELETE FROM ${table}`);
 			}
@@ -1330,6 +1350,245 @@ export class AccountsDO extends DurableObject<Env> {
 	}
 
 	/** Admin only: lifts the server-wide PIN lock and forgets the counted failures. */
+	/** Admin only: every user, how they joined, their workspaces and devices (signed in or not). */
+	async people(token: string | null): Promise<Result<{ people: PersonSummary[] }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		if (s.value.user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const now = Date.now();
+		const users = this.sql
+			.exec<{ id: string; name: string; is_admin: number; disabled_at: number | null }>(
+				"SELECT id, name, is_admin, disabled_at FROM users ORDER BY name COLLATE NOCASE",
+			)
+			.toArray();
+		const withPassword = new Set(
+			this.sql
+				.exec<{ user_id: string }>("SELECT user_id FROM user_passwords")
+				.toArray()
+				.map((r) => r.user_id),
+		);
+		const memberships = this.sql
+			.exec<{ user_id: string; role: string; id: string; name: string }>(
+				`SELECT m.user_id, m.role, w.id, w.name FROM memberships m
+				JOIN workspaces w ON w.id = m.workspace_id WHERE w.deleted_at IS NULL
+				ORDER BY w.name COLLATE NOCASE`,
+			)
+			.toArray();
+		const devices = this.sql
+			.exec<{ id: string; user_id: string; name: string; platform: string; active: number }>(
+				`SELECT d.id, d.user_id, d.name, d.platform,
+					(SELECT COUNT(*) FROM sessions s WHERE s.device_id = d.id
+						AND s.revoked_at IS NULL AND s.expires_at > ?) AS active
+				FROM devices d ORDER BY d.name COLLATE NOCASE`,
+				now,
+			)
+			.toArray();
+		const joins = new Map<string, PersonSummary["joined"]>();
+		const pinCodes = new Map(
+			this.sql
+				.exec<{ id: string; pin: string }>("SELECT id, pin FROM invite_pins")
+				.toArray()
+				.map((r) => [r.id, r.pin]),
+		);
+		for (const row of this.sql
+			.exec<{ actor_id: string; action: string; target: string; at: number }>(
+				`SELECT actor_id, action, target, at FROM audit_log
+				WHERE action IN ('pin.accept', 'invite.accept') AND actor_id IS NOT NULL ORDER BY at`,
+			)
+			.toArray()) {
+			if (joins.has(row.actor_id)) continue;
+			const pin = row.action === "pin.accept";
+			joins.set(row.actor_id, {
+				via: pin ? "pin" : "invite",
+				pin: pin ? (pinCodes.get(row.target) ?? null) : null,
+				at: row.at,
+			});
+		}
+		const lastSignIn = new Map(
+			this.sql
+				.exec<{ actor_id: string; at: number }>(
+					`SELECT actor_id, MAX(at) AS at FROM audit_log
+					WHERE action IN ('user.login', 'pin.accept', 'invite.accept', 'user.reenter',
+						'device.approve', 'user.password.reset') AND actor_id IS NOT NULL GROUP BY actor_id`,
+				)
+				.toArray()
+				.map((r) => [r.actor_id, r.at]),
+		);
+		const resets = new Map(
+			this.sql
+				.exec<{ user_id: string; pin: string; expires_at: number }>(
+					`SELECT user_id, pin, expires_at FROM password_resets
+					WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+					now,
+				)
+				.toArray()
+				.map((r) => [r.user_id, { pin: r.pin, expiresAt: r.expires_at }]),
+		);
+		const people = users.map((u) => ({
+			id: u.id,
+			name: u.name,
+			isAdmin: u.is_admin === 1,
+			disabled: u.disabled_at !== null,
+			hasPassword: withPassword.has(u.id),
+			joined: joins.get(u.id) ?? null,
+			lastSignInAt: lastSignIn.get(u.id) ?? null,
+			workspaces: memberships
+				.filter((m) => m.user_id === u.id)
+				.map((m) => ({ id: m.id, name: m.name, role: m.role })),
+			devices: devices
+				.filter((d) => d.user_id === u.id)
+				.map((d) => ({ id: d.id, name: d.name, platform: d.platform, signedIn: d.active > 0 })),
+			reset: resets.get(u.id) ?? null,
+		}));
+		return ok({ people });
+	}
+
+	/** Admin only: revokes every session of one device and closes its owner's sockets. */
+	async signOutDevice(token: string | null, deviceId: string): Promise<Result<{ ok: true }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const device = this.sql
+			.exec<{ user_id: string }>("SELECT user_id FROM devices WHERE id = ?", deviceId)
+			.toArray()[0];
+		if (!device) return fail(404, "not_found", "Unknown device");
+		this.sql.exec(
+			"UPDATE sessions SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL",
+			Date.now(),
+			deviceId,
+		);
+		this.audit(user.id, "device.signout", deviceId, { userId: device.user_id });
+		// Closes every socket of the user (4401): their other devices re-authenticate and stay in;
+		// this one's session is gone, so it is signed out.
+		const workspaceIds = this.sql
+			.exec<{ workspace_id: string }>(
+				"SELECT workspace_id FROM memberships WHERE user_id = ?",
+				device.user_id,
+			)
+			.toArray()
+			.map((r) => r.workspace_id);
+		for (const workspaceId of workspaceIds) await this.revokeSockets(workspaceId, device.user_id);
+		return ok({ ok: true });
+	}
+
+	/** The usable reset PIN with these digits for the user signing in as `name`. */
+	private activeReset(name: string, pin: string, now: number) {
+		const user = this.userBySignInName(name);
+		if (!user) return undefined;
+		return this.sql
+			.exec<{ id: string; user_id: string }>(
+				`SELECT id, user_id FROM password_resets WHERE user_id = ? AND pin = ?
+				 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+				user.id,
+				pin,
+				now,
+			)
+			.toArray()[0];
+	}
+
+	/** Admin only: a fresh single-use reset PIN for one user (replaces any unused one). */
+	async createResetPin(
+		token: string | null,
+		userId: string,
+	): Promise<Result<{ pin: string; expiresAt: number }>> {
+		this.calls += 1;
+		const s = await this.session(token);
+		if (!s.ok) return s;
+		const { user } = s.value;
+		if (user.is_admin !== 1) return fail(403, "forbidden", "Admin only");
+		const target = this.userById(userId);
+		if (!target) return fail(404, "not_found", "Unknown user");
+		const now = Date.now();
+		this.sql.exec(
+			"UPDATE password_resets SET revoked_at = ? WHERE user_id = ? AND used_at IS NULL AND revoked_at IS NULL",
+			now,
+			userId,
+		);
+		this.sql.exec("DELETE FROM password_resets WHERE expires_at <= ?", now - PIN_KEEP_MS);
+		const pin = newPin((candidate) => this.activePin(candidate, now) !== undefined);
+		if (!pin) return fail(409, "too_many_pins", "No free PIN; revoke one first");
+		const expiresAt = now + RESET_PIN_TTL_MS;
+		const id = crypto.randomUUID();
+		this.sql.exec(
+			`INSERT INTO password_resets (id, pin, user_id, expires_at, created_by, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			id,
+			pin,
+			userId,
+			expiresAt,
+			user.id,
+			now,
+		);
+		this.audit(user.id, "password_reset.create", userId, { resetId: id, expiresAt });
+		return ok({ pin, expiresAt });
+	}
+
+	/**
+	 * Unauthenticated forgot-password: name + the admin's reset PIN set a new password, revoke
+	 * every session of the user and sign this device in. Wrong PINs count like invite PINs.
+	 */
+	async resetPassword(
+		req: PasswordResetRequest,
+		clientIp: string,
+	): Promise<Result<SessionResponse & { userId: string }>> {
+		this.calls += 1;
+		const problem = passwordProblem(req.password);
+		if (problem) return fail(400, "weak_password", problem);
+		const ip = await this.ipKey(clientIp);
+		const sessionToken = newOpaqueToken();
+		const sessionHash = await this.hashToken(sessionToken);
+
+		const now = Date.now();
+		const gate = this.pinGate(ip, now);
+		if (!gate.ok) return gate;
+		const found = this.activeReset(req.name, req.pin, now);
+		if (!found) {
+			this.recordPinFailure(ip, now);
+			return invalidPin();
+		}
+		const hash = await hashPassword(this.env.ARCASYNC_SECRET, req.password);
+
+		// Synchronous again: the reset may have been used or replaced during the hash.
+		const reset = this.activeReset(req.name, req.pin, Date.now());
+		if (!reset || reset.id !== found.id) return invalidPin();
+		const user = this.userById(reset.user_id);
+		if (!user) return invalidPin();
+		if (user.disabled_at) return fail(403, "forbidden", "Account disabled");
+		const at = Date.now();
+		this.setPasswordRow(user.id, hash);
+		this.sql.exec("UPDATE password_resets SET used_at = ? WHERE id = ?", at, reset.id);
+		const revoked = this.sql
+			.exec(
+				"UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL RETURNING id",
+				at,
+				user.id,
+			)
+			.toArray().length;
+		this.insertSession(user.id, this.deviceFor(user.id, req.device), sessionHash);
+		this.audit(user.id, "user.password.reset", user.id, {
+			resetId: reset.id,
+			revokedSessions: revoked,
+			device: { name: req.device.name, platform: req.device.platform },
+		});
+		const workspaceIds = this.sql
+			.exec<{ workspace_id: string }>(
+				"SELECT workspace_id FROM memberships WHERE user_id = ?",
+				user.id,
+			)
+			.toArray()
+			.map((r) => r.workspace_id);
+		for (const workspaceId of workspaceIds) await this.revokeSockets(workspaceId, user.id);
+		return ok({
+			sessionToken,
+			user: toApiUser(user),
+			workspaces: this.workspacesFor(user.id),
+			userId: user.id,
+		});
+	}
+
 	async unlockPins(token: string | null): Promise<Result<{ ok: true }>> {
 		this.calls += 1;
 		const s = await this.session(token);

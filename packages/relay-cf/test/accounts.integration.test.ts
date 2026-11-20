@@ -432,3 +432,101 @@ describe("bootstrap reset", () => {
 		expect(old.status).toBe(401);
 	});
 });
+
+describe("admin people & devices", () => {
+	let relay: Relay;
+	let dir: string;
+
+	beforeAll(async () => {
+		dir = mkdtempSync(join(tmpdir(), "relay-accounts-"));
+		relay = await startRelayDev({ port: PORT + 700, persistTo: dir });
+	});
+
+	afterAll(async () => {
+		await relay?.stop();
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("lists people with how they joined and their devices; signs one device out", async () => {
+		const boot = await bootstrap(relay.url, "Friends");
+		const admin = await acceptInvite(relay.url, boot.invite.token, "fay");
+		const pin = (await post(
+			relay.url,
+			`/api/workspaces/${boot.workspace.id}/pins`,
+			{ role: "editor" },
+			admin.sessionToken,
+		)) as { pin: string };
+		const guest = SessionResponse.parse(
+			await post(relay.url, "/api/auth/pin/accept", {
+				pin: pin.pin,
+				name: "gus",
+				password: "a long enough passphrase 1",
+				device: device("gus"),
+			}),
+		);
+
+		const forbidden = await request(relay.url, "GET", "/api/admin/people", {
+			token: guest.sessionToken,
+		});
+		expect(forbidden.status).toBe(403);
+
+		type People = {
+			people: {
+				name: string;
+				hasPassword: boolean;
+				joined: { via: string; pin: string | null } | null;
+				workspaces: { role: string }[];
+				devices: { id: string; signedIn: boolean }[];
+			}[];
+		};
+		const list = async () =>
+			((await get(relay.url, "/api/admin/people", admin.sessionToken)) as People).people;
+		const people = await list();
+		const gus = people.find((p) => p.name === "gus");
+		expect(gus).toMatchObject({
+			hasPassword: true,
+			joined: { via: "pin", pin: pin.pin },
+			workspaces: [{ role: "editor" }],
+		});
+		expect(gus?.devices).toEqual([expect.objectContaining({ signedIn: true })]);
+		expect(people.find((p) => p.name === "fay")?.joined?.via).toBe("invite");
+
+		const deviceId = gus?.devices[0]?.id ?? "";
+		await post(relay.url, `/api/admin/devices/${deviceId}/sign-out`, {}, admin.sessionToken);
+		expect((await list()).find((p) => p.name === "gus")?.devices[0]?.signedIn).toBe(false);
+		const me = await request(relay.url, "GET", "/api/auth/me", { token: guest.sessionToken });
+		expect(me.status).toBe(401);
+
+		// Forgot password: the admin issues a reset PIN bound to gus; name + PIN set a new one.
+		const gusId = (await list()).find((p) => p.name === "gus") as unknown as { id: string };
+		const reset = (await post(
+			relay.url,
+			`/api/admin/users/${gusId.id}/reset-pin`,
+			{},
+			admin.sessionToken,
+		)) as { pin: string };
+		const resetBody = (name: string, pin: string) => ({
+			name,
+			pin,
+			password: "a brand new passphrase 2",
+			device: device(name),
+		});
+		const wrongName = await request(relay.url, "POST", "/api/auth/password/reset", {
+			body: resetBody("fay", reset.pin),
+		});
+		expect(errorCode(wrongName.body)).toBe("invalid_pin");
+		const back = SessionResponse.parse(
+			await post(relay.url, "/api/auth/password/reset", resetBody("gus", reset.pin)),
+		);
+		expect(back.user.name).toBe("gus");
+		const reused = await request(relay.url, "POST", "/api/auth/password/reset", {
+			body: resetBody("gus", reset.pin),
+		});
+		expect(errorCode(reused.body)).toBe("invalid_pin");
+		await post(relay.url, "/api/auth/login", {
+			name: "gus",
+			password: "a brand new passphrase 2",
+			device: device("gus"),
+		});
+	});
+});

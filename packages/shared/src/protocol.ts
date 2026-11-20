@@ -190,6 +190,18 @@ export const PinAcceptRequest = z.object({
 });
 export type PinAcceptRequest = z.infer<typeof PinAcceptRequest>;
 
+/**
+ * Unauthenticated: forgot password. An admin issues a one-time reset PIN for the user; name + PIN
+ * set a new password, sign out every device and return a `SessionResponse`.
+ */
+export const PasswordResetRequest = z.object({
+	name: z.string().min(1).max(60),
+	pin: Pin,
+	password: PasswordField,
+	device: DeviceInfo,
+});
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequest>;
+
 /** Authenticated: join the PIN's workspace → `WorkspacesResponse`. */
 export const PinRedeemRequest = z.object({ pin: Pin });
 export type PinRedeemRequest = z.infer<typeof PinRedeemRequest>;
