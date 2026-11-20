@@ -43,6 +43,14 @@ export async function beginOAuth(
 		options,
 	);
 	if (res.ok) {
+		// Back from the provider via the back/forward cache: the button works again.
+		window.addEventListener(
+			"pageshow",
+			(event) => {
+				if (event.persisted && button) setBusy(button, false);
+			},
+			{ once: true },
+		);
 		location.assign(res.url);
 		return true;
 	}
