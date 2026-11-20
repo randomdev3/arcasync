@@ -728,8 +728,12 @@ export default class ArcaSyncPlugin extends Plugin {
 				if (this.browserLogin !== entry) return;
 				entry.view = { ...entry.view, userCode: code.userCode };
 				entry.url = browserSignInUrl(publicUrl, provider, code.userCode);
-				if (entry.url) window.open(entry.url);
-				else entry.view = { ...entry.view, error: "This server has no sign-in page" };
+				if (entry.url) {
+					window.open(entry.url);
+				} else {
+					entry.view = { ...entry.view, error: "This server has no sign-in page" };
+					login.cancel();
+				}
 				this.notifyView();
 			})
 			.then(
@@ -759,11 +763,12 @@ export default class ArcaSyncPlugin extends Plugin {
 	reopenBrowserSignIn(): void {
 		const entry = this.browserLogin;
 		if (!entry) return;
-		if (entry.view.error || !entry.url) {
+		if (entry.view.error) {
 			this.startBrowserSignIn(entry.view.provider);
 			return;
 		}
-		window.open(entry.url);
+		// Still asking for a code: the browser opens once it arrives.
+		if (entry.url) window.open(entry.url);
 	}
 
 	cancelBrowserSignIn(): void {
@@ -774,7 +779,7 @@ export default class ArcaSyncPlugin extends Plugin {
 	}
 
 	/**
-	 * Joins with an invite link, bare token or (relay with `features.pins`) 4-digit PIN. Signed
+	 * Joins with an invite link, bare token or (relay with `features.pins`) PIN. Signed
 	 * out, it creates the account `name` (with `password` for a PIN) and connects; signed in, it
 	 * adds the workspace. Returns whether it joined.
 	 */

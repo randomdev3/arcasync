@@ -178,7 +178,7 @@ export class ApiClient {
 		});
 	}
 
-	/** Signed out: joins with a 4-digit PIN as the new user `name`, with a password. */
+	/** Signed out: joins with a PIN as the new user `name`, with a password. */
 	acceptPin(
 		pin: string,
 		name: string,

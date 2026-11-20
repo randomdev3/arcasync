@@ -55,9 +55,11 @@ export class ArcaSyncSettingsTab extends PluginSettingTab {
 			props: this.props(),
 		});
 		this.unsubscribe = this.plugin.onViewChange(() => this.render());
-		void this.plugin.refreshServerInfo();
-		void this.plugin.refreshMe();
-		void this.plugin.refreshTeams();
+		// In order: `/auth/me` may be cached by the relay, so the uncached team list comes last.
+		void this.plugin
+			.refreshServerInfo()
+			.then(() => this.plugin.refreshMe())
+			.then(() => this.plugin.refreshTeams());
 	}
 
 	hide(): void {
